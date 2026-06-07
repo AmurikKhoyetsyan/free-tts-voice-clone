@@ -2,8 +2,20 @@ import gradio as gr
 import pyttsx3
 import tempfile
 import os
+import time
+import threading
 import numpy as np
 import soundfile as sf
+from asyncio.proactor_events import _ProactorBasePipeTransport
+
+# Suppress harmless Windows asyncio "connection forcibly closed" noise.
+_orig_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+def _silent_connection_lost(self, exc):
+    try:
+        _orig_connection_lost(self, exc)
+    except ConnectionResetError:
+        pass
+_ProactorBasePipeTransport._call_connection_lost = _silent_connection_lost
 
 # ── Windows voices (pyttsx3) ────────────────────────────────────────────────
 
@@ -26,8 +38,18 @@ WIN_VOICE_NAMES = sorted(WIN_VOICES.keys(), key=_sort_key)
 WIN_DEFAULT = next((n for n in WIN_VOICE_NAMES if 'irina' in n.lower()), WIN_VOICE_NAMES[0] if WIN_VOICE_NAMES else None)
 
 
+def _progress_bar(current, total, start_time, width=40):
+    pct = int(current / total * 100) if total > 0 else 100
+    filled = int(width * current / total) if total > 0 else width
+    bar = '#' * filled + '-' * (width - filled)
+    elapsed = time.time() - start_time
+    print(f'\r  [{bar}] {pct:3d}%  {elapsed:.1f}s', end='', flush=True)
+    if current >= total:
+        print(flush=True)
+
+
 def _wav_to_numpy(path):
-    data, sr = sf.read(path, dtype='float32')
+    data, sr = sf.read(path, dtype='int16')
     if data.ndim > 1:
         data = data[:, 0]
     return sr, data
@@ -36,14 +58,34 @@ def _wav_to_numpy(path):
 def win_synthesize(text, voice_name, rate, volume):
     if not text or not text.strip():
         return None, "Введите текст"
+
+    words = text.split()
+    word_count = max(len(words), 1)
+    progress = [0]
+    start_time = time.time()
+
+    print(f"\n[{time.strftime('%H:%M:%S')}] Синтез начат | голос: {voice_name} | слов: {word_count}", flush=True)
+    _progress_bar(0, word_count, start_time)
+
+    def on_word(name, location, length):
+        progress[0] += 1
+        _progress_bar(min(progress[0], word_count), word_count, start_time)
+
     engine = pyttsx3.init()
     engine.setProperty('voice', WIN_VOICES[voice_name])
     engine.setProperty('rate', int(rate))
     engine.setProperty('volume', volume / 100.0)
+    engine.connect('started-word', on_word)
+
     tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
     tmp.close()
     engine.save_to_file(text, tmp.name)
     engine.runAndWait()
+
+    _progress_bar(word_count, word_count, start_time)
+    elapsed = time.time() - start_time
+    print(f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True)
+
     if not os.path.exists(tmp.name) or os.path.getsize(tmp.name) == 0:
         return None, "Ошибка синтеза"
     audio = _wav_to_numpy(tmp.name)
@@ -62,20 +104,31 @@ def _get_tts():
             import torch
             import functools
 
-            # PyTorch 2.6 changed weights_only default to True, which breaks TTS model loading.
-            # Patch torch.load to keep weights_only=False for trusted local models.
+            # PyTorch 2.x changed weights_only default to True — breaks TTS checkpoint loading.
             _original_torch_load = torch.load
             @functools.wraps(_original_torch_load)
-            def _patched_load(*args, **kwargs):
+            def _patched_torch_load(*args, **kwargs):
                 kwargs.setdefault('weights_only', False)
                 return _original_torch_load(*args, **kwargs)
-            torch.load = _patched_load
+            torch.load = _patched_torch_load
+
+            # TTS 0.22.0 loads XTTS with strict=True, but PyTorch 2.x no longer saves
+            # attention buffers and gpt_inference weights into the checkpoint — they are
+            # re-created at init time from gpt.gpt anyway.  Force strict=False so those
+            # missing keys are silently ignored instead of raising RuntimeError.
+            from TTS.tts.models.xtts import Xtts
+            _orig_load_ckpt = Xtts.load_checkpoint
+            def _patched_load_ckpt(self, config, **kwargs):
+                kwargs['strict'] = False
+                return _orig_load_ckpt(self, config, **kwargs)
+            Xtts.load_checkpoint = _patched_load_ckpt
 
             from TTS.api import TTS
             device = "cuda" if torch.cuda.is_available() else "cpu"
             _tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(device)
 
-            torch.load = _original_torch_load  # restore after loading
+            torch.load = _original_torch_load
+            Xtts.load_checkpoint = _orig_load_ckpt
         except Exception as e:
             return None, str(e)
     return _tts_model, None
@@ -102,6 +155,26 @@ def clone_synthesize(text, speaker_audio, language_label):
         return None, f"Модель не загружена: {err}"
 
     lang = LANGUAGES.get(language_label, "ru")
+    word_count = len(text.split())
+    start_time = time.time()
+
+    print(f"\n[{time.strftime('%H:%M:%S')}] Клонирование начато | язык: {lang} | слов: {word_count}", flush=True)
+
+    done = [False]
+    frames = ['-', '\\', '|', '/']
+
+    def _spinner():
+        i = 0
+        while not done[0]:
+            elapsed = time.time() - start_time
+            spin = frames[i % 4]
+            print(f'\r  [{spin}]   ?%  {elapsed:.1f}s', end='', flush=True)
+            i += 1
+            time.sleep(0.15)
+
+    t = threading.Thread(target=_spinner, daemon=True)
+    t.start()
+
     tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
     tmp.close()
 
@@ -113,7 +186,16 @@ def clone_synthesize(text, speaker_audio, language_label):
             file_path=tmp.name,
         )
     except Exception as e:
+        done[0] = True
+        t.join(timeout=1)
+        print(flush=True)
         return None, f"Ошибка: {e}"
+
+    done[0] = True
+    t.join(timeout=1)
+    elapsed = time.time() - start_time
+    print(f'\r  [{"#" * 40}] 100%  {elapsed:.1f}s', flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True)
 
     if os.path.getsize(tmp.name) == 0:
         return None, "Ошибка: пустой файл"
