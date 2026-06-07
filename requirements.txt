@@ -1,2 +1,4 @@
-gradio>=4.0.0
+gradio>=6.0
 pyttsx3>=2.90
+numpy>=1.22.0
+soundfile>=0.12.0
