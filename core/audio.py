@@ -12,7 +12,7 @@ def wav_to_numpy(path):
 
 
 def save_named_audio(sr, data):
-    date_str = time.strftime('%Y-%m-%d')
-    path = os.path.join(tempfile.gettempdir(), f"audio-{date_str}.wav")
+    dt = time.strftime('%Y-%m-%d_%H-%M-%S')
+    path = os.path.join(tempfile.gettempdir(), f"audio-{dt}.wav")
     sf.write(path, data, sr)
     return path

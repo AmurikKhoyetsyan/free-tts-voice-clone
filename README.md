@@ -13,14 +13,16 @@
 
 ## What is this?
 
-A local **text-to-speech (TTS) web app** with two modes:
+A local **text-to-speech (TTS) web app** with three tabs:
 
-| Mode | Engine | Internet |
+| Tab | Engine | Internet |
 |---|---|---|
 | **Windows Voices** | pyttsx3 + Windows SAPI / OneCore | Not required |
-| **Voice Cloning** | Coqui XTTS v2 (neural network) | Only for first model download |
+| **Voice Cloning (XTTS v2)** | Coqui XTTS v2 (neural network) | Only for first model download |
+| **My Voices** | Reuses saved voice profiles | Not required |
 
-**Voice cloning** lets you upload a 10–30 second voice sample and synthesize any text in that voice — in Russian, English, German, French, Spanish, Italian, Polish, or Ukrainian.
+**Voice cloning** lets you upload a 10–30 second voice sample and synthesize any text in that voice — in Russian, English, German, French, Spanish, Italian, Polish, or Ukrainian.  
+**My Voices** lets you save a cloned voice once and reuse it anytime — no need to re-upload the sample.
 
 ---
 
@@ -29,10 +31,12 @@ A local **text-to-speech (TTS) web app** with two modes:
 - **Free & open source** — no subscriptions, no cloud, no data sent anywhere
 - **Offline TTS** — works without internet using built-in Windows voices (Irina, Pavel, David, Zira, and more)
 - **AI voice cloning** — powered by [Coqui XTTS v2](https://github.com/coqui-ai/TTS), one of the best open-source multilingual TTS models
+- **Saved voice profiles** — save a cloned voice by name and reuse it instantly without re-uploading
+- **Rename & delete voices** — manage your saved voice library from the UI
 - **Gradio web UI** — simple browser interface, no coding required
 - **Multilingual** — Russian, English, German, French, Spanish, Italian, Polish, Ukrainian
 - **GPU acceleration** — CUDA support for fast voice cloning on NVIDIA GPUs
-- **WAV export** — download the generated audio as a WAV file
+- **Named WAV export** — downloads are saved as `audio-YYYY-MM-DD_HH-MM-SS.wav`
 - **Microphone recording** — record a voice sample directly in the browser
 
 ---
@@ -122,8 +126,30 @@ Uses **Coqui XTTS v2** — a state-of-the-art multilingual neural TTS model.
 2. Or record directly from your microphone
 3. Enter text and select the language
 4. Click **"Clone and Synthesize"**
+5. (Optional) Enter a name and click **"Save"** to save the voice for future use
 
 Generation time: ~10 seconds on GPU, up to a few minutes on CPU.
+
+---
+
+### Tab: My Voices
+
+Reuse previously saved voice profiles — no need to re-upload an audio sample.
+
+1. Select a saved voice from the dropdown
+2. Enter text and select the language
+3. Click **"Synthesize"**
+
+**Managing voices:**
+
+| Action | How |
+|---|---|
+| Save | In the "Voice Cloning" tab — enter a name and click "Save" |
+| Rename | Type a new name in the rename field and click "Rename" |
+| Delete | Select the voice and click 🗑 |
+| Refresh list | Click ⟳ to reload voices added in another tab |
+
+Saved voices are stored in the `saved_voices/` folder as WAV files.
 
 ---
 
@@ -131,15 +157,25 @@ Generation time: ~10 seconds on GPU, up to a few minutes on CPU.
 
 ```
 tts/
-├── app.py                  # Main Gradio application
-├── requirements.txt        # Base dependencies
-├── run.bat                 # Launch script
-├── install_xtts.bat        # Coqui TTS / XTTS v2 installer
-├── add_voices.py           # OneCore voice registration script
-├── add_voices_admin.bat    # Run add_voices.py with admin rights
-└── voice_for_copy/         # Sample WAV files for voice cloning
-    ├── voice_1.wav
-    └── voice_2.wav
+├── app.py                      # Entry point — assembles tabs and launches Gradio
+├── requirements.txt            # Base dependencies
+├── run.bat                     # Launch script
+├── install_xtts.bat            # Coqui TTS / XTTS v2 installer
+├── add_voices.py               # OneCore voice registration script
+├── add_voices_admin.bat        # Run add_voices.py with admin rights
+├── saved_voices/               # Saved voice profiles (WAV files)
+├── voice_for_copy/             # Sample WAV files for voice cloning
+│   ├── voice_1.wav
+│   └── voice_2.wav
+├── core/                       # Business logic
+│   ├── audio.py                # WAV helpers, named file export
+│   ├── tts_windows.py          # Windows SAPI / pyttsx3 synthesis
+│   ├── tts_xtts.py             # Coqui XTTS v2 cloning
+│   └── voice_manager.py        # Save / load / rename / delete voices
+└── ui/                         # Gradio tab components
+    ├── windows_tab.py          # "Windows Voices" tab
+    ├── cloning_tab.py          # "Voice Cloning" tab
+    └── my_voices_tab.py        # "My Voices" tab
 ```
 
 ---

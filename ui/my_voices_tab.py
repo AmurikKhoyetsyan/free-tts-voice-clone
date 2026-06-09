@@ -29,6 +29,7 @@ def build():
                 audio  = gr.Audio(label="Результат")
                 status = gr.Textbox(label="Статус", interactive=False)
 
+        voice.change(fn=lambda name: name or "", inputs=[voice], outputs=[rename_input])
         refresh_btn.click(fn=voices_dropdown, outputs=[voice])
         del_btn.click(fn=delete_voice, inputs=[voice], outputs=[status, voice])
         rename_btn.click(fn=rename_voice, inputs=[voice, rename_input], outputs=[status, voice])
