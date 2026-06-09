@@ -1,9 +1,45 @@
-# TTS — Speech Synthesis & Voice Cloning
+# TTS — Free Text to Speech & AI Voice Cloning (Windows)
 
-A web application built with **Gradio** with two modes:
+> **Offline speech synthesis + neural voice cloning** on your local machine.  
+> No API keys. No internet required for basic TTS. Runs 100% locally.
 
-- **Windows Voices** — offline synthesis using built-in Windows voices (SAPI / pyttsx3)
-- **Voice Cloning (XTTS v2)** — neural network synthesis with voice cloning from an audio sample
+[![Python](https://img.shields.io/badge/Python-3.10-blue)](https://www.python.org/)
+[![Gradio](https://img.shields.io/badge/UI-Gradio-orange)](https://gradio.app/)
+[![XTTS v2](https://img.shields.io/badge/Voice%20Cloning-XTTS%20v2-green)](https://github.com/coqui-ai/TTS)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue)](https://www.microsoft.com/windows)
+
+---
+
+## What is this?
+
+A local **text-to-speech (TTS) web app** with two modes:
+
+| Mode | Engine | Internet |
+|---|---|---|
+| **Windows Voices** | pyttsx3 + Windows SAPI / OneCore | Not required |
+| **Voice Cloning** | Coqui XTTS v2 (neural network) | Only for first model download |
+
+**Voice cloning** lets you upload a 10–30 second voice sample and synthesize any text in that voice — in Russian, English, German, French, Spanish, Italian, Polish, or Ukrainian.
+
+---
+
+## Features
+
+- **Free & open source** — no subscriptions, no cloud, no data sent anywhere
+- **Offline TTS** — works without internet using built-in Windows voices (Irina, Pavel, David, Zira, and more)
+- **AI voice cloning** — powered by [Coqui XTTS v2](https://github.com/coqui-ai/TTS), one of the best open-source multilingual TTS models
+- **Gradio web UI** — simple browser interface, no coding required
+- **Multilingual** — Russian, English, German, French, Spanish, Italian, Polish, Ukrainian
+- **GPU acceleration** — CUDA support for fast voice cloning on NVIDIA GPUs
+- **WAV export** — download the generated audio as a WAV file
+- **Microphone recording** — record a voice sample directly in the browser
+
+---
+
+## Supported Languages (Voice Cloning)
+
+`Russian` `English` `Deutsch` `Français` `Español` `Italiano` `Polski` `Українська`
 
 ---
 
@@ -11,116 +47,83 @@ A web application built with **Gradio** with two modes:
 
 | Component | Version |
 |---|---|
-| Windows | 10 / 11 |
+| OS | Windows 10 / 11 |
 | Python | 3.10 (recommended) |
-
-> **Note:** `run.bat` and `install_xtts.bat` are configured for the `Python 3.10` path.  
-> If your Python is installed elsewhere — edit those files before running.
+| GPU | NVIDIA CUDA (optional, for faster cloning) |
 
 ---
 
-## Installation — Step by Step
+## Installation
 
-### Step 1 — Clone the repository
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/AmurKhoyetsyan/tts.git
 cd tts
 ```
 
-Or download the ZIP from GitHub and extract it to any folder.
+Or download the ZIP and extract it.
 
----
-
-### Step 2 — Install dependencies
-
-Open a terminal in the project folder and run:
+### 2. Install base dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-This installs:
-- `gradio` — web UI
-- `pyttsx3` — Windows voices
-- `numpy` — audio processing
-- `soundfile` — WAV file reading/writing
+Installs: `gradio`, `pyttsx3`, `numpy`, `soundfile`
 
----
+### 3. (Optional) Add more Windows voices
 
-### Step 3 — (Optional) Add more Windows voices
+Windows includes **OneCore voices** (Irina, Pavel, etc.) that are hidden from SAPI by default.  
+Run `add_voices_admin.bat` as administrator to unlock them — one-time operation.
 
-By default `pyttsx3` only sees SAPI voices.  
-To add **Windows OneCore** voices (Irina, Pavel, etc.):
-
-1. Run `add_voices_admin.bat` — it will automatically request administrator privileges
-2. Wait for the message `Done! Added X voices`
-3. Restart the application
-
-> This is a one-time operation. No need to run it again.
-
----
-
-### Step 4 — (Optional) Install XTTS v2 for voice cloning
-
-If you want to use the **"Voice Cloning"** tab:
-
-1. Run `install_xtts.bat`
-2. Wait for the Coqui TTS installation to finish (~2–3 GB)
-3. On first launch the `xtts_v2` model will download automatically (~2 GB)
-
-> A **CUDA-capable GPU** (NVIDIA) is recommended for faster cloning.  
-> CPU mode works but is significantly slower.
-
----
-
-## Running the App
-
-### Option 1 — via BAT file (recommended)
-
-Double-click `run.bat`
-
-The browser will open automatically with the application interface.
-
----
-
-### Option 2 — via terminal
+### 4. (Optional) Install XTTS v2 for voice cloning
 
 ```bash
+# Double-click or run:
+install_xtts.bat
+```
+
+Downloads Coqui TTS (~2 GB) + XTTS v2 model (~2 GB on first launch).
+
+---
+
+## Running
+
+```bash
+# Option 1 — double-click:
+run.bat
+
+# Option 2 — terminal:
 python app.py
 ```
 
-Then open in your browser: `http://127.0.0.1:7860`
+Opens automatically at `http://127.0.0.1:7860`
 
 ---
 
-## Usage
+## How It Works
 
-### Tab "Windows Voices"
+### Tab: Windows Voices
 
-| Field | Description |
-|---|---|
-| Text | Enter any text to synthesize |
-| Voice | Choose a voice from the list (Russian voices appear at the top) |
-| Speed | From 50 to 350 words/min (default 150) |
-| Volume | From 0 to 100% (default 90%) |
+Uses **Windows SAPI / pyttsx3** — fully offline, instant synthesis.
 
-Click **"Synthesize"** — the audio will appear on the right and can be downloaded.
+| Setting | Range | Default |
+|---|---|---|
+| Voice | System voices | Irina (if available) |
+| Speed | 50–350 wpm | 150 |
+| Volume | 0–100% | 90% |
 
----
+### Tab: Voice Cloning (XTTS v2)
 
-### Tab "Voice Cloning (XTTS v2)"
+Uses **Coqui XTTS v2** — a state-of-the-art multilingual neural TTS model.
 
-| Field | Description |
-|---|---|
-| Text | Enter text in the selected language |
-| Voice sample | Upload a WAV/MP3 file 10–30 seconds long or record from microphone |
-| Text language | Russian, English, Deutsch, Français, Español, Italiano, Polski, Українська |
+1. Upload a clean voice sample (WAV/MP3, 10–30 seconds, no background noise)
+2. Or record directly from your microphone
+3. Enter text and select the language
+4. Click **"Clone and Synthesize"**
 
-> **Sample requirements:** clean speech with no music or background noise, 10–30 seconds.  
-> Cloning quality depends directly on the quality of the recording.
-
-Click **"Clone and Synthesize"** — generation takes from 10 seconds to a few minutes depending on your hardware.
+Generation time: ~10 seconds on GPU, up to a few minutes on CPU.
 
 ---
 
@@ -128,13 +131,13 @@ Click **"Clone and Synthesize"** — generation takes from 10 seconds to a few m
 
 ```
 tts/
-├── app.py                  # Main application
+├── app.py                  # Main Gradio application
 ├── requirements.txt        # Base dependencies
-├── run.bat                 # Launch the application
-├── install_xtts.bat        # Install Coqui TTS / XTTS v2
-├── add_voices.py           # Script to register OneCore voices
-├── add_voices_admin.bat    # Run add_voices.py with administrator privileges
-└── voice_for_copy/         # Sample audio files for voice cloning
+├── run.bat                 # Launch script
+├── install_xtts.bat        # Coqui TTS / XTTS v2 installer
+├── add_voices.py           # OneCore voice registration script
+├── add_voices_admin.bat    # Run add_voices.py with admin rights
+└── voice_for_copy/         # Sample WAV files for voice cloning
     ├── voice_1.wav
     └── voice_2.wav
 ```
@@ -143,18 +146,32 @@ tts/
 
 ## Troubleshooting
 
-### No voices in the list
-Run `add_voices_admin.bat` as administrator and restart the application.
+**No voices in the dropdown**  
+→ Run `add_voices_admin.bat` as administrator and restart.
 
-### XTTS not installed
-The app status will show: _"XTTS v2 is not installed"_.  
-Run `install_xtts.bat` and restart the application.
+**XTTS not installed**  
+→ The status bar will say _"XTTS v2 is not installed"_. Run `install_xtts.bat`.
 
-### Cloning error: `RuntimeError`
-Usually caused by a PyTorch version mismatch. Make sure you are using Python 3.10 and try:
+**RuntimeError during cloning**  
+→ PyTorch version mismatch. Fix:
 ```bash
 pip install torch==2.1.0 --index-url https://download.pytorch.org/whl/cpu
 ```
 
-### App does not open in the browser
-Open it manually: [http://127.0.0.1:7860](http://127.0.0.1:7860)
+**Browser doesn't open**  
+→ Open manually: [http://127.0.0.1:7860](http://127.0.0.1:7860)
+
+---
+
+## Related Projects & Alternatives
+
+> **Searching for:** free TTS Windows, offline text to speech Python, voice cloning open source, Coqui TTS GUI, XTTS v2 interface, pyttsx3 web UI, speech synthesis Russian, локальный синтез речи, клонирование голоса бесплатно
+
+- [Coqui TTS](https://github.com/coqui-ai/TTS) — the underlying XTTS v2 engine
+- [Gradio](https://github.com/gradio-app/gradio) — the web UI framework used
+
+---
+
+## License
+
+MIT — free to use, modify, and distribute.
