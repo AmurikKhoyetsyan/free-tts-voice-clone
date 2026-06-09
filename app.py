@@ -59,6 +59,13 @@ def _wav_to_numpy(path):
     return sr, data
 
 
+def _save_named_audio(sr, data):
+    date_str = time.strftime('%Y-%m-%d')
+    path = os.path.join(tempfile.gettempdir(), f"audio-{date_str}.wav")
+    sf.write(path, data, sr)
+    return path
+
+
 def win_synthesize(text, voice_name, rate, volume):
     if not text or not text.strip():
         return None, "Введите текст"
@@ -92,9 +99,9 @@ def win_synthesize(text, voice_name, rate, volume):
 
     if not os.path.exists(tmp.name) or os.path.getsize(tmp.name) == 0:
         return None, "Ошибка синтеза"
-    audio = _wav_to_numpy(tmp.name)
+    out = _save_named_audio(*_wav_to_numpy(tmp.name))
     os.unlink(tmp.name)
-    return audio, f"Готово — {voice_name}"
+    return out, f"Готово — {voice_name}"
 
 
 # ── Voice cloning (XTTS v2) ─────────────────────────────────────────────────
@@ -204,9 +211,9 @@ def clone_synthesize(text, speaker_audio, language_label):
     if os.path.getsize(tmp.name) == 0:
         return None, "Ошибка: пустой файл"
 
-    audio = _wav_to_numpy(tmp.name)
+    out = _save_named_audio(*_wav_to_numpy(tmp.name))
     os.unlink(tmp.name)
-    return audio, "Готово — голос клонирован"
+    return out, "Готово — голос клонирован"
 
 
 def get_saved_voices():
@@ -214,15 +221,19 @@ def get_saved_voices():
     return [os.path.splitext(f)[0] for f in files]
 
 
+def _voices_dropdown(**kwargs):
+    return gr.Dropdown(choices=get_saved_voices(), **kwargs)
+
+
 def save_voice(audio_path, name):
     if not name or not name.strip():
-        return "Введите имя голоса", gr.update()
+        return "Введите имя голоса", _voices_dropdown()
     if audio_path is None:
-        return "Сначала загрузите или запишите аудио образец", gr.update()
+        return "Сначала загрузите или запишите аудио образец", _voices_dropdown()
     safe_name = name.strip().replace(" ", "_")
     dest = os.path.join(VOICES_DIR, f"{safe_name}.wav")
     shutil.copy2(audio_path, dest)
-    return f"Голос «{safe_name}» сохранён", gr.update(choices=get_saved_voices(), value=safe_name)
+    return f"Голос «{safe_name}» сохранён", _voices_dropdown(value=safe_name)
 
 
 def load_saved_voice(voice_name):
@@ -234,12 +245,28 @@ def load_saved_voice(voice_name):
 
 def delete_saved_voice(voice_name):
     if not voice_name:
-        return "Выберите голос для удаления", gr.update()
+        return "Выберите голос для удаления", _voices_dropdown()
     path = os.path.join(VOICES_DIR, f"{voice_name}.wav")
     if os.path.exists(path):
         os.remove(path)
-        return f"Голос «{voice_name}» удалён", gr.update(choices=get_saved_voices(), value=None)
-    return "Файл не найден", gr.update()
+        return f"Голос «{voice_name}» удалён", _voices_dropdown(value=None)
+    return "Файл не найден", _voices_dropdown()
+
+
+def rename_voice(old_name, new_name):
+    if not old_name:
+        return "Выберите голос", _voices_dropdown()
+    if not new_name or not new_name.strip():
+        return "Введите новое имя", _voices_dropdown()
+    safe_new = new_name.strip().replace(" ", "_")
+    old_path = os.path.join(VOICES_DIR, f"{old_name}.wav")
+    new_path = os.path.join(VOICES_DIR, f"{safe_new}.wav")
+    if not os.path.exists(old_path):
+        return "Файл не найден", _voices_dropdown()
+    if os.path.exists(new_path):
+        return f"Голос «{safe_new}» уже существует", _voices_dropdown(value=old_name)
+    os.rename(old_path, new_path)
+    return f"Переименован в «{safe_new}»", _voices_dropdown(value=safe_new)
 
 
 def check_xtts_status():
@@ -255,7 +282,13 @@ def check_xtts_status():
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 
-with gr.Blocks(title="TTS — Синтез речи") as app:
+_css = """
+.tab-nav button { font-size: 15px; padding: 10px 20px; }
+.svelte-1ed2p3z { gap: 6px; }
+footer { display: none !important; }
+"""
+
+with gr.Blocks(title="TTS — Синтез речи", theme=gr.themes.Soft(), css=_css) as app:
     gr.Markdown("# Синтез речи и клонирование голоса")
 
     with gr.Tabs():
@@ -271,7 +304,7 @@ with gr.Blocks(title="TTS — Синтез речи") as app:
                         w_vol  = gr.Slider(0, 100, value=90, step=5, label="Громкость (%)")
                     w_btn = gr.Button("Синтезировать", variant="primary")
                 with gr.Column(scale=2):
-                    w_audio  = gr.Audio(label="Результат", type="numpy")
+                    w_audio  = gr.Audio(label="Результат")
                     w_status = gr.Textbox(label="Статус", interactive=False)
             w_btn.click(fn=win_synthesize, inputs=[w_text, w_voice, w_rate, w_vol], outputs=[w_audio, w_status])
 
@@ -288,25 +321,26 @@ with gr.Blocks(title="TTS — Синтез речи") as app:
                     c_lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык текста")
                     c_btn  = gr.Button("Клонировать и синтезировать", variant="primary")
                 with gr.Column(scale=2):
-                    c_audio_out = gr.Audio(label="Результат", type="numpy")
+                    c_audio_out = gr.Audio(label="Результат")
                     c_status    = gr.Textbox(label="Статус", interactive=False)
 
             c_save_btn.click(fn=save_voice, inputs=[c_audio_in, c_save_name], outputs=[c_status, gr.State()])
             c_btn.click(fn=clone_synthesize, inputs=[c_text, c_audio_in, c_lang], outputs=[c_audio_out, c_status])
 
         with gr.Tab("Мои голоса"):
-            gr.Markdown("Выбери сохранённый голос и синтезируй текст без повторной загрузки образца.")
             with gr.Row():
                 with gr.Column(scale=3):
+                    sv_voice = gr.Dropdown(choices=get_saved_voices(), value=None, label="Выберите голос")
                     with gr.Row():
-                        sv_voice   = gr.Dropdown(choices=get_saved_voices(), value=None, label="Голос", scale=4)
-                        sv_refresh = gr.Button("⟳", size="sm", scale=1, min_width=60)
-                        sv_del_btn = gr.Button("Удалить", variant="stop", scale=1)
-                    sv_text = gr.Textbox(label="Текст", placeholder="Введите текст...", lines=5)
+                        sv_rename_input = gr.Textbox(placeholder="Новое имя...", show_label=False, scale=3)
+                        sv_rename_btn   = gr.Button("Переименовать", scale=2)
+                        sv_refresh      = gr.Button("⟳", scale=1, min_width=48)
+                        sv_del_btn      = gr.Button("🗑", variant="stop", scale=1, min_width=48)
+                    sv_text = gr.Textbox(label="Текст", placeholder="Введите текст...", lines=6)
                     sv_lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык")
-                    sv_btn  = gr.Button("Синтезировать", variant="primary")
+                    sv_btn  = gr.Button("Синтезировать", variant="primary", size="lg")
                 with gr.Column(scale=2):
-                    sv_audio  = gr.Audio(label="Результат", type="numpy")
+                    sv_audio  = gr.Audio(label="Результат")
                     sv_status = gr.Textbox(label="Статус", interactive=False)
 
             def sv_synthesize(voice_name, text, language_label):
@@ -317,9 +351,10 @@ with gr.Blocks(title="TTS — Синтез речи") as app:
                     return None, f"Файл голоса «{voice_name}» не найден"
                 return clone_synthesize(text, audio_path, language_label)
 
-            sv_refresh.click(fn=lambda: gr.update(choices=get_saved_voices()), outputs=[sv_voice])
+            sv_refresh.click(fn=lambda: _voices_dropdown(), outputs=[sv_voice])
             sv_del_btn.click(fn=delete_saved_voice, inputs=[sv_voice], outputs=[sv_status, sv_voice])
+            sv_rename_btn.click(fn=rename_voice, inputs=[sv_voice, sv_rename_input], outputs=[sv_status, sv_voice])
             sv_btn.click(fn=sv_synthesize, inputs=[sv_voice, sv_text, sv_lang], outputs=[sv_audio, sv_status])
 
 if __name__ == "__main__":
-    app.launch(inbrowser=True, theme=gr.themes.Soft())
+    app.launch(inbrowser=True)
