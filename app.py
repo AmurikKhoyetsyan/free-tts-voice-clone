@@ -4,9 +4,13 @@ import tempfile
 import os
 import time
 import threading
+import shutil
 import numpy as np
 import soundfile as sf
 from asyncio.proactor_events import _ProactorBasePipeTransport
+
+VOICES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_voices")
+os.makedirs(VOICES_DIR, exist_ok=True)
 
 # Suppress harmless Windows asyncio "connection forcibly closed" noise.
 _orig_connection_lost = _ProactorBasePipeTransport._call_connection_lost
@@ -205,6 +209,39 @@ def clone_synthesize(text, speaker_audio, language_label):
     return audio, "Готово — голос клонирован"
 
 
+def get_saved_voices():
+    files = sorted(f for f in os.listdir(VOICES_DIR) if f.endswith('.wav'))
+    return [os.path.splitext(f)[0] for f in files]
+
+
+def save_voice(audio_path, name):
+    if not name or not name.strip():
+        return "Введите имя голоса", gr.update()
+    if audio_path is None:
+        return "Сначала загрузите или запишите аудио образец", gr.update()
+    safe_name = name.strip().replace(" ", "_")
+    dest = os.path.join(VOICES_DIR, f"{safe_name}.wav")
+    shutil.copy2(audio_path, dest)
+    return f"Голос «{safe_name}» сохранён", gr.update(choices=get_saved_voices(), value=safe_name)
+
+
+def load_saved_voice(voice_name):
+    if not voice_name:
+        return None
+    path = os.path.join(VOICES_DIR, f"{voice_name}.wav")
+    return path if os.path.exists(path) else None
+
+
+def delete_saved_voice(voice_name):
+    if not voice_name:
+        return "Выберите голос для удаления", gr.update()
+    path = os.path.join(VOICES_DIR, f"{voice_name}.wav")
+    if os.path.exists(path):
+        os.remove(path)
+        return f"Голос «{voice_name}» удалён", gr.update(choices=get_saved_voices(), value=None)
+    return "Файл не найден", gr.update()
+
+
 def check_xtts_status():
     try:
         from TTS.api import TTS
@@ -245,12 +282,44 @@ with gr.Blocks(title="TTS — Синтез речи") as app:
                 with gr.Column(scale=3):
                     c_text     = gr.Textbox(label="Текст", placeholder="Введите текст на выбранном языке...", lines=5)
                     c_audio_in = gr.Audio(label="Образец голоса", type="filepath", sources=["upload", "microphone"])
-                    c_lang     = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык текста")
-                    c_btn      = gr.Button("Клонировать и синтезировать", variant="primary")
+                    with gr.Row():
+                        c_save_name = gr.Textbox(label="Сохранить голос как", placeholder="Имя голоса...", scale=3)
+                        c_save_btn  = gr.Button("Сохранить", scale=1)
+                    c_lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык текста")
+                    c_btn  = gr.Button("Клонировать и синтезировать", variant="primary")
                 with gr.Column(scale=2):
                     c_audio_out = gr.Audio(label="Результат", type="numpy")
                     c_status    = gr.Textbox(label="Статус", interactive=False)
+
+            c_save_btn.click(fn=save_voice, inputs=[c_audio_in, c_save_name], outputs=[c_status, gr.State()])
             c_btn.click(fn=clone_synthesize, inputs=[c_text, c_audio_in, c_lang], outputs=[c_audio_out, c_status])
+
+        with gr.Tab("Мои голоса"):
+            gr.Markdown("Выбери сохранённый голос и синтезируй текст без повторной загрузки образца.")
+            with gr.Row():
+                with gr.Column(scale=3):
+                    with gr.Row():
+                        sv_voice   = gr.Dropdown(choices=get_saved_voices(), value=None, label="Голос", scale=4)
+                        sv_refresh = gr.Button("⟳", size="sm", scale=1, min_width=60)
+                        sv_del_btn = gr.Button("Удалить", variant="stop", scale=1)
+                    sv_text = gr.Textbox(label="Текст", placeholder="Введите текст...", lines=5)
+                    sv_lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык")
+                    sv_btn  = gr.Button("Синтезировать", variant="primary")
+                with gr.Column(scale=2):
+                    sv_audio  = gr.Audio(label="Результат", type="numpy")
+                    sv_status = gr.Textbox(label="Статус", interactive=False)
+
+            def sv_synthesize(voice_name, text, language_label):
+                if not voice_name:
+                    return None, "Выберите голос из списка"
+                audio_path = load_saved_voice(voice_name)
+                if audio_path is None:
+                    return None, f"Файл голоса «{voice_name}» не найден"
+                return clone_synthesize(text, audio_path, language_label)
+
+            sv_refresh.click(fn=lambda: gr.update(choices=get_saved_voices()), outputs=[sv_voice])
+            sv_del_btn.click(fn=delete_saved_voice, inputs=[sv_voice], outputs=[sv_status, sv_voice])
+            sv_btn.click(fn=sv_synthesize, inputs=[sv_voice, sv_text, sv_lang], outputs=[sv_audio, sv_status])
 
 if __name__ == "__main__":
     app.launch(inbrowser=True, theme=gr.themes.Soft())
