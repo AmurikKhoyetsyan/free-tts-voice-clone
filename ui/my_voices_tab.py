@@ -72,7 +72,11 @@ _PREVIEW_CSS = """
     pointer-events: auto !important;
 }
 .voice-opt-play:hover { background: rgba(99,102,241,0.35); }
-.voice-opt-play.active { background: #22c55e !important; color: white; }
+.voice-opt-play.playing {
+    background: #ef4444 !important;
+    border-color: #ef4444 !important;
+    color: white !important;
+}
 #__voiceDebug {
     position: fixed;
     bottom: 8px;
@@ -114,6 +118,25 @@ INJECT_OPTIONS_PLAY_JS = """
         try { return JSON.parse(ta.value); } catch (e) { log('urls parse fail'); return {}; }
     };
 
+    const PLAY_ICON = '▶';
+    const STOP_ICON = '⏹';
+
+    const setBtnState = (btn, playing) => {
+        if (!btn) return;
+        const want = playing ? STOP_ICON : PLAY_ICON;
+        if (btn.textContent !== want) btn.textContent = want;
+        if (btn.classList.contains('playing') !== !!playing) {
+            btn.classList.toggle('playing', !!playing);
+        }
+    };
+
+    const resetAllBtns = () => {
+        document.querySelectorAll('.voice-opt-play').forEach(b => setBtnState(b, false));
+    };
+
+    let currentBtn = null;
+    let currentName = null;
+
     const getPlayer = () => {
         let p = document.getElementById('__voicePlayer');
         if (!p) {
@@ -121,15 +144,36 @@ INJECT_OPTIONS_PLAY_JS = """
             p.id = '__voicePlayer';
             p.style.display = 'none';
             document.body.appendChild(p);
+            // Only auto-reset on natural end. Pause is fired during src
+            // swaps and would clobber the freshly-set state.
+            p.addEventListener('ended', () => {
+                log('ended');
+                resetAllBtns();
+                currentBtn = null;
+                currentName = null;
+            });
         }
         return p;
     };
 
+    const stopPlayback = () => {
+        const p = document.getElementById('__voicePlayer');
+        if (p) { try { p.pause(); } catch(e) {} }
+        resetAllBtns();
+        currentBtn = null;
+        currentName = null;
+    };
+
     const playVoice = (name, btn) => {
-        log('playVoice → ' + name);
-        if (btn) { btn.classList.add('active'); setTimeout(() => btn.classList.remove('active'), 600); }
         const player = getPlayer();
+        // Second tap on the same voice while it's playing → stop.
+        if (currentName === name && !player.paused) { log('stop ' + name); stopPlayback(); return; }
+        log('playVoice → ' + name);
         document.querySelectorAll('audio').forEach(a => { if (a !== player) a.pause(); });
+        resetAllBtns();
+        currentBtn = btn || null;
+        currentName = name;
+        setBtnState(currentBtn, true);
         const map = getUrls();
         const abs = map[name];
         const candidates = [];
@@ -142,7 +186,7 @@ INJECT_OPTIONS_PLAY_JS = """
         log('try URLs: ' + candidates.length);
         let i = 0;
         const next = () => {
-            if (i >= candidates.length) { log('all URLs FAILED'); return; }
+            if (i >= candidates.length) { log('all URLs FAILED'); stopPlayback(); return; }
             const u = candidates[i++];
             log('→ ' + u);
             player.src = u;
@@ -188,38 +232,54 @@ INJECT_OPTIONS_PLAY_JS = """
             .trim();
     };
 
-    const inject = () => {
+    let observer = null;
+    const withObserverPaused = (fn) => {
+        if (observer) observer.disconnect();
+        try { fn(); } finally {
+            if (observer) observer.observe(document.body, { childList: true, subtree: true });
+        }
+    };
+
+    const inject = () => withObserverPaused(() => {
         const root = document.querySelector('#voice_select');
         if (!root) return;
         const items = root.querySelectorAll('[role="option"], ul.options li, li.item, [data-testid*="option"]');
         let added = 0, refreshed = 0;
         items.forEach(opt => {
-            // Prefer Gradio's data-value if present, otherwise strip the button's
-            // own text + the "✓" Gradio adds to the currently-selected option.
+            // Prefer Gradio's data-value, else strip "✓" + ▶ from text.
             const raw = opt.getAttribute('data-value') || opt.textContent;
             const name = cleanName(raw);
             if (!name) return;
             let btn = opt.querySelector(':scope > .voice-opt-play');
             if (!btn) {
                 btn = document.createElement('span');
-                btn.textContent = '▶';
                 btn.className = 'voice-opt-play';
                 btn.setAttribute('role', 'button');
-                opt.style.position = 'relative';
-                opt.style.paddingRight = '46px';
+                if (opt.style.position !== 'relative') opt.style.position = 'relative';
+                if (opt.style.paddingRight !== '46px') opt.style.paddingRight = '46px';
                 opt.appendChild(btn);
                 added++;
-            } else if (btn.dataset.voiceName !== name) {
+            }
+            if (btn.dataset.voiceName !== name) {
+                btn.dataset.voiceName = name;
+                btn.setAttribute('aria-label', 'Прослушать ' + name);
                 refreshed++;
             }
-            btn.dataset.voiceName = name;
-            btn.setAttribute('aria-label', 'Прослушать ' + name);
+            const player = document.getElementById('__voicePlayer');
+            const isPlayingThis = (currentName === name) && player && !player.paused;
+            const wantIcon = isPlayingThis ? STOP_ICON : PLAY_ICON;
+            if (btn.textContent !== wantIcon) btn.textContent = wantIcon;
+            if (btn.classList.contains('playing') !== isPlayingThis) {
+                btn.classList.toggle('playing', isPlayingThis);
+            }
+            if (isPlayingThis) currentBtn = btn;
         });
         if (added) log('injected ' + added + ' button(s)');
-        if (refreshed) log('refreshed ' + refreshed + ' button name(s)');
-    };
+        if (refreshed) log('refreshed ' + refreshed + ' name(s)');
+    });
 
-    new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
+    observer = new MutationObserver(inject);
+    observer.observe(document.body, { childList: true, subtree: true });
     inject();
 }
 """
