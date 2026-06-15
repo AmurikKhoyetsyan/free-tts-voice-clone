@@ -113,6 +113,47 @@ footer { display: none !important; }
 # Один audio за раз + стоп при смене вкладки + глобальный логгер активности.
 _global_js = """
 () => {
+    // ====== АУДИО-МЬЮТЕКС: ставим САМЫМ ПЕРВЫМ в отдельном try ======
+    // Гарантия "один audio за раз". Дублирует capture-listener ниже на
+    // случай, если ниже что-то упадёт — наша главная страховка.
+    try {
+        if (!window.__ttsAudioMutexV2) {
+            window.__ttsAudioMutexV2 = true;
+            const pauseOthers = (target) => {
+                if (!target || target.tagName !== 'AUDIO') return;
+                document.querySelectorAll('audio').forEach(a => {
+                    if (a !== target && !a.paused) {
+                        try { a.pause(); } catch(_) {}
+                    }
+                });
+            };
+            // Capture-фаза на document — основной перехват.
+            document.addEventListener('play', (e) => pauseOthers(e.target), true);
+            // Прямые listener-ы на каждом <audio> — страховка для случаев,
+            // когда capture не сработал (shadow DOM и т.п.).
+            const wireAudio = (el) => {
+                if (!el || el.__ttsAudioWired) return;
+                el.__ttsAudioWired = true;
+                el.addEventListener('play', () => pauseOthers(el));
+            };
+            const wireAll = (root) => {
+                (root || document).querySelectorAll('audio').forEach(wireAudio);
+            };
+            wireAll();
+            new MutationObserver(muts => {
+                muts.forEach(m => {
+                    m.addedNodes && m.addedNodes.forEach(n => {
+                        if (!n || n.nodeType !== 1) return;
+                        if (n.tagName === 'AUDIO') wireAudio(n);
+                        else if (n.querySelectorAll) wireAll(n);
+                    });
+                });
+            }).observe(document.body, { childList: true, subtree: true });
+        }
+    } catch (e) {
+        try { console.error('[audio-mutex install failed]', e); } catch(_) {}
+    }
+
     try {
     if (window.__ttsAudioMutex) return;
     window.__ttsAudioMutex = true;
@@ -214,12 +255,39 @@ _global_js = """
                                 } else if (p.progress != null) {
                                     pct = ' ' + Math.round(p.progress * 100) + '%';
                                 }
-                                voiceLog('… ' + (p.desc || 'progress') + pct, 'gen');
+                                const desc = String(p.desc || 'progress');
+                                // Авто-распознавание ошибок по маркеру в desc.
+                                let level = 'gen';
+                                if (desc.includes('❌') || /ошибк/i.test(desc)) level = 'err';
+                                else if (desc.includes('✓') || /готов/i.test(desc)) level = 'done';
+                                voiceLog('… ' + desc + pct, level);
                             });
                         } else if (d.msg === 'process_completed') {
                             const ok = d.success !== false;
-                            voiceLog(ok ? '✓ генерация готова' : '✗ генерация упала', ok ? 'done' : 'err');
+                            // Проверяем выходные данные — статус может быть "❌ ..." при
+                            // мягкой валидации, тогда трактуем как ошибку.
+                            let outErr = false;
+                            try {
+                                if (d.output && Array.isArray(d.output.data)) {
+                                    d.output.data.forEach(v => {
+                                        if (typeof v === 'string' && v.indexOf('❌') !== -1) outErr = true;
+                                    });
+                                }
+                            } catch (e) {}
+                            const success = ok && !outErr;
+                            voiceLog(success ? '✓ генерация готова' : '✗ генерация прервана', success ? 'done' : 'err');
                             if (d.output && d.output.error) voiceLog('ошибка: ' + d.output.error, 'err');
+                            // Если в data есть строки — выведем последнюю (это обычно статус).
+                            try {
+                                if (d.output && Array.isArray(d.output.data)) {
+                                    d.output.data.forEach(v => {
+                                        if (typeof v === 'string' && v.trim()) {
+                                            voiceLog('статус: ' + v.slice(0, 200),
+                                                     v.indexOf('❌') !== -1 ? 'err' : 'done');
+                                        }
+                                    });
+                                }
+                            } catch (e) {}
                         }
                     } catch (e) {}
                 });

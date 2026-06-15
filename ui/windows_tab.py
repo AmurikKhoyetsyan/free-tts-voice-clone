@@ -1,7 +1,21 @@
 import gradio as gr
-from core.tts_windows import synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
+from core.tts_windows import synthesize as _core_synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
 
 _STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+
+
+def _synthesize(text, voice, rate, vol, progress=gr.Progress()):
+    if not voice:
+        msg = "❌ Выберите голос из списка"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
+    if not text or not text.strip():
+        msg = "❌ Введите текст для синтеза"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
+    return _core_synthesize(text, voice, rate, vol, progress=progress)
 
 
 def build():
@@ -19,4 +33,4 @@ def build():
                 audio  = gr.Audio(label="Результат")
                 status = gr.Textbox(label="Статус", interactive=False)
 
-        btn.click(fn=synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=_STOP_ALL_JS)
+        btn.click(fn=_synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=_STOP_ALL_JS)

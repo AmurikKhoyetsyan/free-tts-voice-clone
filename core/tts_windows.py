@@ -1,6 +1,7 @@
 import time
 import tempfile
 import os
+import traceback
 import pyttsx3
 from .audio import wav_to_numpy, save_named_audio
 
@@ -28,50 +29,82 @@ WIN_DEFAULT = next(
 )
 
 
-def _progress_bar(current, total, start_time, width=40):
-    pct = int(current / total * 100) if total > 0 else 100
-    filled = int(width * current / total) if total > 0 else width
-    bar = '#' * filled + '-' * (width - filled)
-    elapsed = time.time() - start_time
-    print(f'\r  [{bar}] {pct:3d}%  {elapsed:.1f}s', end='', flush=True)
-    if current >= total:
-        print(flush=True)
+def _emit(progress, value, desc):
+    """Отправить прогресс в UI (gr.Progress) и в stdout."""
+    if progress is not None:
+        try:
+            progress(value, desc=desc)
+        except Exception:
+            pass
+    print(f"[{time.strftime('%H:%M:%S')}] [{int(value * 100):3d}%] {desc}", flush=True)
 
 
-def synthesize(text, voice_name, rate, volume):
+def synthesize(text, voice_name, rate, volume, progress=None):
+    start_time = time.time()
+    _emit(progress, 0.0, "Подготовка")
+
     if not text or not text.strip():
-        return None, "Введите текст"
+        return None, "❌ Введите текст для синтеза"
+    if not voice_name or voice_name not in WIN_VOICES:
+        return None, "❌ Выберите голос из списка"
 
     words = text.split()
     word_count = max(len(words), 1)
-    progress = [0]
-    start_time = time.time()
+    counter = [0]
 
-    print(f"\n[{time.strftime('%H:%M:%S')}] Синтез начат | голос: {voice_name} | слов: {word_count}", flush=True)
-    _progress_bar(0, word_count, start_time)
+    print(
+        f"[{time.strftime('%H:%M:%S')}] Синтез начат | голос: {voice_name} | слов: {word_count}",
+        flush=True,
+    )
+
+    _emit(progress, 0.05, "Инициализация движка SAPI5")
+    try:
+        engine = pyttsx3.init()
+        engine.setProperty('voice', WIN_VOICES[voice_name])
+        engine.setProperty('rate', int(rate))
+        engine.setProperty('volume', volume / 100.0)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[ERROR] Не удалось инициализировать движок:\n{tb}", flush=True)
+        return None, f"❌ Не удалось инициализировать движок: {e}"
 
     def on_word(name, location, length):
-        progress[0] += 1
-        _progress_bar(min(progress[0], word_count), word_count, start_time)
+        counter[0] += 1
+        cur = min(counter[0], word_count)
+        pct = 0.10 + 0.75 * (cur / word_count)  # от 10% до 85%
+        _emit(progress, pct, f"Синтез слова {cur}/{word_count}")
 
-    engine = pyttsx3.init()
-    engine.setProperty('voice', WIN_VOICES[voice_name])
-    engine.setProperty('rate', int(rate))
-    engine.setProperty('volume', volume / 100.0)
     engine.connect('started-word', on_word)
 
     tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
     tmp.close()
-    engine.save_to_file(text, tmp.name)
-    engine.runAndWait()
 
-    _progress_bar(word_count, word_count, start_time)
-    elapsed = time.time() - start_time
-    print(f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True)
+    _emit(progress, 0.10, f"Синтез речи ({word_count} слов)")
+    try:
+        engine.save_to_file(text, tmp.name)
+        engine.runAndWait()
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[ERROR] Ошибка синтеза Windows TTS:\n{tb}", flush=True)
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return None, f"❌ Ошибка синтеза: {e}"
 
     if not os.path.exists(tmp.name) or os.path.getsize(tmp.name) == 0:
-        return None, "Ошибка синтеза"
+        return None, "❌ Ошибка синтеза: пустой файл результата"
 
+    _emit(progress, 0.92, "Сохранение файла")
     out = save_named_audio(*wav_to_numpy(tmp.name))
-    os.unlink(tmp.name)
-    return out, f"Готово — {voice_name}"
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
+
+    elapsed = time.time() - start_time
+    _emit(progress, 1.0, f"Готово за {elapsed:.1f}с")
+    print(
+        f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True
+    )
+    return out, f"✓ Готово — {voice_name} ({elapsed:.1f}с)"

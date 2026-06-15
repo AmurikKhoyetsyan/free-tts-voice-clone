@@ -1,8 +1,22 @@
 import gradio as gr
-from core.tts_xtts import synthesize, check_status, LANGUAGES
+from core.tts_xtts import synthesize as _core_synthesize, check_status, LANGUAGES
 from core.voice_manager import save_voice
 
 _STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+
+
+def _synthesize(text, audio_in, lang, progress=gr.Progress()):
+    if audio_in is None:
+        msg = "❌ Загрузите аудио образец голоса (10–30 сек)"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
+    if not text or not text.strip():
+        msg = "❌ Введите текст для синтеза"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
+    return _core_synthesize(text, audio_in, lang, progress=progress)
 
 
 def build():
@@ -23,4 +37,4 @@ def build():
                 status    = gr.Textbox(label="Статус", interactive=False)
 
         save_btn.click(fn=save_voice, inputs=[audio_in, save_name], outputs=[status, gr.State()])
-        btn.click(fn=synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status], js=_STOP_ALL_JS)
+        btn.click(fn=_synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status], js=_STOP_ALL_JS)

@@ -9,13 +9,24 @@ from core.voice_manager import (
 )
 
 
-def _synthesize(voice_name, text, language_label):
+def _synthesize(voice_name, text, language_label, progress=gr.Progress()):
     if not voice_name:
-        return None, "Выберите голос из списка"
+        msg = "❌ Выберите голос из списка"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
+    if not text or not text.strip():
+        msg = "❌ Введите текст для синтеза"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
     audio_path = load_voice(voice_name)
     if audio_path is None:
-        return None, f"Файл голоса «{voice_name}» не найден"
-    return xtts_synthesize(text, audio_path, language_label)
+        msg = f"❌ Файл голоса «{voice_name}» не найден"
+        gr.Warning(msg)
+        progress(1.0, desc=msg)
+        return None, msg
+    return xtts_synthesize(text, audio_path, language_label, progress=progress)
 
 
 def _voice_urls_json():
@@ -136,6 +147,9 @@ INJECT_OPTIONS_PLAY_JS = """
 
     let currentBtn = null;
     let currentName = null;
+    // Поднимается на время смены src — чтобы 'pause' от свопа src не
+    // сбрасывал только что выставленное состояние кнопки.
+    let swappingSrc = false;
 
     const getPlayer = () => {
         let p = document.getElementById('__voicePlayer');
@@ -144,10 +158,20 @@ INJECT_OPTIONS_PLAY_JS = """
             p.id = '__voicePlayer';
             p.style.display = 'none';
             document.body.appendChild(p);
-            // Only auto-reset on natural end. Pause is fired during src
-            // swaps and would clobber the freshly-set state.
             p.addEventListener('ended', () => {
                 log('ended');
+                resetAllBtns();
+                currentBtn = null;
+                currentName = null;
+            });
+            // Сюда попадаем когда: 1) кто-то другой запустил audio и
+            // глобальный mutex поставил нас на паузу, 2) нажали «Синтезировать»
+            // (_STOP_ALL_JS), 3) сами вызвали stopPlayback. Во всех трёх
+            // случаях кнопку нужно вернуть в ▶.
+            p.addEventListener('pause', () => {
+                if (swappingSrc) return;
+                if (p.ended) return; // ended-листенер уже отработает
+                log('paused externally');
                 resetAllBtns();
                 currentBtn = null;
                 currentName = null;
@@ -189,10 +213,15 @@ INJECT_OPTIONS_PLAY_JS = """
             if (i >= candidates.length) { log('all URLs FAILED'); stopPlayback(); return; }
             const u = candidates[i++];
             log('→ ' + u);
+            swappingSrc = true;
             player.src = u;
             player.currentTime = 0;
-            player.play().then(() => log('OK ' + u))
-                         .catch(err => { log('fail ' + (err && err.name || err)); next(); });
+            player.play().then(() => { swappingSrc = false; log('OK ' + u); })
+                         .catch(err => {
+                             swappingSrc = false;
+                             log('fail ' + (err && err.name || err));
+                             next();
+                         });
         };
         next();
     };

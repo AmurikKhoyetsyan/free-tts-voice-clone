@@ -1,7 +1,7 @@
 import time
 import tempfile
 import os
-import threading
+import traceback
 from .audio import wav_to_numpy, save_named_audio
 
 LANGUAGES = {
@@ -65,54 +65,75 @@ def check_status():
         return "XTTS v2 не установлен. Запусти install_xtts.bat и перезапусти приложение."
 
 
-def synthesize(text, speaker_audio, language_label):
-    if not text or not text.strip():
-        return None, "Введите текст"
-    if speaker_audio is None:
-        return None, "Загрузите аудио образец голоса (10–30 сек)"
+def _emit(progress, value, desc):
+    """Отправить прогресс в UI (gr.Progress) и в stdout."""
+    if progress is not None:
+        try:
+            progress(value, desc=desc)
+        except Exception:
+            pass
+    print(f"[{time.strftime('%H:%M:%S')}] [{int(value * 100):3d}%] {desc}", flush=True)
 
+
+def synthesize(text, speaker_audio, language_label, progress=None):
+    start_time = time.time()
+    _emit(progress, 0.0, "Подготовка")
+
+    if not text or not text.strip():
+        return None, "❌ Введите текст для синтеза"
+    if speaker_audio is None:
+        return None, "❌ Загрузите аудио образец голоса (10–30 сек)"
+
+    _emit(progress, 0.05, "Загрузка модели XTTS v2")
     tts, err = _get_model()
     if tts is None:
-        return None, f"Модель не загружена: {err}"
+        msg = f"❌ Модель не загружена: {err}"
+        print(f"[ERROR] {msg}", flush=True)
+        return None, msg
 
     lang = LANGUAGES.get(language_label, "ru")
-    start_time = time.time()
-    print(f"\n[{time.strftime('%H:%M:%S')}] Клонирование | язык: {lang} | слов: {len(text.split())}", flush=True)
-
-    done = [False]
-    frames = ['-', '\\', '|', '/']
-
-    def _spinner():
-        i = 0
-        while not done[0]:
-            elapsed = time.time() - start_time
-            print(f'\r  [{frames[i % 4]}]   ?%  {elapsed:.1f}s', end='', flush=True)
-            i += 1
-            time.sleep(0.15)
-
-    t = threading.Thread(target=_spinner, daemon=True)
-    t.start()
+    word_count = len(text.split())
+    print(
+        f"[{time.strftime('%H:%M:%S')}] Клонирование | язык: {lang} | слов: {word_count}",
+        flush=True,
+    )
 
     tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
     tmp.close()
 
     try:
-        tts.tts_to_file(text=text, speaker_wav=speaker_audio, language=lang, file_path=tmp.name)
+        _emit(progress, 0.15, f"Анализ образца голоса (язык: {lang})")
+        _emit(progress, 0.25, f"Синтез речи ({word_count} слов)")
+        tts.tts_to_file(
+            text=text, speaker_wav=speaker_audio, language=lang, file_path=tmp.name
+        )
+        _emit(progress, 0.85, "Аудио сгенерировано")
     except Exception as e:
-        done[0] = True
-        t.join(timeout=1)
-        print(flush=True)
-        return None, f"Ошибка: {e}"
-
-    done[0] = True
-    t.join(timeout=1)
-    elapsed = time.time() - start_time
-    print(f'\r  [{"#" * 40}] 100%  {elapsed:.1f}s', flush=True)
-    print(f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True)
+        tb = traceback.format_exc()
+        print(f"[ERROR] Ошибка синтеза XTTS:\n{tb}", flush=True)
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return None, f"❌ Ошибка синтеза: {e}"
 
     if os.path.getsize(tmp.name) == 0:
-        return None, "Ошибка: пустой файл"
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return None, "❌ Ошибка: пустой файл результата"
 
+    _emit(progress, 0.92, "Сохранение файла")
     out = save_named_audio(*wav_to_numpy(tmp.name))
-    os.unlink(tmp.name)
-    return out, "Готово — голос клонирован"
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
+
+    elapsed = time.time() - start_time
+    _emit(progress, 1.0, f"Готово за {elapsed:.1f}с")
+    print(
+        f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True
+    )
+    return out, f"✓ Готово — голос клонирован ({elapsed:.1f}с)"
