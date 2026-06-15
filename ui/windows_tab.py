@@ -1,6 +1,8 @@
 import gradio as gr
 from core.tts_windows import synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
 
+_STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+
 
 def build():
     with gr.Tab("Windows голоса"):
@@ -17,4 +19,4 @@ def build():
                 audio  = gr.Audio(label="Результат")
                 status = gr.Textbox(label="Статус", interactive=False)
 
-        btn.click(fn=synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status])
+        btn.click(fn=synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=_STOP_ALL_JS)

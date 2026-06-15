@@ -2,6 +2,8 @@ import gradio as gr
 from core.tts_xtts import synthesize, check_status, LANGUAGES
 from core.voice_manager import save_voice
 
+_STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+
 
 def build():
     with gr.Tab("Клонирование голоса (XTTS v2)"):
@@ -21,4 +23,4 @@ def build():
                 status    = gr.Textbox(label="Статус", interactive=False)
 
         save_btn.click(fn=save_voice, inputs=[audio_in, save_name], outputs=[status, gr.State()])
-        btn.click(fn=synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status])
+        btn.click(fn=synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status], js=_STOP_ALL_JS)
