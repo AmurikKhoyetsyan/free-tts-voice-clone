@@ -58,32 +58,60 @@ _PREVIEW_CSS = """
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 22px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
+    width: 28px;
+    height: 24px;
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.5);
+    cursor: pointer !important;
     font-size: 12px;
     line-height: 1;
     border-radius: 4px;
-    z-index: 10;
+    z-index: 999999;
     user-select: none;
     color: inherit;
+    pointer-events: auto !important;
 }
-.voice-opt-play:hover { background: rgba(127,127,127,0.25); }
+.voice-opt-play:hover { background: rgba(99,102,241,0.35); }
+.voice-opt-play.active { background: #22c55e !important; color: white; }
+#__voiceDebug {
+    position: fixed;
+    bottom: 8px;
+    right: 8px;
+    z-index: 1000000;
+    background: rgba(0,0,0,0.85);
+    color: #fff;
+    font: 11px monospace;
+    padding: 8px 10px;
+    border-radius: 6px;
+    max-width: 380px;
+    white-space: pre-wrap;
+    pointer-events: none;
+}
 """
 
 INJECT_OPTIONS_PLAY_JS = """
 () => {
     if (window.__voiceOptInjectorInstalled) return;
     window.__voiceOptInjectorInstalled = true;
-    console.log('[voice-play] injector installed');
+
+    // ---- on-screen debug panel ----
+    const dbg = document.createElement('div');
+    dbg.id = '__voiceDebug';
+    dbg.textContent = 'voice-play: ждём dropdown...';
+    document.body.appendChild(dbg);
+    const log = (msg) => {
+        const t = new Date().toLocaleTimeString();
+        dbg.textContent = `[${t}] ${msg}\\n` + dbg.textContent;
+        if (dbg.textContent.length > 1500) dbg.textContent = dbg.textContent.slice(0, 1500);
+        console.log('[voice-play]', msg);
+    };
+    log('injector installed');
 
     const getUrls = () => {
         const ta = document.querySelector('#voice_urls_data textarea, #voice_urls_data input');
-        if (!ta) { console.warn('[voice-play] urls textbox not found'); return {}; }
-        if (!ta.value) { console.warn('[voice-play] urls textbox empty'); return {}; }
-        try { return JSON.parse(ta.value); } catch (e) { console.warn('[voice-play] urls parse fail', e); return {}; }
+        if (!ta) { log('urls textbox NOT FOUND'); return {}; }
+        if (!ta.value) { log('urls textbox EMPTY'); return {}; }
+        try { return JSON.parse(ta.value); } catch (e) { log('urls parse fail'); return {}; }
     };
 
     const getPlayer = () => {
@@ -97,8 +125,9 @@ INJECT_OPTIONS_PLAY_JS = """
         return p;
     };
 
-    const playVoice = (name) => {
-        console.log('[voice-play] playVoice called', name);
+    const playVoice = (name, btn) => {
+        log('playVoice → ' + name);
+        if (btn) { btn.classList.add('active'); setTimeout(() => btn.classList.remove('active'), 600); }
         const player = getPlayer();
         document.querySelectorAll('audio').forEach(a => { if (a !== player) a.pause(); });
         const map = getUrls();
@@ -110,60 +139,84 @@ INJECT_OPTIONS_PLAY_JS = """
         }
         candidates.push(`/gradio_api/file=saved_voices/${encodeURIComponent(name)}.wav`);
         candidates.push(`/file=saved_voices/${encodeURIComponent(name)}.wav`);
-        console.log('[voice-play] candidates', candidates);
+        log('try URLs: ' + candidates.length);
         let i = 0;
         const next = () => {
-            if (i >= candidates.length) { console.warn('[voice-play] all URLs failed'); return; }
+            if (i >= candidates.length) { log('all URLs FAILED'); return; }
             const u = candidates[i++];
+            log('→ ' + u);
             player.src = u;
             player.currentTime = 0;
-            player.play().then(() => console.log('[voice-play] OK', u))
-                         .catch(err => { console.warn('[voice-play] failed', u, err); next(); });
+            player.play().then(() => log('OK ' + u))
+                         .catch(err => { log('fail ' + (err && err.name || err)); next(); });
         };
         next();
     };
     window.__playVoice = playVoice;
 
-    // Capture-phase listeners on document — fire BEFORE Gradio's dropdown
-    // handlers, so the option doesn't get selected / popup doesn't close
-    // when the ▶ button is clicked inside an option.
+    // Capture-phase listeners on document, BEFORE Gradio's dropdown handlers.
+    // Trigger playback on pointerdown so we don't lose the gesture if the
+    // dropdown later tears down the button DOM before click fires.
+    let firedThisGesture = false;
     const intercept = (e) => {
         const btn = e.target && e.target.closest && e.target.closest('.voice-opt-play');
         if (!btn) return;
-        console.log('[voice-play] intercept', e.type, btn.dataset.voiceName);
         e.preventDefault();
         e.stopPropagation();
         if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-        if (e.type === 'click') {
+        if (e.type === 'pointerdown' || e.type === 'mousedown') {
+            if (firedThisGesture) return;
+            firedThisGesture = true;
             const name = btn.dataset.voiceName;
-            if (name) playVoice(name);
+            log('intercept ' + e.type + ' for ' + name);
+            if (name) playVoice(name, btn);
+            setTimeout(() => { firedThisGesture = false; }, 400);
         }
     };
     ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(t => {
         document.addEventListener(t, intercept, true);
+        window.addEventListener(t, intercept, true);
     });
+
+    const cleanName = (raw) => {
+        // Gradio prefixes the currently-selected option with "✓ ", strip it.
+        // Also strip any other decorative chars (▶ from our own button if
+        // re-injected, bullets, etc.) and surrounding whitespace.
+        return (raw || '')
+            .replace(/[\\u2713\\u2714\\u2022\\u00b7\\u25b6]/g, '')
+            .replace(/\\s+/g, ' ')
+            .trim();
+    };
 
     const inject = () => {
         const root = document.querySelector('#voice_select');
         if (!root) return;
-        const items = root.querySelectorAll('[role="option"], ul.options li, li.item');
-        if (items.length) console.log('[voice-play] inject: found', items.length, 'options');
+        const items = root.querySelectorAll('[role="option"], ul.options li, li.item, [data-testid*="option"]');
+        let added = 0, refreshed = 0;
         items.forEach(opt => {
-            if (opt.dataset.playInjected) return;
-            const name = opt.textContent.trim();
+            // Prefer Gradio's data-value if present, otherwise strip the button's
+            // own text + the "✓" Gradio adds to the currently-selected option.
+            const raw = opt.getAttribute('data-value') || opt.textContent;
+            const name = cleanName(raw);
             if (!name) return;
-            opt.dataset.playInjected = '1';
-            const btn = document.createElement('span');
-            btn.textContent = '▶';
-            btn.className = 'voice-opt-play';
+            let btn = opt.querySelector(':scope > .voice-opt-play');
+            if (!btn) {
+                btn = document.createElement('span');
+                btn.textContent = '▶';
+                btn.className = 'voice-opt-play';
+                btn.setAttribute('role', 'button');
+                opt.style.position = 'relative';
+                opt.style.paddingRight = '46px';
+                opt.appendChild(btn);
+                added++;
+            } else if (btn.dataset.voiceName !== name) {
+                refreshed++;
+            }
             btn.dataset.voiceName = name;
-            btn.setAttribute('role', 'button');
             btn.setAttribute('aria-label', 'Прослушать ' + name);
-            opt.style.position = 'relative';
-            opt.style.paddingRight = '40px';
-            opt.appendChild(btn);
-            console.log('[voice-play] injected button for', name);
         });
+        if (added) log('injected ' + added + ' button(s)');
+        if (refreshed) log('refreshed ' + refreshed + ' button name(s)');
     };
 
     new MutationObserver(inject).observe(document.body, { childList: true, subtree: true });
