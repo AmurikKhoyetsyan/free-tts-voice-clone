@@ -1,21 +1,30 @@
 import gradio as gr
 from core.tts_windows import synthesize as _core_synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
+from ui.progress_stream import stream
 
-_STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+_STOP_ALL_JS = (
+    "(...args) => { "
+    "if (window.__ttsAudio) window.__ttsAudio.stop(); "
+    "else document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch(_) {} }); "
+    "return args; }"
+)
 
 
 def _synthesize(text, voice, rate, vol, progress=gr.Progress()):
+    print(f"[windows_tab] _synthesize CALLED text_len={len(text or '')} voice={voice!r}", flush=True)
     if not voice:
         msg = "❌ Выберите голос из списка"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
+        yield None, msg
+        return
     if not text or not text.strip():
         msg = "❌ Введите текст для синтеза"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
-    return _core_synthesize(text, voice, rate, vol, progress=progress)
+        yield None, msg
+        return
+    yield from stream(_core_synthesize, (text, voice, rate, vol), progress)
 
 
 def build():

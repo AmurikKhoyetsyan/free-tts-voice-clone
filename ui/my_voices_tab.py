@@ -7,26 +7,31 @@ from core.voice_manager import (
     load_voice, delete_voice, rename_voice, voices_dropdown,
     get_saved_voices, VOICES_DIR,
 )
+from ui.progress_stream import stream
 
 
 def _synthesize(voice_name, text, language_label, progress=gr.Progress()):
+    print(f"[my_voices_tab] _synthesize CALLED voice={voice_name!r} text_len={len(text or '')}", flush=True)
     if not voice_name:
         msg = "❌ Выберите голос из списка"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
+        yield None, msg
+        return
     if not text or not text.strip():
         msg = "❌ Введите текст для синтеза"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
+        yield None, msg
+        return
     audio_path = load_voice(voice_name)
     if audio_path is None:
         msg = f"❌ Файл голоса «{voice_name}» не найден"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
-    return xtts_synthesize(text, audio_path, language_label, progress=progress)
+        yield None, msg
+        return
+    yield from stream(xtts_synthesize, (text, audio_path, language_label), progress)
 
 
 def _voice_urls_json():
@@ -38,8 +43,17 @@ def _voice_urls_json():
     return json.dumps(paths)
 
 
-_STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+_STOP_ALL_JS = (
+    "(...args) => { "
+    "if (window.__ttsAudio) window.__ttsAudio.stop(); "
+    "else document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch(_) {} }); "
+    "return args; }"
+)
 
+# Превью при смене голоса в дропдауне: дёргаем единственный плеер Manager-а,
+# а не <audio> Gradio-компонента. Это правильный способ — через
+# window.__ttsAudio.play(url). Gradio-компонент превью остаётся скрытым (CSS
+# display:none) и нужен только чтобы получить URL файла.
 _PLAY_PREVIEW_JS = """
 (...args) => {
     const root = document.querySelector('#voice_preview_audio');
@@ -50,9 +64,9 @@ _PLAY_PREVIEW_JS = """
             if (attempt < 20) setTimeout(() => tryPlay(attempt + 1), 100);
             return;
         }
-        document.querySelectorAll('audio').forEach(a => { if (a !== el) a.pause(); });
-        el.currentTime = 0;
-        el.play().catch(() => {});
+        if (window.__ttsAudio) {
+            window.__ttsAudio.play(el.src).catch(() => {});
+        }
     };
     tryPlay();
     return args;
@@ -132,72 +146,53 @@ INJECT_OPTIONS_PLAY_JS = """
     const PLAY_ICON = '▶';
     const STOP_ICON = '⏹';
 
-    const setBtnState = (btn, playing) => {
-        if (!btn) return;
-        const want = playing ? STOP_ICON : PLAY_ICON;
-        if (btn.textContent !== want) btn.textContent = want;
-        if (btn.classList.contains('playing') !== !!playing) {
-            btn.classList.toggle('playing', !!playing);
-        }
+    // ВАЖНО: никакого собственного <audio> здесь больше нет. Воспроизведением
+    // владеет window.__ttsAudio (Audio Manager singleton из app.py). Мы только
+    // дергаем play(url)/stop() и читаем currentUrl/isPlaying для UI.
+    if (!window.__ttsAudio) {
+        log('FATAL: __ttsAudio manager not installed');
+    }
+
+    // Состояние UI — какое имя голоса сейчас отражено в кнопке как ⏹.
+    // Источник истины — __ttsAudio. Это локально-кэшированный маппинг
+    // currentUrl → voiceName, чтобы знать какой именно вариант ▶/⏹ показать.
+    let playingName = null;
+
+    const refreshButtons = () => {
+        document.querySelectorAll('.voice-opt-play').forEach(b => {
+            const n = b.dataset.voiceName;
+            const isThis = playingName !== null && n === playingName;
+            const wantIcon = isThis ? STOP_ICON : PLAY_ICON;
+            if (b.textContent !== wantIcon) b.textContent = wantIcon;
+            if (b.classList.contains('playing') !== isThis) {
+                b.classList.toggle('playing', isThis);
+            }
+        });
     };
 
-    const resetAllBtns = () => {
-        document.querySelectorAll('.voice-opt-play').forEach(b => setBtnState(b, false));
-    };
+    // Подписываемся на состояние Manager-а — он единственный источник истины.
+    // Если играет НЕ наш встроенный плеер (т.е. внешний Gradio-источник),
+    // либо вообще ничего не играет — все ▶/⏹ кнопки сбрасываем в ▶.
+    if (window.__ttsAudio && typeof window.__ttsAudio.subscribe === 'function') {
+        window.__ttsAudio.subscribe((state) => {
+            const ourPlayer = window.__ttsAudio._player;
+            const ownsPlayback = state.isPlaying && state.currentAudio === ourPlayer;
+            if (!ownsPlayback) {
+                playingName = null;
+            }
+            refreshButtons();
+        });
+    }
 
-    let currentBtn = null;
-    let currentName = null;
-    // Поднимается на время смены src — чтобы 'pause' от свопа src не
-    // сбрасывал только что выставленное состояние кнопки.
-    let swappingSrc = false;
-
-    const getPlayer = () => {
-        let p = document.getElementById('__voicePlayer');
-        if (!p) {
-            p = document.createElement('audio');
-            p.id = '__voicePlayer';
-            p.style.display = 'none';
-            document.body.appendChild(p);
-            p.addEventListener('ended', () => {
-                log('ended');
-                resetAllBtns();
-                currentBtn = null;
-                currentName = null;
-            });
-            // Сюда попадаем когда: 1) кто-то другой запустил audio и
-            // глобальный mutex поставил нас на паузу, 2) нажали «Синтезировать»
-            // (_STOP_ALL_JS), 3) сами вызвали stopPlayback. Во всех трёх
-            // случаях кнопку нужно вернуть в ▶.
-            p.addEventListener('pause', () => {
-                if (swappingSrc) return;
-                if (p.ended) return; // ended-листенер уже отработает
-                log('paused externally');
-                resetAllBtns();
-                currentBtn = null;
-                currentName = null;
-            });
-        }
-        return p;
-    };
-
-    const stopPlayback = () => {
-        const p = document.getElementById('__voicePlayer');
-        if (p) { try { p.pause(); } catch(e) {} }
-        resetAllBtns();
-        currentBtn = null;
-        currentName = null;
-    };
-
-    const playVoice = (name, btn) => {
-        const player = getPlayer();
+    const playVoice = (name) => {
+        if (!window.__ttsAudio) { log('no audio manager'); return; }
         // Second tap on the same voice while it's playing → stop.
-        if (currentName === name && !player.paused) { log('stop ' + name); stopPlayback(); return; }
+        if (playingName === name && window.__ttsAudio.isPlaying) {
+            log('stop ' + name);
+            window.__ttsAudio.stop();
+            return;
+        }
         log('playVoice → ' + name);
-        document.querySelectorAll('audio').forEach(a => { if (a !== player) a.pause(); });
-        resetAllBtns();
-        currentBtn = btn || null;
-        currentName = name;
-        setBtnState(currentBtn, true);
         const map = getUrls();
         const abs = map[name];
         const candidates = [];
@@ -208,22 +203,29 @@ INJECT_OPTIONS_PLAY_JS = """
         candidates.push(`/gradio_api/file=saved_voices/${encodeURIComponent(name)}.wav`);
         candidates.push(`/file=saved_voices/${encodeURIComponent(name)}.wav`);
         log('try URLs: ' + candidates.length);
+
         let i = 0;
-        const next = () => {
-            if (i >= candidates.length) { log('all URLs FAILED'); stopPlayback(); return; }
+        const tryNext = () => {
+            if (i >= candidates.length) {
+                log('all URLs FAILED');
+                playingName = null;
+                refreshButtons();
+                return;
+            }
             const u = candidates[i++];
             log('→ ' + u);
-            swappingSrc = true;
-            player.src = u;
-            player.currentTime = 0;
-            player.play().then(() => { swappingSrc = false; log('OK ' + u); })
-                         .catch(err => {
-                             swappingSrc = false;
-                             log('fail ' + (err && err.name || err));
-                             next();
-                         });
+            // Оптимистично выставляем UI до резолва промиса —
+            // мгновенная обратная связь юзеру.
+            playingName = name;
+            refreshButtons();
+            window.__ttsAudio.play(u)
+                .then(() => log('OK ' + u))
+                .catch(err => {
+                    log('fail ' + (err && err.name || err));
+                    tryNext();
+                });
         };
-        next();
+        tryNext();
     };
     window.__playVoice = playVoice;
 
@@ -242,7 +244,7 @@ INJECT_OPTIONS_PLAY_JS = """
             firedThisGesture = true;
             const name = btn.dataset.voiceName;
             log('intercept ' + e.type + ' for ' + name);
-            if (name) playVoice(name, btn);
+            if (name) playVoice(name);
             setTimeout(() => { firedThisGesture = false; }, 400);
         }
     };
@@ -253,10 +255,12 @@ INJECT_OPTIONS_PLAY_JS = """
 
     const cleanName = (raw) => {
         // Gradio prefixes the currently-selected option with "✓ ", strip it.
-        // Also strip any other decorative chars (▶ from our own button if
-        // re-injected, bullets, etc.) and surrounding whitespace.
+        // Также убираем декоративные символы из нашей собственной кнопки
+        // (▶ U+25B6, ⏹ U+23F9), маркеры списков и лишние пробелы. ВАЖНО:
+        // если забыть ⏹, то при проигрывании текстовый контент <li> вида
+        // "Имя⏹" не совпадёт с playingName="Имя", и иконка отвалится в ▶.
         return (raw || '')
-            .replace(/[\\u2713\\u2714\\u2022\\u00b7\\u25b6]/g, '')
+            .replace(/[\\u2713\\u2714\\u2022\\u00b7\\u25b6\\u23f9]/g, '')
             .replace(/\\s+/g, ' ')
             .trim();
     };
@@ -294,14 +298,12 @@ INJECT_OPTIONS_PLAY_JS = """
                 btn.setAttribute('aria-label', 'Прослушать ' + name);
                 refreshed++;
             }
-            const player = document.getElementById('__voicePlayer');
-            const isPlayingThis = (currentName === name) && player && !player.paused;
+            const isPlayingThis = (playingName !== null) && (playingName === name);
             const wantIcon = isPlayingThis ? STOP_ICON : PLAY_ICON;
             if (btn.textContent !== wantIcon) btn.textContent = wantIcon;
             if (btn.classList.contains('playing') !== isPlayingThis) {
                 btn.classList.toggle('playing', isPlayingThis);
             }
-            if (isPlayingThis) currentBtn = btn;
         });
         if (added) log('injected ' + added + ' button(s)');
         if (refreshed) log('refreshed ' + refreshed + ' name(s)');

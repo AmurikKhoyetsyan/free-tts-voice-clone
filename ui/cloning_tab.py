@@ -1,22 +1,31 @@
 import gradio as gr
 from core.tts_xtts import synthesize as _core_synthesize, check_status, LANGUAGES
 from core.voice_manager import save_voice
+from ui.progress_stream import stream
 
-_STOP_ALL_JS = "(...args) => { document.querySelectorAll('audio').forEach(a => { a.pause(); }); return args; }"
+_STOP_ALL_JS = (
+    "(...args) => { "
+    "if (window.__ttsAudio) window.__ttsAudio.stop(); "
+    "else document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch(_) {} }); "
+    "return args; }"
+)
 
 
 def _synthesize(text, audio_in, lang, progress=gr.Progress()):
+    print(f"[cloning_tab] _synthesize CALLED text_len={len(text or '')} audio={audio_in!r}", flush=True)
     if audio_in is None:
         msg = "❌ Загрузите аудио образец голоса (10–30 сек)"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
+        yield None, msg
+        return
     if not text or not text.strip():
         msg = "❌ Введите текст для синтеза"
         gr.Warning(msg)
         progress(1.0, desc=msg)
-        return None, msg
-    return _core_synthesize(text, audio_in, lang, progress=progress)
+        yield None, msg
+        return
+    yield from stream(_core_synthesize, (text, audio_in, lang), progress)
 
 
 def build():

@@ -113,45 +113,457 @@ footer { display: none !important; }
 # Один audio за раз + стоп при смене вкладки + глобальный логгер активности.
 _global_js = """
 () => {
-    // ====== АУДИО-МЬЮТЕКС: ставим САМЫМ ПЕРВЫМ в отдельном try ======
-    // Гарантия "один audio за раз". Дублирует capture-listener ниже на
-    // случай, если ниже что-то упадёт — наша главная страховка.
+    // Маркер версии — посмотри в DevTools Console. Если этой строки нет —
+    // браузер показывает СТАРУЮ версию JS, перезапусти сервер и сделай
+    // Ctrl+Shift+R. Без этого никакие правки не применятся.
+    try { console.log('[__ttsAudio] v6 install — enforced singleton'); } catch(_) {}
+    // ====== window.__ttsAudio — единый Audio Manager (singleton) ======
+    // Жёсткое правило: в любой момент играет МАКСИМУМ один источник.
+    //
+    // Manager владеет одним <audio> элементом (this._player) для всех наших
+    // управляемых проигрываний (dropdown-превью, programmatic playback).
+    // Никто кроме Manager-а не должен создавать new Audio() или вызывать
+    // .play()/.pause() на нём напрямую.
+    //
+    // Gradio-компоненты создают свои <audio> и WaveSurfer'ы внутри своих
+    // Svelte-компонентов — это вне нашего контроля. Manager обращается с
+    // ними как с "внешними источниками": перехватывает их play (event
+    // 'play' для MediaElement-backend и click на Play-кнопке для WebAudio-
+    // backend), регистрирует их как currentAudio и стопает всё остальное.
+    //
+    // Публичный API:
+    //   __ttsAudio.play(url, opts?) → Promise   воспроизвести через свой плеер
+    //   __ttsAudio.stop()                       полная остановка ВСЕГО
+    //   __ttsAudio.currentAudio                 текущий активный <audio> или null
+    //   __ttsAudio.isPlaying                    boolean
+    //   __ttsAudio.subscribe(fn)                подписка на изменения состояния
+    //
+    // ====== BULLETPROOF: monkey-patches на прототипах ======
+    // Сначала ставим хуки прямо на HTMLMediaElement.play и
+    // AudioBufferSourceNode.start. Это даёт физическую гарантию singleton-а:
+    // КАЖДЫЙ вызов play() / start() на ЛЮБОМ элементе/узле в странице
+    // автоматически останавливает все остальные источники ПЕРЕД тем, как
+    // делегировать в оригинал. Не важно, кто и как запускает звук — Gradio,
+    // WaveSurfer (MediaElement или WebAudio backend), наш Manager, любой
+    // сторонний код, — два аудио одновременно не запустятся в принципе.
     try {
-        if (!window.__ttsAudioMutexV2) {
-            window.__ttsAudioMutexV2 = true;
-            const pauseOthers = (target) => {
-                if (!target || target.tagName !== 'AUDIO') return;
-                document.querySelectorAll('audio').forEach(a => {
-                    if (a !== target && !a.paused) {
-                        try { a.pause(); } catch(_) {}
-                    }
+        if (window.HTMLMediaElement && !HTMLMediaElement.prototype.__ttsPlayPatched) {
+            const origPlay = HTMLMediaElement.prototype.play;
+            HTMLMediaElement.prototype.play = function() {
+                const me = this;
+                // Глушим все остальные media-элементы.
+                document.querySelectorAll('audio, video').forEach(function(el) {
+                    if (el === me || el.paused) return;
+                    try { el.pause(); el.currentTime = 0; } catch(_) {}
                 });
+                // Глушим активный WebAudio-источник (WaveSurfer WebAudio backend).
+                if (window.__ttsAudio && window.__ttsAudio._activeBufferSource) {
+                    try { window.__ttsAudio._activeBufferSource.stop(); } catch(_) {}
+                    window.__ttsAudio._activeBufferSource = null;
+                }
+                return origPlay.apply(this, arguments);
             };
-            // Capture-фаза на document — основной перехват.
-            document.addEventListener('play', (e) => pauseOthers(e.target), true);
-            // Прямые listener-ы на каждом <audio> — страховка для случаев,
-            // когда capture не сработал (shadow DOM и т.п.).
+            try {
+                Object.defineProperty(HTMLMediaElement.prototype, '__ttsPlayPatched', { value: true });
+            } catch(_) { HTMLMediaElement.prototype.__ttsPlayPatched = true; }
+        }
+    } catch(_) {}
+    // Глобальный registry AudioContext-ов. Любая lib (WaveSurfer, Tone.js,
+    // что угодно) создаёт source-nodes через context.createBufferSource().
+    // Когда такой узел запускают через start() — мы видим его .context и
+    // запоминаем. Дальше при Manager.play() suspend-им все «чужие» контексты
+    // → весь Web Audio output в странице глохнет физически, на уровне API.
+    if (!window.__ttsAudioContexts) window.__ttsAudioContexts = [];
+    try {
+        if (window.AudioBufferSourceNode && !AudioBufferSourceNode.prototype.__ttsStartPatched) {
+            const origStart = AudioBufferSourceNode.prototype.start;
+            AudioBufferSourceNode.prototype.start = function() {
+                const me = this;
+                // Регистрируем контекст этого источника.
+                try {
+                    const ctx = me.context;
+                    if (ctx && window.__ttsAudioContexts.indexOf(ctx) === -1) {
+                        window.__ttsAudioContexts.push(ctx);
+                    }
+                } catch(_) {}
+                // Глушим все нативные <audio>/<video>.
+                document.querySelectorAll('audio, video').forEach(function(el) {
+                    if (el.paused) return;
+                    try { el.pause(); el.currentTime = 0; } catch(_) {}
+                });
+                // Глушим предыдущий активный WebAudio-источник и регистрируем себя.
+                if (window.__ttsAudio) {
+                    if (window.__ttsAudio._activeBufferSource && window.__ttsAudio._activeBufferSource !== me) {
+                        try { window.__ttsAudio._activeBufferSource.stop(); } catch(_) {}
+                    }
+                    window.__ttsAudio._activeBufferSource = me;
+                    try {
+                        me.addEventListener('ended', function() {
+                            if (window.__ttsAudio && window.__ttsAudio._activeBufferSource === me) {
+                                window.__ttsAudio._activeBufferSource = null;
+                            }
+                        });
+                    } catch(_) {}
+                }
+                return origStart.apply(this, arguments);
+            };
+            try {
+                Object.defineProperty(AudioBufferSourceNode.prototype, '__ttsStartPatched', { value: true });
+            } catch(_) { AudioBufferSourceNode.prototype.__ttsStartPatched = true; }
+        }
+    } catch(_) {}
+
+    // Также пробуем перехватить КОНСТРУКТОРЫ AudioContext, чтобы регистрировать
+    // даже те контексты, в которых ни один source-node ещё не стартовал.
+    try {
+        ['AudioContext', 'webkitAudioContext'].forEach(function(name) {
+            const Orig = window[name];
+            if (!Orig || Orig.__ttsPatched) return;
+            const Wrapped = function() {
+                const args = Array.prototype.slice.call(arguments);
+                const inst = (args.length === 0)
+                    ? new Orig()
+                    : new (Function.prototype.bind.apply(Orig, [null].concat(args)))();
+                try {
+                    if (window.__ttsAudioContexts && window.__ttsAudioContexts.indexOf(inst) === -1) {
+                        window.__ttsAudioContexts.push(inst);
+                    }
+                } catch(_) {}
+                return inst;
+            };
+            Wrapped.prototype = Orig.prototype;
+            try { Object.setPrototypeOf(Wrapped, Orig); } catch(_) {}
+            try { Object.defineProperty(Wrapped, '__ttsPatched', { value: true }); } catch(_) {}
+            try { window[name] = Wrapped; } catch(_) {}
+        });
+    } catch(_) {}
+
+    // Helper-ы для управления зарегистрированными контекстами.
+    window.__ttsSuspendForeignContexts = function() {
+        if (!window.__ttsAudioContexts) return;
+        window.__ttsAudioContexts.forEach(function(ctx) {
+            if (!ctx) return;
+            if (ctx.state === 'running' && typeof ctx.suspend === 'function') {
+                try { ctx.suspend(); } catch(_) {}
+            }
+        });
+    };
+    window.__ttsResumeForeignContexts = function() {
+        if (!window.__ttsAudioContexts) return;
+        window.__ttsAudioContexts.forEach(function(ctx) {
+            if (!ctx) return;
+            if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                try { ctx.resume(); } catch(_) {}
+            }
+        });
+    };
+
+    try {
+        if (!window.__ttsAudio) {
+            // ВАЖНО: в JS regex без флага `u` `\\b` — это ASCII word boundary.
+            // Кириллица НЕ считается word char, поэтому `\\bпауз` НЕ матчит
+            // «Пауза». Для русских меток границу не ставим.
+            const isPauseLabel = (s) => /\\bpause\\b|пауз/i.test(s || '');
+            const isPlayLabel  = (s) => /\\bplay\\b|воспроизв/i.test(s || '');
+
+            const nearbyAudio = (el) => {
+                if (!el) return null;
+                if (el.tagName === 'AUDIO') return el;
+                let cur = el;
+                for (let d = 0; d < 8 && cur; d++, cur = cur.parentElement) {
+                    if (cur.querySelector) {
+                        const a = cur.querySelector('audio');
+                        if (a) return a;
+                    }
+                }
+                return null;
+            };
+
+            const isAudioControl = (btn) => {
+                let cur = btn;
+                for (let d = 0; d < 8 && cur; d++, cur = cur.parentElement) {
+                    if (cur.querySelector && (cur.querySelector('audio') || cur.querySelector('canvas'))) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+
+            const componentOfButton = (btn) => {
+                let cur = btn;
+                for (let d = 0; d < 8 && cur; d++, cur = cur.parentElement) {
+                    if (cur.querySelector && cur.querySelector('audio')) return cur;
+                }
+                return null;
+            };
+
+            const mgr = {
+                _player: null,
+                _activeBufferSource: null,  // tracked WebAudio source (WaveSurfer WebAudio backend)
+                _subscribers: [],
+                _swappingSrc: false,
+                _playToken: 0,
+                currentAudio: null,
+                currentUrl: null,
+                isPlaying: false,
+
+                _getPlayer: function() {
+                    if (this._player) return this._player;
+                    const a = document.createElement('audio');
+                    a.id = '__ttsAudioPlayer';
+                    a.style.display = 'none';
+                    a.preload = 'auto';
+                    document.body.appendChild(a);
+                    this._player = a;
+
+                    a.addEventListener('play', () => {
+                        // Уже обработано в _stopExternal/_takeOver; страховка.
+                        this._setState(a, a.src, true);
+                    });
+                    a.addEventListener('pause', () => {
+                        if (this._swappingSrc) return;
+                        if (a.ended) return;
+                        if (this.currentAudio === a) this._setState(null, null, false);
+                    });
+                    a.addEventListener('ended', () => {
+                        if (this.currentAudio === a) this._setState(null, null, false);
+                    });
+                    return a;
+                },
+
+                // Останавливает ВСЁ кроме указанного <audio>: pause+currentTime=0
+                // для нативных <audio>, click по Pause-кнопкам для WaveSurfer
+                // (MediaElement backend) и stop() для WebAudio buffer source
+                // (WaveSurfer WebAudio backend).
+                _stopExternal: function(exceptAudio) {
+                    document.querySelectorAll('audio').forEach(function(a) {
+                        if (a === exceptAudio) return;
+                        try {
+                            if (!a.paused) a.pause();
+                            a.currentTime = 0;
+                        } catch(_) {}
+                    });
+                    document.querySelectorAll('button[aria-label]').forEach(function(btn) {
+                        if (!isPauseLabel(btn.getAttribute('aria-label'))) return;
+                        if (!isAudioControl(btn)) return;
+                        if (exceptAudio) {
+                            const comp = componentOfButton(btn);
+                            if (comp && comp.contains(exceptAudio)) return;
+                        }
+                        try { btn.click(); } catch(_) {}
+                    });
+                    // Прибиваем активный WebAudio-источник, если он не «свой».
+                    if (this._activeBufferSource) {
+                        try { this._activeBufferSource.stop(); } catch(_) {}
+                        this._activeBufferSource = null;
+                    }
+                },
+
+                _setState: function(audio, url, playing) {
+                    this.currentAudio = audio;
+                    this.currentUrl = url;
+                    this.isPlaying = !!playing;
+                    const snap = { currentAudio: audio, currentUrl: url, isPlaying: !!playing };
+                    this._subscribers.forEach(function(fn) {
+                        try { fn(snap); } catch(_) {}
+                    });
+                },
+
+                // Публичное: проиграть URL через наш единственный плеер.
+                play: function(url) {
+                    if (!url) return Promise.reject(new Error('no url'));
+                    const a = this._getPlayer();
+                    const token = ++this._playToken;
+                    // Сначала глушим всё чужое.
+                    this._stopExternal(a);
+                    // Suspend всех чужих AudioContext-ов → весь Web Audio
+                    // output (включая Gradio WaveSurfer) останавливается.
+                    if (window.__ttsSuspendForeignContexts) {
+                        try { window.__ttsSuspendForeignContexts(); } catch(_) {}
+                    }
+                    this._swappingSrc = true;
+                    try { a.src = url; } catch(_) {}
+                    try { a.currentTime = 0; } catch(_) {}
+                    const p = a.play();
+                    const self = this;
+                    return (p && typeof p.then === 'function' ? p : Promise.resolve())
+                        .then(function() {
+                            self._swappingSrc = false;
+                            // Если за это время вызвали play(url2) — игнор.
+                            if (token !== self._playToken) return;
+                            self._setState(a, url, true);
+                        })
+                        .catch(function(err) {
+                            self._swappingSrc = false;
+                            if (token !== self._playToken) throw err;
+                            self._setState(null, null, false);
+                            throw err;
+                        });
+                },
+
+                // Публичное: полностью остановить ВСЁ во всём приложении.
+                stop: function() {
+                    this._playToken++;
+                    if (this._player) {
+                        this._swappingSrc = true;
+                        try { if (!this._player.paused) this._player.pause(); } catch(_) {}
+                        try { this._player.currentTime = 0; } catch(_) {}
+                        this._swappingSrc = false;
+                    }
+                    this._stopExternal(null);
+                    if (this._activeBufferSource) {
+                        try { this._activeBufferSource.stop(); } catch(_) {}
+                        this._activeBufferSource = null;
+                    }
+                    if (window.__ttsSuspendForeignContexts) {
+                        try { window.__ttsSuspendForeignContexts(); } catch(_) {}
+                    }
+                    this._setState(null, null, false);
+                },
+
+                // Внутреннее: внешний источник (Gradio) собирается играть.
+                _takeOver: function(externalAudio) {
+                    this._playToken++;
+                    // Глушим всё кроме него (включая наш _player).
+                    this._stopExternal(externalAudio);
+                    // Внутренний счётчик не путаем: наш _player.pause фактически
+                    // сейчас сработал — установим состояние.
+                    const url = (externalAudio && externalAudio.src) || null;
+                    this._setState(externalAudio, url, true);
+                },
+
+                subscribe: function(fn) {
+                    if (typeof fn !== 'function') return function(){};
+                    this._subscribers.push(fn);
+                    const subs = this._subscribers;
+                    return function() {
+                        const i = subs.indexOf(fn);
+                        if (i >= 0) subs.splice(i, 1);
+                    };
+                }
+            };
+            window.__ttsAudio = mgr;
+
+            // Перехват 1: любой нативный <audio> сообщил 'play'. Если это
+            // не наш плеер — это Gradio (MediaElement backend). Берём над ним
+            // управление и стопаем всё остальное.
+            document.addEventListener('play', function(e) {
+                if (!e.target || e.target.tagName !== 'AUDIO') return;
+                if (e.target === mgr._player) return; // свой обрабатывается в _getPlayer
+                mgr._takeOver(e.target);
+            }, true);
+
+            // Перехват 2: клик по Play-кнопке Gradio-компонента (WebAudio
+            // backend — 'play' event на <audio> не сработает). Перехват в
+            // capture-фазе → срабатывает раньше Gradio-handler-а.
+            document.addEventListener('click', function(e) {
+                const btn = e.target && e.target.closest && e.target.closest('button[aria-label]');
+                if (!btn) return;
+                if (!isPlayLabel(btn.getAttribute('aria-label'))) return;
+                if (!isAudioControl(btn)) return;
+                // Resume контекстов — иначе Gradio не сможет проиграть после
+                // того, как мы их раньше suspend-нули.
+                if (window.__ttsResumeForeignContexts) {
+                    try { window.__ttsResumeForeignContexts(); } catch(_) {}
+                }
+                mgr._takeOver(nearbyAudio(btn));
+            }, true);
+
+            // Страховка: прямой listener на каждый <audio> (shadow DOM,
+            // переподписки и т.п.). Заодно ставим timestamp начала
+            // воспроизведения — используется polling-страховкой ниже.
             const wireAudio = (el) => {
                 if (!el || el.__ttsAudioWired) return;
                 el.__ttsAudioWired = true;
-                el.addEventListener('play', () => pauseOthers(el));
+                el.addEventListener('play', () => {
+                    el.__ttsStartedAt = (window.performance && performance.now) ? performance.now() : Date.now();
+                    if (el === mgr._player) return;
+                    mgr._takeOver(el);
+                });
             };
             const wireAll = (root) => {
-                (root || document).querySelectorAll('audio').forEach(wireAudio);
+                (root || document).querySelectorAll('audio, video').forEach(wireAudio);
             };
             wireAll();
             new MutationObserver(muts => {
                 muts.forEach(m => {
                     m.addedNodes && m.addedNodes.forEach(n => {
                         if (!n || n.nodeType !== 1) return;
-                        if (n.tagName === 'AUDIO') wireAudio(n);
+                        if (n.tagName === 'AUDIO' || n.tagName === 'VIDEO') wireAudio(n);
                         else if (n.querySelectorAll) wireAll(n);
                     });
                 });
             }).observe(document.body, { childList: true, subtree: true });
+
+            // Глобальный capture-listener: ставим timestamp ДО прямых
+            // listener-ов, чтобы он стоял на всём, что играет, независимо
+            // от того, успел ли wireAudio к этому элементу добраться.
+            document.addEventListener('play', function(e) {
+                const t = e.target;
+                if (!t || (t.tagName !== 'AUDIO' && t.tagName !== 'VIDEO')) return;
+                t.__ttsStartedAt = (window.performance && performance.now) ? performance.now() : Date.now();
+            }, true);
+
+            // ====== АГРЕССИВНЫЙ ENFORCEMENT (последняя линия обороны) ======
+            // Раз в 30мс проверяем инвариант singleton-а:
+            //   • Если играет наш _player → ВСЕ остальные <audio>/<video>
+            //     паузим + currentTime=0, suspend-им все чужие AudioContext,
+            //     убиваем _activeBufferSource. Гарантия: пока играет dropdown,
+            //     ничего другое звучать не может.
+            //   • Если играют несколько НЕ-наших audio → оставляем самое
+            //     свежее (по __ttsStartedAt), остальные глушим.
+            try {
+                if (window.__ttsAudioPollTimer) clearInterval(window.__ttsAudioPollTimer);
+                window.__ttsAudioPollTimer = setInterval(function() {
+                    const player = mgr._player;
+                    const playerLive = player && !player.paused && !player.ended;
+
+                    if (playerLive) {
+                        // Наш плеер играет → никто другой не имеет права играть.
+                        document.querySelectorAll('audio, video').forEach(function(el) {
+                            if (el === player) return;
+                            if (!el.paused) {
+                                try { el.pause(); el.currentTime = 0; } catch(_) {}
+                            }
+                        });
+                        if (window.__ttsAudioContexts) {
+                            window.__ttsAudioContexts.forEach(function(ctx) {
+                                if (ctx && ctx.state === 'running' && typeof ctx.suspend === 'function') {
+                                    try { ctx.suspend(); } catch(_) {}
+                                }
+                            });
+                        }
+                        if (mgr._activeBufferSource) {
+                            try { mgr._activeBufferSource.stop(); } catch(_) {}
+                            mgr._activeBufferSource = null;
+                        }
+                        return;
+                    }
+
+                    // Наш плеер молчит. Среди чужих оставляем самое свежее.
+                    const live = [];
+                    document.querySelectorAll('audio, video').forEach(function(el) {
+                        if (!el.paused && !el.ended && el.readyState > 0) live.push(el);
+                    });
+                    if (live.length <= 1) return;
+                    live.sort(function(a, b) {
+                        return (b.__ttsStartedAt || 0) - (a.__ttsStartedAt || 0);
+                    });
+                    for (let i = 1; i < live.length; i++) {
+                        try { live[i].pause(); live[i].currentTime = 0; } catch(_) {}
+                    }
+                }, 30);
+            } catch(_) {}
+
+            // Обратно-совместимый alias на старое имя, чтобы внешний код,
+            // ещё ссылающийся на __ttsAudioBus, не падал. Минимальный shim.
+            window.__ttsAudioBus = {
+                stopAll: function() { mgr.stop(); },
+                claim:   function(t) { mgr._takeOver(nearbyAudio(t) || t); }
+            };
         }
     } catch (e) {
-        try { console.error('[audio-mutex install failed]', e); } catch(_) {}
+        try { console.error('[audio manager install failed]', e); } catch(_) {}
     }
 
     try {
@@ -245,7 +657,21 @@ _global_js = """
                         } else if (d.msg === 'process_starts') {
                             voiceLog('▶ генерация началась', 'gen');
                         } else if (d.msg === 'process_generating') {
-                            voiceLog('⚙ модель работает...', 'gen');
+                            // Стримящийся output из yield: показываем реальные строки.
+                            let printed = false;
+                            try {
+                                if (d.output && Array.isArray(d.output.data)) {
+                                    d.output.data.forEach(v => {
+                                        if (typeof v === 'string' && v.trim()) {
+                                            const lvl = v.indexOf('❌') !== -1 ? 'err'
+                                                      : (v.indexOf('✓') !== -1 ? 'done' : 'gen');
+                                            voiceLog('⚙ ' + v.slice(0, 200), lvl);
+                                            printed = true;
+                                        }
+                                    });
+                                }
+                            } catch (e) {}
+                            if (!printed) voiceLog('⚙ модель работает...', 'gen');
                         } else if (d.msg === 'progress' && Array.isArray(d.progress_data)) {
                             d.progress_data.forEach(p => {
                                 let pct = '';
@@ -301,21 +727,13 @@ _global_js = """
         window.EventSource = Wrapped;
     }
 
-    // -------- один audio за раз + стоп при смене вкладки --------
-    document.addEventListener('play', (e) => {
-        const t = e.target;
-        if (!t || t.tagName !== 'AUDIO') return;
-        document.querySelectorAll('audio').forEach(a => {
-            if (a !== t && !a.paused) a.pause();
-        });
-    }, true);
-
+    // -------- стоп при смене вкладки --------
     const wireTabs = () => {
         document.querySelectorAll('.tab-nav button').forEach(b => {
             if (b.__ttsWired) return;
             b.__ttsWired = true;
             b.addEventListener('click', () => {
-                document.querySelectorAll('audio').forEach(a => a.pause());
+                if (window.__ttsAudio) window.__ttsAudio.stop();
             });
         });
     };
