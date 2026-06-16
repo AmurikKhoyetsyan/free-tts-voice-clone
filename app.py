@@ -2,6 +2,7 @@ import gradio as gr
 from asyncio.proactor_events import _ProactorBasePipeTransport
 
 from core.voice_manager import voices_dropdown, VOICES_DIR
+from core.audio import OUTPUT_DIR
 from ui.windows_tab import build as build_windows
 from ui.cloning_tab import build as build_cloning
 from ui.my_voices_tab import (
@@ -776,4 +777,4 @@ with gr.Blocks(title="TTS — Синтез речи", theme=gr.themes.Soft(), cs
     app.load(fn=None, inputs=None, outputs=None, js=INJECT_OPTIONS_PLAY_JS)
 
 if __name__ == "__main__":
-    app.launch(inbrowser=True, allowed_paths=[VOICES_DIR])
+    app.launch(inbrowser=True, allowed_paths=[VOICES_DIR, OUTPUT_DIR])

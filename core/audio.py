@@ -1,7 +1,12 @@
 import os
 import time
-import tempfile
 import soundfile as sf
+
+OUTPUT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ".output_audio",
+)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def wav_to_numpy(path):
@@ -13,6 +18,6 @@ def wav_to_numpy(path):
 
 def save_named_audio(sr, data):
     dt = time.strftime('%Y-%m-%d_%H-%M-%S')
-    path = os.path.join(tempfile.gettempdir(), f"audio-{dt}.wav")
+    path = os.path.join(OUTPUT_DIR, f"audio-{dt}.wav")
     sf.write(path, data, sr)
     return path
