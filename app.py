@@ -205,6 +205,40 @@ footer { display: none !important; }
 #__voiceLog .row.gen   { color: #fbbf24; }
 #__voiceLog .row.done  { color: #34d399; }
 #__voiceLog .row.err   { color: #f87171; }
+
+/* ---- лоадер на audio-компоненте «Результат» ---- */
+.js-audio-loader { position: relative; }
+body.tts-generating .js-audio-loader > .wrap,
+body.tts-generating .js-audio-loader > .component-wrap,
+body.tts-generating .js-audio-loader { overflow: hidden; }
+body.tts-generating .js-audio-loader::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(15,15,20,0.55);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    border-radius: inherit;
+    z-index: 100;
+    pointer-events: none;
+}
+body.tts-generating .js-audio-loader::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    margin: -22px 0 0 -22px;
+    width: 44px;
+    height: 44px;
+    border: 4px solid rgba(255,255,255,0.15);
+    border-top-color: #6366f1;
+    border-right-color: #34d399;
+    border-radius: 50%;
+    animation: __ttsSpin 0.85s linear infinite;
+    z-index: 101;
+    pointer-events: none;
+}
+@keyframes __ttsSpin { to { transform: rotate(360deg); } }
 """
 
 # Один audio за раз + стоп при смене вкладки + глобальный логгер активности.
@@ -754,6 +788,7 @@ _global_js = """
             tgl.classList.add('open');
         }
         panel.classList.remove('idle');
+        document.body.classList.add('tts-generating');
         setBarColor(null);
         $ps.text.textContent  = label || 'Генерация...';
         $ps.pct.textContent   = '0%';
@@ -786,6 +821,7 @@ _global_js = """
         if (!progState.active && !ok) return;
         const elapsed = ((performance.now() - progState.started) / 1000).toFixed(1);
         progState.active = false;
+        document.body.classList.remove('tts-generating');
         setBarColor(ok ? 'done' : 'err');
         $ps.fill.style.width = '100%';
         $ps.pct.textContent  = ok ? '100%' : '—';

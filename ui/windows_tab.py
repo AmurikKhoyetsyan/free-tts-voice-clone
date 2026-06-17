@@ -10,21 +10,19 @@ _STOP_ALL_JS = (
 )
 
 
-def _synthesize(text, voice, rate, vol, progress=gr.Progress()):
+def _synthesize(text, voice, rate, vol):
     print(f"[windows_tab] _synthesize CALLED text_len={len(text or '')} voice={voice!r}", flush=True)
     if not voice:
         msg = "❌ Выберите голос из списка"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
     if not text or not text.strip():
         msg = "❌ Введите текст для синтеза"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
-    yield from stream(_core_synthesize, (text, voice, rate, vol), progress)
+    yield from stream(_core_synthesize, (text, voice, rate, vol))
 
 
 def build():
@@ -39,7 +37,7 @@ def build():
                     vol  = gr.Slider(0, 100, value=90, step=5, label="Громкость (%)")
                 btn = gr.Button("Синтезировать", variant="primary", size="lg")
             with gr.Column(scale=2):
-                audio  = gr.Audio(label="Результат")
+                audio  = gr.Audio(label="Результат", elem_classes=["js-audio-loader"])
                 status = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         btn.click(fn=_synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=_STOP_ALL_JS)

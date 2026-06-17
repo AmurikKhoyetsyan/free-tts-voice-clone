@@ -11,21 +11,19 @@ _STOP_ALL_JS = (
 )
 
 
-def _synthesize(text, audio_in, lang, progress=gr.Progress()):
+def _synthesize(text, audio_in, lang):
     print(f"[cloning_tab] _synthesize CALLED text_len={len(text or '')} audio={audio_in!r}", flush=True)
     if audio_in is None:
         msg = "❌ Загрузите аудио образец голоса (10–30 сек)"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
     if not text or not text.strip():
         msg = "❌ Введите текст для синтеза"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
-    yield from stream(_core_synthesize, (text, audio_in, lang), progress)
+    yield from stream(_core_synthesize, (text, audio_in, lang))
 
 
 def build():
@@ -42,7 +40,7 @@ def build():
                 lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык текста")
                 btn  = gr.Button("Клонировать и синтезировать", variant="primary", size="lg")
             with gr.Column(scale=2):
-                audio_out = gr.Audio(label="Результат")
+                audio_out = gr.Audio(label="Результат", elem_classes=["js-audio-loader"])
                 status    = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         save_btn.click(fn=save_voice, inputs=[audio_in, save_name], outputs=[status, gr.State()])

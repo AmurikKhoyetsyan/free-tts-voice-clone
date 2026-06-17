@@ -6,14 +6,18 @@
 - Worker пишет события в queue.Queue (thread-safe).
 - Главный поток (генератор) делает q.get() — БЛОКИРУЕТ нить до события, без
   sleep-полл-цикла. Каждое событие → yield в Gradio.
+
+Прогресс отдаём ТОЛЬКО как текст в status-Textbox. gr.Progress() намеренно
+не используем — он рисует свою progress-bar поверх output-компонентов и
+перекрывает status-текст и audio-плеер. Лоадер на audio-компоненте теперь
+рисует наш собственный CSS-overlay (см. app.py: body.tts-generating).
 """
-import sys
 import threading
 import traceback
 from queue import Queue
 
 
-def stream(core_fn, args, progress):
+def stream(core_fn, args):
     """Запускает core_fn(*args, progress=cb) в фоне и yield-ит прогресс.
 
     Yields:
@@ -45,7 +49,6 @@ def stream(core_fn, args, progress):
     t.start()
 
     # Первый кадр — пока worker раскручивается.
-    progress(0.0, desc="Запуск")
     yield None, "[  0%] Запуск синтеза..."
 
     while True:
@@ -53,10 +56,6 @@ def stream(core_fn, args, progress):
         if msg[0] == 'done':
             break
         _, value, desc = msg
-        try:
-            progress(value, desc=desc)
-        except Exception as e:
-            print(f"[stream] progress() failed: {e}", file=sys.stderr, flush=True)
         yield None, f"[{int(value * 100):3d}%] {desc}"
 
     yield holder['audio'], holder['status']

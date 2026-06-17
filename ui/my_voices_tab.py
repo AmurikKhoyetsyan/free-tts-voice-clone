@@ -10,28 +10,25 @@ from core.voice_manager import (
 from ui.progress_stream import stream
 
 
-def _synthesize(voice_name, text, language_label, progress=gr.Progress()):
+def _synthesize(voice_name, text, language_label):
     print(f"[my_voices_tab] _synthesize CALLED voice={voice_name!r} text_len={len(text or '')}", flush=True)
     if not voice_name:
         msg = "❌ Выберите голос из списка"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
     if not text or not text.strip():
         msg = "❌ Введите текст для синтеза"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
     audio_path = load_voice(voice_name)
     if audio_path is None:
         msg = f"❌ Файл голоса «{voice_name}» не найден"
         gr.Warning(msg)
-        progress(1.0, desc=msg)
         yield None, msg
         return
-    yield from stream(xtts_synthesize, (text, audio_path, language_label), progress)
+    yield from stream(xtts_synthesize, (text, audio_path, language_label))
 
 
 def _voice_urls_json():
@@ -337,7 +334,7 @@ def build():
                 lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык")
                 btn  = gr.Button("Синтезировать", variant="primary", size="lg")
             with gr.Column(scale=2):
-                audio  = gr.Audio(label="Результат")
+                audio  = gr.Audio(label="Результат", elem_classes=["js-audio-loader"])
                 status = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         voice.change(
