@@ -57,7 +57,9 @@ footer { display: none !important; }
     bottom: 8px;
     z-index: 1000000;
     width: 340px;
-    height: 160px;
+    height: 220px;
+    min-height: 140px;
+    max-height: 90vh;
     background: rgba(15,15,20,0.94);
     color: #f3f4f6;
     font: 11px ui-monospace, "JetBrains Mono", Consolas, monospace;
@@ -67,6 +69,12 @@ footer { display: none !important; }
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+    transition: box-shadow .15s ease;
+}
+#__voiceLog.dragging {
+    box-shadow: 0 14px 40px rgba(0,0,0,0.7);
+    transition: none;
+    user-select: none;
 }
 #__voiceLog .hdr {
     display: flex;
@@ -76,7 +84,95 @@ footer { display: none !important; }
     background: rgba(255,255,255,0.05);
     border-bottom: 1px solid rgba(255,255,255,0.08);
     flex: 0 0 auto;
+    cursor: move;
+    user-select: none;
 }
+#__voiceLog .hdr.grabbing { cursor: grabbing; }
+#__voiceLog .progress-section {
+    padding: 7px 9px 8px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    flex: 0 0 auto;
+}
+#__voiceLog.idle .progress-section { display: none; }
+#__voiceLog .ps-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 5px;
+    gap: 8px;
+}
+#__voiceLog .ps-text {
+    color: #fbbf24;
+    font-weight: 600;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#__voiceLog .ps-pct {
+    color: #f3f4f6;
+    font-weight: 700;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+}
+#__voiceLog .ps-bar {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+#__voiceLog .ps-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #6366f1, #34d399);
+    border-radius: 3px;
+    transition: width .25s ease;
+}
+#__voiceLog .ps-fill.err {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+#__voiceLog .ps-fill.done {
+    background: linear-gradient(90deg, #10b981, #34d399);
+}
+#__voiceLog .ps-meta {
+    margin-top: 5px;
+    display: flex;
+    justify-content: space-between;
+    color: rgba(243,244,246,0.55);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+#__voiceLog .resize-handle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 8px;
+    cursor: ns-resize;
+    background: transparent;
+    z-index: 10;
+}
+#__voiceLog .resize-handle::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 2px;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.18);
+    transition: background .15s ease;
+}
+#__voiceLog .resize-handle:hover::after,
+#__voiceLog.resizing .resize-handle::after {
+    background: rgba(99,102,241,0.75);
+}
+#__voiceLog.resizing { user-select: none; }
 #__voiceLog .title { flex: 1; font-weight: 600; font-size: 11px; letter-spacing: .3px; }
 #__voiceLog .hdr button {
     background: transparent;
@@ -582,14 +678,208 @@ _global_js = """
     const panel = document.createElement('div');
     panel.id = '__voiceLog';
     panel.style.display = 'flex';
+    panel.classList.add('idle');
     panel.innerHTML = '<div class="hdr">'
         + '<span class="title">Активность</span>'
         + '<button class="clear" type="button" title="Очистить">⌫</button>'
         + '<button class="close" type="button" title="Скрыть">×</button>'
-        + '</div><div class="body"></div>';
+        + '</div>'
+        + '<div class="progress-section">'
+        +   '<div class="ps-head">'
+        +     '<span class="ps-text">Готово к работе</span>'
+        +     '<span class="ps-pct">0%</span>'
+        +   '</div>'
+        +   '<div class="ps-bar"><div class="ps-fill"></div></div>'
+        +   '<div class="ps-meta"><span class="ps-stage"></span><span class="ps-eta"></span></div>'
+        + '</div>'
+        + '<div class="body"></div>'
+        + '<div class="resize-handle" title="Потяните, чтобы изменить высоту"></div>';
     document.body.appendChild(panel);
     const body = panel.querySelector('.body');
     tgl.classList.add('open');
+
+    // ---- restore position/size from session ----
+    const POS_KEY = '__voiceLog_pos_v1';
+    const SIZE_KEY = '__voiceLog_size_v1';
+    try {
+        const pos = JSON.parse(sessionStorage.getItem(POS_KEY) || 'null');
+        if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) {
+            const maxLeft = Math.max(0, window.innerWidth  - 80);
+            const maxTop  = Math.max(0, window.innerHeight - 60);
+            panel.style.right  = 'auto';
+            panel.style.bottom = 'auto';
+            panel.style.left = Math.min(pos.left, maxLeft) + 'px';
+            panel.style.top  = Math.min(pos.top,  maxTop)  + 'px';
+        }
+        const size = JSON.parse(sessionStorage.getItem(SIZE_KEY) || 'null');
+        if (size && Number.isFinite(size.height)) {
+            const h = Math.max(140, Math.min(window.innerHeight * 0.9, size.height));
+            panel.style.height = h + 'px';
+        }
+    } catch (_) {}
+
+    // ---- progress UI ----
+    const $ps = {
+        sect:  panel.querySelector('.progress-section'),
+        text:  panel.querySelector('.ps-text'),
+        pct:   panel.querySelector('.ps-pct'),
+        fill:  panel.querySelector('.ps-fill'),
+        stage: panel.querySelector('.ps-stage'),
+        eta:   panel.querySelector('.ps-eta'),
+    };
+    const fmtEta = (sec) => {
+        if (!isFinite(sec) || sec <= 0) return '';
+        if (sec < 1)  return '~<1с';
+        if (sec < 60) return '~' + Math.round(sec) + 'с';
+        const m = Math.floor(sec / 60);
+        const s = Math.round(sec % 60);
+        return '~' + m + 'м ' + (s < 10 ? '0' + s : s) + 'с';
+    };
+    const progState = { active: false, started: 0, lastPct: 0, hideTimer: null };
+
+    const setBarColor = (cls) => {
+        $ps.fill.classList.remove('err', 'done');
+        if (cls) $ps.fill.classList.add(cls);
+    };
+
+    const startProgress = (label) => {
+        if (progState.hideTimer) { clearTimeout(progState.hideTimer); progState.hideTimer = null; }
+        progState.active = true;
+        progState.started = performance.now();
+        progState.lastPct = 0;
+        panel.classList.remove('idle');
+        setBarColor(null);
+        $ps.text.textContent  = label || 'Генерация...';
+        $ps.pct.textContent   = '0%';
+        $ps.fill.style.width  = '0%';
+        $ps.stage.textContent = 'старт';
+        $ps.eta.textContent   = '';
+    };
+
+    const updateProgress = (frac, desc) => {
+        if (!progState.active) startProgress(desc);
+        const f   = Math.max(0, Math.min(1, frac));
+        const pct = Math.round(f * 100);
+        progState.lastPct = pct;
+        $ps.pct.textContent  = pct + '%';
+        $ps.fill.style.width = pct + '%';
+        if (desc) {
+            $ps.text.textContent  = desc.slice(0, 60);
+            $ps.stage.textContent = (desc.length > 60 ? desc.slice(0, 60) + '…' : desc);
+        }
+        const elapsedSec = (performance.now() - progState.started) / 1000;
+        if (f >= 0.02 && f < 0.99) {
+            const total = elapsedSec / f;
+            $ps.eta.textContent = 'осталось ' + fmtEta(total - elapsedSec);
+        } else {
+            $ps.eta.textContent = elapsedSec.toFixed(1) + 'с';
+        }
+    };
+
+    const finishProgress = (ok) => {
+        if (!progState.active && !ok) return;
+        const elapsed = ((performance.now() - progState.started) / 1000).toFixed(1);
+        progState.active = false;
+        setBarColor(ok ? 'done' : 'err');
+        $ps.fill.style.width = '100%';
+        $ps.pct.textContent  = ok ? '100%' : '—';
+        $ps.text.textContent  = ok ? '✓ Готово' : '✗ Ошибка';
+        $ps.stage.textContent = 'всего ' + elapsed + 'с';
+        $ps.eta.textContent   = '';
+        if (progState.hideTimer) clearTimeout(progState.hideTimer);
+        progState.hideTimer = setTimeout(() => {
+            if (!progState.active) {
+                panel.classList.add('idle');
+                setBarColor(null);
+                $ps.fill.style.width = '0%';
+            }
+        }, 5000);
+    };
+
+    // Expose so other tabs/handlers can drive it.
+    window.__voiceProgress = {
+        start: startProgress, update: updateProgress, finish: finishProgress,
+    };
+
+    // ---- drag (mouse) ----
+    const hdr = panel.querySelector('.hdr');
+    let drag = null;
+    hdr.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button')) return;
+        const r = panel.getBoundingClientRect();
+        drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+        panel.style.right  = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.left = r.left + 'px';
+        panel.style.top  = r.top  + 'px';
+        panel.classList.add('dragging');
+        hdr.classList.add('grabbing');
+        e.preventDefault();
+    });
+
+    // ---- resize (vertical) ----
+    const rh = panel.querySelector('.resize-handle');
+    let resize = null;
+    rh.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        resize = { startY: e.clientY, startH: panel.offsetHeight };
+        panel.classList.add('resizing');
+        e.preventDefault();
+        e.stopPropagation();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (drag) {
+            const w = panel.offsetWidth;
+            const h = panel.offsetHeight;
+            let x = e.clientX - drag.dx;
+            let y = e.clientY - drag.dy;
+            x = Math.max(0, Math.min(window.innerWidth  - w, x));
+            y = Math.max(0, Math.min(window.innerHeight - h, y));
+            panel.style.left = x + 'px';
+            panel.style.top  = y + 'px';
+        } else if (resize) {
+            const dh = e.clientY - resize.startY;
+            const h  = Math.max(140, Math.min(window.innerHeight * 0.9, resize.startH + dh));
+            panel.style.height = h + 'px';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (drag) {
+            drag = null;
+            panel.classList.remove('dragging');
+            hdr.classList.remove('grabbing');
+            try {
+                sessionStorage.setItem(POS_KEY, JSON.stringify({
+                    left: parseInt(panel.style.left, 10) || 0,
+                    top:  parseInt(panel.style.top,  10) || 0,
+                }));
+            } catch (_) {}
+        }
+        if (resize) {
+            resize = null;
+            panel.classList.remove('resizing');
+            try {
+                sessionStorage.setItem(SIZE_KEY, JSON.stringify({
+                    height: panel.offsetHeight,
+                }));
+            } catch (_) {}
+        }
+    });
+
+    // Keep the panel on-screen if the window is resized.
+    window.addEventListener('resize', () => {
+        if (panel.style.left === '' && panel.style.top === '') return;
+        const r = panel.getBoundingClientRect();
+        const w = panel.offsetWidth;
+        const h = panel.offsetHeight;
+        const x = Math.max(0, Math.min(window.innerWidth  - w, r.left));
+        const y = Math.max(0, Math.min(window.innerHeight - h, r.top));
+        panel.style.left = x + 'px';
+        panel.style.top  = y + 'px';
+    });
 
     const voiceLog = (msg, level) => {
         if (msg == null) return;
@@ -657,9 +947,12 @@ _global_js = """
                             voiceLog('очередь: ранг ' + (d.rank || 0) + eta, 'gen');
                         } else if (d.msg === 'process_starts') {
                             voiceLog('▶ генерация началась', 'gen');
+                            if (window.__voiceProgress) window.__voiceProgress.start('Запуск генерации...');
                         } else if (d.msg === 'process_generating') {
                             // Стримящийся output из yield: показываем реальные строки.
                             let printed = false;
+                            let lastDesc = null;
+                            let lastPct  = null;
                             try {
                                 if (d.output && Array.isArray(d.output.data)) {
                                     d.output.data.forEach(v => {
@@ -668,31 +961,44 @@ _global_js = """
                                                       : (v.indexOf('✓') !== -1 ? 'done' : 'gen');
                                             voiceLog('⚙ ' + v.slice(0, 200), lvl);
                                             printed = true;
+                                            // Парсим "[ NN%] описание" из stream() — это
+                                            // даёт нам fraction и desc для прогресс-бара.
+                                            const m = v.match(/^\\[\\s*(\\d+)%\\]\\s*(.*)$/);
+                                            if (m) {
+                                                lastPct  = parseInt(m[1], 10) / 100;
+                                                lastDesc = m[2] || '';
+                                            }
                                         }
                                     });
                                 }
                             } catch (e) {}
                             if (!printed) voiceLog('⚙ модель работает...', 'gen');
+                            if (lastPct != null && window.__voiceProgress) {
+                                window.__voiceProgress.update(lastPct, lastDesc);
+                            }
                         } else if (d.msg === 'progress' && Array.isArray(d.progress_data)) {
                             d.progress_data.forEach(p => {
-                                let pct = '';
+                                let frac = null;
+                                let pct  = '';
                                 if (p.index != null && p.length) {
-                                    pct = ' ' + p.index + '/' + p.length
-                                        + ' (' + Math.round(100 * p.index / p.length) + '%)';
+                                    frac = p.index / p.length;
+                                    pct  = ' ' + p.index + '/' + p.length
+                                        + ' (' + Math.round(100 * frac) + '%)';
                                 } else if (p.progress != null) {
-                                    pct = ' ' + Math.round(p.progress * 100) + '%';
+                                    frac = Number(p.progress);
+                                    pct  = ' ' + Math.round(frac * 100) + '%';
                                 }
                                 const desc = String(p.desc || 'progress');
-                                // Авто-распознавание ошибок по маркеру в desc.
                                 let level = 'gen';
                                 if (desc.includes('❌') || /ошибк/i.test(desc)) level = 'err';
                                 else if (desc.includes('✓') || /готов/i.test(desc)) level = 'done';
                                 voiceLog('… ' + desc + pct, level);
+                                if (frac != null && window.__voiceProgress) {
+                                    window.__voiceProgress.update(frac, desc);
+                                }
                             });
                         } else if (d.msg === 'process_completed') {
                             const ok = d.success !== false;
-                            // Проверяем выходные данные — статус может быть "❌ ..." при
-                            // мягкой валидации, тогда трактуем как ошибку.
                             let outErr = false;
                             try {
                                 if (d.output && Array.isArray(d.output.data)) {
@@ -704,7 +1010,6 @@ _global_js = """
                             const success = ok && !outErr;
                             voiceLog(success ? '✓ генерация готова' : '✗ генерация прервана', success ? 'done' : 'err');
                             if (d.output && d.output.error) voiceLog('ошибка: ' + d.output.error, 'err');
-                            // Если в data есть строки — выведем последнюю (это обычно статус).
                             try {
                                 if (d.output && Array.isArray(d.output.data)) {
                                     d.output.data.forEach(v => {
@@ -715,6 +1020,7 @@ _global_js = """
                                     });
                                 }
                             } catch (e) {}
+                            if (window.__voiceProgress) window.__voiceProgress.finish(success);
                         }
                     } catch (e) {}
                 });
