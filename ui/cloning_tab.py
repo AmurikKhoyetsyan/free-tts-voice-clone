@@ -43,7 +43,7 @@ def build():
                 btn  = gr.Button("Клонировать и синтезировать", variant="primary", size="lg")
             with gr.Column(scale=2):
                 audio_out = gr.Audio(label="Результат")
-                status    = gr.Textbox(label="Статус", interactive=False)
+                status    = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         save_btn.click(fn=save_voice, inputs=[audio_in, save_name], outputs=[status, gr.State()])
         btn.click(fn=_synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status], js=_STOP_ALL_JS)

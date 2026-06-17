@@ -747,6 +747,12 @@ _global_js = """
         progState.active = true;
         progState.started = performance.now();
         progState.lastPct = 0;
+        // Авто-раскрываем панель если она была свёрнута — без этого юзер
+        // не увидит прогресс.
+        if (panel.style.display === 'none') {
+            panel.style.display = 'flex';
+            tgl.classList.add('open');
+        }
         panel.classList.remove('idle');
         setBarColor(null);
         $ps.text.textContent  = label || 'Генерация...';
@@ -1033,6 +1039,51 @@ _global_js = """
         Wrapped.prototype = OrigES.prototype;
         window.EventSource = Wrapped;
     }
+
+    // -------- polling status-textbox для real-time прогресса --------
+    // В Gradio 4.x перехват EventSource не всегда срабатывает (зависит от
+    // транспорта: SSE / fetch+ReadableStream / websocket). Поэтому основной
+    // источник прогресса — прямое чтение DOM: streaming-генератор stream()
+    // обновляет <textarea> статуса значениями вида "[ NN%] описание", их
+    // достаточно опрашивать раз в 200мс.
+    const _statusState = new Map(); // textarea → {lastValue, lastDesc}
+    const _scanStatus = () => {
+        document.querySelectorAll('.js-status-poll textarea, .js-status-poll input').forEach((el) => {
+            const v  = String(el.value || '');
+            const st = _statusState.get(el) || { lastValue: '', lastDesc: '' };
+            if (st.lastValue === v) return;
+            st.lastValue = v;
+            _statusState.set(el, st);
+
+            if (!v.trim()) return;
+
+            const m = v.match(/^\\[\\s*(\\d+)%\\]\\s*(.*)$/);
+            if (m) {
+                const frac = parseInt(m[1], 10) / 100;
+                const desc = (m[2] || '').trim();
+                if (window.__voiceProgress) window.__voiceProgress.update(frac, desc);
+                // Логируем только смену стадии (по тексту), иначе на каждое
+                // слово в Windows-TTS получим спам.
+                if (desc && desc !== st.lastDesc) {
+                    st.lastDesc = desc;
+                    let level = 'gen';
+                    if (/❌|ошибк/i.test(desc))      level = 'err';
+                    else if (/✓|готов/i.test(desc)) level = 'done';
+                    voiceLog('⚙ ' + desc + ' (' + Math.round(frac * 100) + '%)', level);
+                }
+            } else {
+                // Финальный статус без процента: "✓ Готово ..." / "❌ Ошибка ..."
+                const isDone = v.indexOf('✓') !== -1;
+                const isErr  = v.indexOf('❌') !== -1;
+                if (isDone || isErr) {
+                    voiceLog(v.slice(0, 200), isDone ? 'done' : 'err');
+                    if (window.__voiceProgress) window.__voiceProgress.finish(isDone);
+                    st.lastDesc = '';
+                }
+            }
+        });
+    };
+    setInterval(_scanStatus, 200);
 
     // -------- стоп при смене вкладки --------
     const wireTabs = () => {

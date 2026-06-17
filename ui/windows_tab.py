@@ -40,6 +40,6 @@ def build():
                 btn = gr.Button("Синтезировать", variant="primary", size="lg")
             with gr.Column(scale=2):
                 audio  = gr.Audio(label="Результат")
-                status = gr.Textbox(label="Статус", interactive=False)
+                status = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         btn.click(fn=_synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=_STOP_ALL_JS)

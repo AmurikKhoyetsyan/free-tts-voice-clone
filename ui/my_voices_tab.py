@@ -338,7 +338,7 @@ def build():
                 btn  = gr.Button("Синтезировать", variant="primary", size="lg")
             with gr.Column(scale=2):
                 audio  = gr.Audio(label="Результат")
-                status = gr.Textbox(label="Статус", interactive=False)
+                status = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         voice.change(
             fn=_on_voice_change, inputs=[voice], outputs=[rename_input, preview]
