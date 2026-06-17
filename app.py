@@ -206,39 +206,53 @@ footer { display: none !important; }
 #__voiceLog .row.done  { color: #34d399; }
 #__voiceLog .row.err   { color: #f87171; }
 
-/* ---- лоадер на audio-компоненте «Результат» ---- */
+/* ---- equalizer-лоадер ---- */
 .js-audio-loader { position: relative; }
-body.tts-generating .js-audio-loader > .wrap,
-body.tts-generating .js-audio-loader > .component-wrap,
-body.tts-generating .js-audio-loader { overflow: hidden; }
-body.tts-generating .js-audio-loader::after {
-    content: '';
+.tts-eq-loader {
     position: absolute;
     inset: 0;
-    background: rgba(15,15,20,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.55);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
     border-radius: inherit;
-    z-index: 100;
+    z-index: 999;
     pointer-events: none;
+    overflow: hidden;
 }
-body.tts-generating .js-audio-loader::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    margin: -22px 0 0 -22px;
-    width: 44px;
-    height: 44px;
-    border: 4px solid rgba(255,255,255,0.15);
-    border-top-color: #6366f1;
-    border-right-color: #34d399;
-    border-radius: 50%;
-    animation: __ttsSpin 0.85s linear infinite;
-    z-index: 101;
-    pointer-events: none;
+@media (prefers-color-scheme: dark) {
+    .tts-eq-loader { background: rgba(30,32,42,0.55); }
 }
-@keyframes __ttsSpin { to { transform: rotate(360deg); } }
+.tts-eq-bars {
+    height: 26px;
+    display: flex;
+    align-items: flex-end;
+}
+.tts-eq-cell { padding: 1px; }
+.tts-eq-bar {
+    width: 4px;
+    background: var(--eq-bg, #6366f1);
+    box-shadow: 0 0 6px 1px var(--eq-bg, #6366f1);
+    animation: tts-eq-anim 500ms ease-in-out infinite;
+    animation-delay: calc(var(--i) * -100ms);
+    border-radius: 1px;
+}
+@keyframes tts-eq-anim {
+    from { height: calc(var(--w) * 5px); }
+    50%  { height: 22px; }
+    to   { height: calc(var(--w) * 5px); }
+}
+.tts-eq-loader.err .tts-eq-bar { --eq-bg: #ef4444; }
+.tts-eq-loader.done .tts-eq-bar { --eq-bg: #34d399; }
+/* Глушим все встроенные индикаторы Gradio */
+.progress-text, .eta-bar, .loading-status .progress,
+.generating > .wrap > .loading, .svelte-1ipelgc .progress-bar,
+.wrap > .loading, .loader, .pending,
+[class*="loading-indicator"], [class*="spinner"] { display: none !important; }
+/* Статус — никаких оверлеев */
+.js-status-poll .tts-eq-loader { display: none !important; }
 """
 
 # Один audio за раз + стоп при смене вкладки + глобальный логгер активности.
@@ -776,19 +790,82 @@ _global_js = """
         if (cls) $ps.fill.classList.add(cls);
     };
 
+    // ---- equalizer-loader ----
+    const EQ_STEPS = [
+        { w: 2, i: 1 }, { w: 1, i: 0 }, { w: 2, i: 1 },
+        { w: 1, i: 2 }, { w: 2, i: 1 }, { w: 1, i: 0 }, { w: 2, i: 2 },
+    ];
+    const ensureEqLoader = (host) => {
+        let ov = host.querySelector(':scope > .tts-eq-loader');
+        if (ov) return ov;
+        ov = document.createElement('div');
+        ov.className = 'tts-eq-loader';
+        const bars = document.createElement('div');
+        bars.className = 'tts-eq-bars';
+        EQ_STEPS.forEach(s => {
+            const cell = document.createElement('div');
+            cell.className = 'tts-eq-cell';
+            const bar = document.createElement('div');
+            bar.className = 'tts-eq-bar';
+            bar.style.setProperty('--w', String(s.w));
+            bar.style.setProperty('--i', String(s.i));
+            cell.appendChild(bar);
+            bars.appendChild(cell);
+        });
+        ov.appendChild(bars);
+        host.appendChild(ov);
+        return ov;
+    };
+
+    // Инжектим эквалайзер на любой Gradio-компонент в состоянии загрузки
+    const GRADIO_LOADING_SEL = '.generating, [aria-busy="true"]';
+    const shouldSkipHost = (host) => {
+        if (host.closest('.tts-eq-loader')) return true;
+        if (host.querySelector(':scope > .tts-eq-loader')) return true;
+        if (host.id === '__voiceLog' || host.closest('#__voiceLog')) return true;
+        // Пропускаем статус — в любом направлении по DOM
+        if (host.classList.contains('js-status-poll')) return true;
+        if (host.closest('.js-status-poll')) return true;
+        if (host.querySelector('.js-status-poll')) return true;
+        return false;
+    };
+    let _eqRefreshScheduled = false;
+    const refreshGradioLoaders = () => {
+        _eqRefreshScheduled = false;
+        document.querySelectorAll(GRADIO_LOADING_SEL).forEach(host => {
+            if (shouldSkipHost(host)) return;
+            const r = host.getBoundingClientRect();
+            if (r.width < 50 || r.height < 22) return;
+            if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+            ensureEqLoader(host);
+        });
+        document.querySelectorAll('.tts-eq-loader').forEach(ov => {
+            const host = ov.parentElement;
+            if (!host) return;
+            if (!host.matches(GRADIO_LOADING_SEL)) ov.remove();
+        });
+    };
+    const scheduleEqRefresh = () => {
+        if (_eqRefreshScheduled) return;
+        _eqRefreshScheduled = true;
+        requestAnimationFrame(refreshGradioLoaders);
+    };
+    new MutationObserver(scheduleEqRefresh).observe(document.body, {
+        subtree: true, childList: true,
+        attributes: true, attributeFilter: ['class', 'aria-busy'],
+    });
+    scheduleEqRefresh();
+
     const startProgress = (label) => {
         if (progState.hideTimer) { clearTimeout(progState.hideTimer); progState.hideTimer = null; }
         progState.active = true;
         progState.started = performance.now();
         progState.lastPct = 0;
-        // Авто-раскрываем панель если она была свёрнута — без этого юзер
-        // не увидит прогресс.
         if (panel.style.display === 'none') {
             panel.style.display = 'flex';
             tgl.classList.add('open');
         }
         panel.classList.remove('idle');
-        document.body.classList.add('tts-generating');
         setBarColor(null);
         $ps.text.textContent  = label || 'Генерация...';
         $ps.pct.textContent   = '0%';
@@ -821,7 +898,6 @@ _global_js = """
         if (!progState.active && !ok) return;
         const elapsed = ((performance.now() - progState.started) / 1000).toFixed(1);
         progState.active = false;
-        document.body.classList.remove('tts-generating');
         setBarColor(ok ? 'done' : 'err');
         $ps.fill.style.width = '100%';
         $ps.pct.textContent  = ok ? '100%' : '—';
