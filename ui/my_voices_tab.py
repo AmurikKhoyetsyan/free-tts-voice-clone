@@ -2,7 +2,7 @@ import json
 import os
 
 import gradio as gr
-from core.tts_xtts import synthesize as xtts_synthesize, LANGUAGES
+from services.tts_xtts import synthesize as xtts_synthesize, LANGUAGES
 from core.voice_manager import (
     load_voice, delete_voice, rename_voice, voices_dropdown,
     get_saved_voices, VOICES_DIR,

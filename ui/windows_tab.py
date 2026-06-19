@@ -1,5 +1,5 @@
 import gradio as gr
-from core.tts_windows import synthesize as _core_synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
+from services.tts_windows import synthesize as _core_synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
 from ui.progress_stream import stream
 
 _STOP_ALL_JS = (

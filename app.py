@@ -1197,6 +1197,55 @@ _global_js = """
     };
     setInterval(_scanStatus, 200);
 
+    // -------- сброс позиции на 0 при каждой новой генерации --------
+    const _resetToStart = (container) => {
+        const audio = container.querySelector('audio');
+        if (audio) {
+            try { audio.currentTime = 0; } catch(_) {}
+        }
+        // WaveSurfer: клик по самому началу waveform-а (x=1px)
+        setTimeout(() => {
+            const wave = container.querySelector('wave') ||
+                         container.querySelector('[class*="waveform"]') ||
+                         container.querySelector('.waveform');
+            if (!wave) return;
+            const rect = wave.getBoundingClientRect();
+            if (!rect.width) return;
+            wave.dispatchEvent(new MouseEvent('click', {
+                bubbles: true, cancelable: true,
+                clientX: rect.left + 1,
+                clientY: rect.top + rect.height / 2,
+            }));
+        }, 50);
+    };
+
+    const _wireReset = (container) => {
+        if (container.__ttsResetWired) return;
+        container.__ttsResetWired = true;
+
+        const wireAudio = (audio) => {
+            if (!audio || audio.__ttsResetWired) return;
+            audio.__ttsResetWired = true;
+            audio.addEventListener('loadstart', () => {
+                audio.addEventListener('canplay', () => _resetToStart(container), { once: true });
+            });
+        };
+
+        container.querySelectorAll('audio').forEach(wireAudio);
+        new MutationObserver(() => {
+            container.querySelectorAll('audio').forEach(wireAudio);
+        }).observe(container, { childList: true, subtree: true });
+    };
+
+    document.querySelectorAll('.js-audio-loader').forEach(_wireReset);
+    new MutationObserver(muts => {
+        muts.forEach(m => m.addedNodes && m.addedNodes.forEach(n => {
+            if (!n || n.nodeType !== 1) return;
+            if (n.classList && n.classList.contains('js-audio-loader')) _wireReset(n);
+            n.querySelectorAll && n.querySelectorAll('.js-audio-loader').forEach(_wireReset);
+        }));
+    }).observe(document.body, { childList: true, subtree: true });
+
     // -------- стоп при смене вкладки --------
     const wireTabs = () => {
         document.querySelectorAll('.tab-nav button').forEach(b => {

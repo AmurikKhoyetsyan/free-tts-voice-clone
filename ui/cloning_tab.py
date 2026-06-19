@@ -1,5 +1,5 @@
 import gradio as gr
-from core.tts_xtts import synthesize as _core_synthesize, check_status, LANGUAGES
+from services.tts_xtts import synthesize as _core_synthesize, check_status, LANGUAGES
 from core.voice_manager import save_voice
 from ui.progress_stream import stream
 

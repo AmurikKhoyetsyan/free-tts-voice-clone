@@ -3,7 +3,7 @@ import tempfile
 import os
 import traceback
 import pyttsx3
-from .audio import wav_to_numpy, save_named_audio
+from core.audio import wav_to_numpy, save_named_audio
 
 
 def _load_voices():
@@ -30,7 +30,6 @@ WIN_DEFAULT = next(
 
 
 def _emit(progress, value, desc):
-    """Отправить прогресс в UI (gr.Progress) и в stdout."""
     if progress is not None:
         try:
             progress(value, desc=desc)
@@ -71,7 +70,7 @@ def synthesize(text, voice_name, rate, volume, progress=None):
     def on_word(name, location, length):
         counter[0] += 1
         cur = min(counter[0], word_count)
-        pct = 0.10 + 0.75 * (cur / word_count)  # от 10% до 85%
+        pct = 0.10 + 0.75 * (cur / word_count)
         _emit(progress, pct, f"Синтез слова {cur}/{word_count}")
 
     engine.connect('started-word', on_word)
@@ -104,7 +103,5 @@ def synthesize(text, voice_name, rate, volume, progress=None):
 
     elapsed = time.time() - start_time
     _emit(progress, 1.0, f"Готово за {elapsed:.1f}с")
-    print(
-        f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True
-    )
+    print(f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True)
     return out, f"✓ Готово — {voice_name} ({elapsed:.1f}с)"

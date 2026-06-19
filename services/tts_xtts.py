@@ -2,7 +2,7 @@ import time
 import tempfile
 import os
 import traceback
-from .audio import wav_to_numpy, save_named_audio
+from core.audio import wav_to_numpy, save_named_audio
 
 LANGUAGES = {
     "Русский": "ru",
@@ -66,7 +66,6 @@ def check_status():
 
 
 def _emit(progress, value, desc):
-    """Отправить прогресс в UI (gr.Progress) и в stdout."""
     if progress is not None:
         try:
             progress(value, desc=desc)
@@ -133,7 +132,5 @@ def synthesize(text, speaker_audio, language_label, progress=None):
 
     elapsed = time.time() - start_time
     _emit(progress, 1.0, f"Готово за {elapsed:.1f}с")
-    print(
-        f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True
-    )
+    print(f"[{time.strftime('%H:%M:%S')}] Готово | время: {elapsed:.2f}с", flush=True)
     return out, f"✓ Готово — голос клонирован ({elapsed:.1f}с)"
