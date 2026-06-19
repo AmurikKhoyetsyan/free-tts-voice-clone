@@ -1,13 +1,7 @@
 import gradio as gr
 from services.tts_windows import synthesize as _core_synthesize, WIN_VOICE_NAMES, WIN_DEFAULT
 from ui.progress_stream import stream
-
-_STOP_ALL_JS = (
-    "(...args) => { "
-    "if (window.__ttsAudio) window.__ttsAudio.stop(); "
-    "else document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch(_) {} }); "
-    "return args; }"
-)
+from ui.constants import STOP_ALL_JS
 
 
 def _synthesize(text, voice, rate, vol):
@@ -40,4 +34,4 @@ def build():
                 audio  = gr.Audio(label="Результат", elem_classes=["js-audio-loader"])
                 status = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
-        btn.click(fn=_synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=_STOP_ALL_JS)
+        btn.click(fn=_synthesize, inputs=[text, voice, rate, vol], outputs=[audio, status], js=STOP_ALL_JS)

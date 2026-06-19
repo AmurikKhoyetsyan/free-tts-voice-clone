@@ -2,13 +2,7 @@ import gradio as gr
 from services.tts_xtts import synthesize as _core_synthesize, check_status, LANGUAGES
 from core.voice_manager import save_voice
 from ui.progress_stream import stream
-
-_STOP_ALL_JS = (
-    "(...args) => { "
-    "if (window.__ttsAudio) window.__ttsAudio.stop(); "
-    "else document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch(_) {} }); "
-    "return args; }"
-)
+from ui.constants import STOP_ALL_JS
 
 
 def _synthesize(text, audio_in, lang):
@@ -44,4 +38,4 @@ def build():
                 status    = gr.Textbox(label="Статус", interactive=False, elem_classes=["js-status-poll"])
 
         save_btn.click(fn=save_voice, inputs=[audio_in, save_name], outputs=[status, gr.State()])
-        btn.click(fn=_synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status], js=_STOP_ALL_JS)
+        btn.click(fn=_synthesize, inputs=[text, audio_in, lang], outputs=[audio_out, status], js=STOP_ALL_JS)
