@@ -1,4 +1,4 @@
-() => {
+(() => {
     if (window.__voiceOptInjectorInstalled) return;
     window.__voiceOptInjectorInstalled = true;
 
@@ -191,4 +191,4 @@
     observer = new MutationObserver(inject);
     observer.observe(document.body, { childList: true, subtree: true });
     inject();
-}
+})()

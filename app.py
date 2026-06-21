@@ -7,6 +7,7 @@ from ui.constants import _load_css, _load_js
 from ui.windows_tab import build as build_windows
 from ui.cloning_tab import build as build_cloning
 from ui.my_voices_tab import build as build_my_voices, _voice_urls_json
+from ui.history_tab import build as build_history
 
 # Suppress harmless Windows asyncio "connection forcibly closed" noise.
 _orig = _ProactorBasePipeTransport._call_connection_lost
@@ -21,12 +22,13 @@ _css = _load_css()
 _global_js = _load_js("global.js")
 
 
-with gr.Blocks(title="TTS — Синтез речи", theme=gr.themes.Soft(), css=_css, js=_global_js) as app:
+with gr.Blocks(title="TTS — Синтез речи") as app:
     gr.Markdown("# Синтез речи и клонирование голоса")
     with gr.Tabs():
         build_windows()
         build_cloning()
         sv_voice, sv_urls = build_my_voices()
+        build_history()
 
     # Обновляем список голосов и URL-карту при каждом открытии страницы
     app.load(fn=voices_dropdown, outputs=[sv_voice])
@@ -38,4 +40,5 @@ with gr.Blocks(title="TTS — Синтез речи", theme=gr.themes.Soft(), cs
     app.load(fn=None, inputs=None, outputs=None, js=_load_js("inject_options.js"))
 
 if __name__ == "__main__":
-    app.launch(inbrowser=True, allowed_paths=[VOICES_DIR, OUTPUT_DIR])
+    app.launch(inbrowser=True, allowed_paths=[VOICES_DIR, OUTPUT_DIR],
+               theme=gr.themes.Soft(), css=_css, js=_global_js)
