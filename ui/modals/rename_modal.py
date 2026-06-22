@@ -3,6 +3,7 @@ import json
 import gradio as gr
 
 import core.history_manager as hm
+from ui.components.history_list import render_list
 
 
 def build():
@@ -11,8 +12,6 @@ def build():
 
     Returns:
         (modal, rename_input, pending, save_btn, cancel_btn)
-
-    Must be called inside a gr.Blocks context.
     """
     with gr.Column(visible=False, elem_classes=["tts-modal-overlay"]) as modal:
         with gr.Column(elem_classes=["tts-modal-box"]):
@@ -38,13 +37,13 @@ def wire(modal, rename_input, pending, save_btn, cancel_btn,
         return gr.update(visible=True), gr.update(value=stem), filename
 
     def _do(filename, new_name):
-        html_list, audio_path, status, signal = hm.rename_file(filename, new_name)
+        audio_path, status, signal = hm.rename_file(filename, new_name)
         if signal:
             _, renamed = json.loads(signal)
             gr.Info(f"Переименовано: {filename} → {renamed}")
         elif status.startswith("❌"):
             gr.Warning(status[2:].strip())
-        return html_list, audio_path, status, signal
+        return render_list(), audio_path, status, signal
 
     trigger_btn.click(
         fn=_open,

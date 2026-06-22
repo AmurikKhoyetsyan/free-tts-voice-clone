@@ -1,6 +1,7 @@
 import gradio as gr
 
 import core.history_manager as hm
+from ui.components.history_list import render_list
 
 
 def build():
@@ -9,8 +10,6 @@ def build():
 
     Returns:
         (modal, text, pending, yes_btn, no_btn)
-
-    Must be called inside a gr.Blocks context.
     """
     with gr.Column(visible=False, elem_classes=["tts-modal-overlay"]) as modal:
         with gr.Column(elem_classes=["tts-modal-box"]):
@@ -39,12 +38,12 @@ def wire(modal, text, pending, yes_btn, no_btn,
         )
 
     def _do(filename):
-        html_list, status, signal = hm.delete_file(filename)
+        status, signal = hm.delete_file(filename)
         if signal:
             gr.Info(f"Удалено: {filename}")
         else:
             gr.Warning(status)
-        return html_list, None, status, signal
+        return render_list(), None, status, signal
 
     trigger_btn.click(
         fn=_open,

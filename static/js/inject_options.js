@@ -22,8 +22,9 @@
         try { return JSON.parse(ta.value); } catch (e) { log('urls parse fail'); return {}; }
     };
 
-    const PLAY_ICON = '▶';
-    const STOP_ICON = '⏹';
+    const _ic = window.__ttsIconSvg || {};
+    const PLAY_ICON = _ic.play  || '▶';
+    const STOP_ICON = _ic.pause || '⏹';
 
     // ВАЖНО: никакого собственного <audio> здесь больше нет. Воспроизведением
     // владеет window.__ttsAudio (Audio Manager singleton из app.py). Мы только
@@ -41,8 +42,11 @@
         document.querySelectorAll('.voice-opt-play').forEach(b => {
             const n = b.dataset.voiceName;
             const isThis = playingName !== null && n === playingName;
-            const wantIcon = isThis ? STOP_ICON : PLAY_ICON;
-            if (b.textContent !== wantIcon) b.textContent = wantIcon;
+            const wantState = isThis ? 'stop' : 'play';
+            if (b.dataset.state !== wantState) {
+                b.dataset.state = wantState;
+                b.innerHTML = isThis ? STOP_ICON : PLAY_ICON;
+            }
             if (b.classList.contains('playing') !== isThis) {
                 b.classList.toggle('playing', isThis);
             }
@@ -178,8 +182,11 @@
                 refreshed++;
             }
             const isPlayingThis = (playingName !== null) && (playingName === name);
-            const wantIcon = isPlayingThis ? STOP_ICON : PLAY_ICON;
-            if (btn.textContent !== wantIcon) btn.textContent = wantIcon;
+            const wantState = isPlayingThis ? 'stop' : 'play';
+            if (btn.dataset.state !== wantState) {
+                btn.dataset.state = wantState;
+                btn.innerHTML = isPlayingThis ? STOP_ICON : PLAY_ICON;
+            }
             if (btn.classList.contains('playing') !== isPlayingThis) {
                 btn.classList.toggle('playing', isPlayingThis);
             }

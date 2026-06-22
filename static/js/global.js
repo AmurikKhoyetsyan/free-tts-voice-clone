@@ -631,29 +631,13 @@
             if (cls) $ps.fill.classList.add(cls);
         };
 
-        // ---- equalizer-loader ----
-        const EQ_STEPS = [
-            {w: 2, i: 1}, {w: 1, i: 0}, {w: 2, i: 1},
-            {w: 1, i: 2}, {w: 2, i: 1}, {w: 1, i: 0}, {w: 2, i: 2},
-        ];
+        // ---- cube-loader (icon_loader.svg) ----
         const ensureEqLoader = (host) => {
             let ov = host.querySelector(':scope > .tts-eq-loader');
             if (ov) return ov;
             ov = document.createElement('div');
             ov.className = 'tts-eq-loader';
-            const bars = document.createElement('div');
-            bars.className = 'tts-eq-bars';
-            EQ_STEPS.forEach(s => {
-                const cell = document.createElement('div');
-                cell.className = 'tts-eq-cell';
-                const bar = document.createElement('div');
-                bar.className = 'tts-eq-bar';
-                bar.style.setProperty('--w', String(s.w));
-                bar.style.setProperty('--i', String(s.i));
-                cell.appendChild(bar);
-                bars.appendChild(cell);
-            });
-            ov.appendChild(bars);
+            ov.innerHTML = (window.__ttsIconSvg && window.__ttsIconSvg.loader) || '';
             host.appendChild(ov);
             return ov;
         };

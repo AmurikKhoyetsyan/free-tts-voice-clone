@@ -44,7 +44,6 @@ def build():
                 with gr.Row():
                     rename_input = gr.Textbox(placeholder="Новое имя...", show_label=False, scale=3)
                     rename_btn   = gr.Button("Переименовать", scale=2)
-                    refresh_btn  = gr.Button("⟳", scale=1, min_width=48)
                     del_btn      = gr.Button("🗑", variant="stop", scale=1, min_width=48)
                 text = gr.Textbox(label="Текст", placeholder="Введите текст...", lines=6)
                 lang = gr.Dropdown(choices=list(LANGUAGES.keys()), value="Русский", label="Язык")
@@ -56,9 +55,6 @@ def build():
         voice.change(
             fn=_on_voice_change, inputs=[voice], outputs=[rename_input, preview]
         ).then(fn=None, inputs=None, outputs=None, js=PLAY_PREVIEW_JS)
-        refresh_btn.click(fn=voices_dropdown, outputs=[voice]).then(
-            fn=voices_urls_json, outputs=[voice_urls_data]
-        )
         del_btn.click(fn=delete_voice, inputs=[voice], outputs=[status, voice]).then(
             fn=voices_urls_json, outputs=[voice_urls_data]
         )

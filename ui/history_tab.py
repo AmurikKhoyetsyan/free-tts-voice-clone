@@ -1,7 +1,7 @@
 import gradio as gr
 
-from core.history_manager import render_list, load_audio
-from ui.components.history_list import build as build_history_list
+from core.history_manager import load_audio
+from ui.components.history_list import build as build_history_list, render_list
 from ui.modals.delete_modal import build as build_delete_modal, wire as wire_delete_modal
 from ui.modals.rename_modal import build as build_rename_modal, wire as wire_rename_modal
 
