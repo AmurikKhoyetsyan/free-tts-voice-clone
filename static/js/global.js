@@ -533,16 +533,6 @@
             } catch (_) {
             }
 
-            // Обратно-совместимый alias на старое имя, чтобы внешний код,
-            // ещё ссылающийся на __ttsAudioBus, не падал. Минимальный shim.
-            window.__ttsAudioBus = {
-                stopAll: function () {
-                    mgr.stop();
-                },
-                claim: function (t) {
-                    mgr._takeOver(nearbyAudio(t) || t);
-                }
-            };
         }
     } catch (e) {
         try {

@@ -7,12 +7,6 @@ footer {
     display: none !important;
 }
 
-/* Скрываем устаревший локальный debug-блок — теперь сообщения
-   проксируются в глобальный логгер. */
-#__voiceDebug {
-    display: none !important;
-}
-
 /* ---- глобальный плавающий логгер ---- */
 #__voiceLogToggle {
     position: fixed !important;
@@ -512,19 +506,4 @@ footer {
     background: #ef4444 !important;
     border-color: #ef4444 !important;
     color: white !important;
-}
-
-#__voiceDebug {
-    position: fixed;
-    bottom: 8px;
-    right: 8px;
-    z-index: 1000000;
-    background: rgba(0, 0, 0, 0.85);
-    color: #fff;
-    font: 11px monospace;
-    padding: 8px 10px;
-    border-radius: 6px;
-    max-width: 380px;
-    white-space: pre-wrap;
-    pointer-events: none;
 }

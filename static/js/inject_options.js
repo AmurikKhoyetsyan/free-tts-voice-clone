@@ -2,17 +2,7 @@
     if (window.__voiceOptInjectorInstalled) return;
     window.__voiceOptInjectorInstalled = true;
 
-    // ---- on-screen debug panel ----
-    const dbg = document.createElement('div');
-    dbg.id = '__voiceDebug';
-    dbg.textContent = 'voice-play: ждём dropdown...';
-    document.body.appendChild(dbg);
-    const log = (msg) => {
-        const t = new Date().toLocaleTimeString();
-        dbg.textContent = `[${t}] ${msg}\n` + dbg.textContent;
-        if (dbg.textContent.length > 1500) dbg.textContent = dbg.textContent.slice(0, 1500);
-        console.log('[voice-play]', msg);
-    };
+    const log = (msg) => { console.log('[voice-play]', msg); };
     log('injector installed');
 
     const getUrls = () => {
@@ -110,8 +100,6 @@
         };
         tryNext();
     };
-    window.__playVoice = playVoice;
-
     // Capture-phase listeners on document, BEFORE Gradio's dropdown handlers.
     // Trigger playback on pointerdown so we don't lose the gesture if the
     // dropdown later tears down the button DOM before click fires.
