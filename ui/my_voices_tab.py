@@ -1,11 +1,9 @@
-import json
-import os
-
 import gradio as gr
+
 from services.tts_xtts import synthesize as xtts_synthesize, LANGUAGES
 from core.voice_manager import (
     load_voice, delete_voice, rename_voice, voices_dropdown,
-    get_saved_voices, VOICES_DIR,
+    voices_urls_json,
 )
 from ui.progress_stream import stream
 from ui.constants import STOP_ALL_JS, PLAY_PREVIEW_JS
@@ -32,15 +30,6 @@ def _synthesize(voice_name, text, language_label):
     yield from stream(xtts_synthesize, (text, audio_path, language_label))
 
 
-def _voice_urls_json():
-    voices = get_saved_voices()
-    paths = {
-        v: os.path.join(VOICES_DIR, f"{v}.wav").replace(os.sep, "/")
-        for v in voices
-    }
-    return json.dumps(paths)
-
-
 def _on_voice_change(name):
     return (name or ""), load_voice(name)
 
@@ -50,7 +39,7 @@ def build():
         with gr.Row():
             with gr.Column(scale=3):
                 voice = gr.Dropdown(choices=[], value=None, label="Выберите голос", elem_id="voice_select")
-                voice_urls_data = gr.Textbox(value=_voice_urls_json(), elem_id="voice_urls_data", visible=False)
+                voice_urls_data = gr.Textbox(value=voices_urls_json(), elem_id="voice_urls_data", visible=False)
                 preview = gr.Audio(type="filepath", interactive=False, show_label=False, elem_id="voice_preview_audio")
                 with gr.Row():
                     rename_input = gr.Textbox(placeholder="Новое имя...", show_label=False, scale=3)
@@ -68,13 +57,13 @@ def build():
             fn=_on_voice_change, inputs=[voice], outputs=[rename_input, preview]
         ).then(fn=None, inputs=None, outputs=None, js=PLAY_PREVIEW_JS)
         refresh_btn.click(fn=voices_dropdown, outputs=[voice]).then(
-            fn=_voice_urls_json, outputs=[voice_urls_data]
+            fn=voices_urls_json, outputs=[voice_urls_data]
         )
         del_btn.click(fn=delete_voice, inputs=[voice], outputs=[status, voice]).then(
-            fn=_voice_urls_json, outputs=[voice_urls_data]
+            fn=voices_urls_json, outputs=[voice_urls_data]
         )
         rename_btn.click(fn=rename_voice, inputs=[voice, rename_input], outputs=[status, voice]).then(
-            fn=_voice_urls_json, outputs=[voice_urls_data]
+            fn=voices_urls_json, outputs=[voice_urls_data]
         )
         btn.click(fn=_synthesize, inputs=[voice, text, lang], outputs=[audio, status], js=STOP_ALL_JS)
 

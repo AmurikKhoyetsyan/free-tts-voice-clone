@@ -1,12 +1,12 @@
 import gradio as gr
 from asyncio.proactor_events import _ProactorBasePipeTransport
 
-from core.voice_manager import voices_dropdown, VOICES_DIR
+from core.voice_manager import voices_dropdown, voices_urls_json, VOICES_DIR
 from core.audio import OUTPUT_DIR
 from ui.constants import _load_css, _load_js
 from ui.windows_tab import build as build_windows
 from ui.cloning_tab import build as build_cloning
-from ui.my_voices_tab import build as build_my_voices, _voice_urls_json
+from ui.my_voices_tab import build as build_my_voices
 from ui.history_tab import build as build_history
 
 # Suppress harmless Windows asyncio "connection forcibly closed" noise.
@@ -32,7 +32,7 @@ with gr.Blocks(title="TTS — Синтез речи") as app:
 
     # Обновляем список голосов и URL-карту при каждом открытии страницы
     app.load(fn=voices_dropdown, outputs=[sv_voice])
-    app.load(fn=_voice_urls_json, outputs=[sv_urls])
+    app.load(fn=voices_urls_json, outputs=[sv_urls])
     # Дублирующий запуск логгера через app.load — на случай если js= на Blocks
     # по какой-то причине не отработал (старая версия Gradio, кэш, и т.п.).
     app.load(fn=None, inputs=None, outputs=None, js=_global_js)

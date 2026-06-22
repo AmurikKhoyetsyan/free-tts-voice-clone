@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import gradio as gr
@@ -56,3 +57,12 @@ def rename_voice(old_name, new_name):
         return f"Голос «{safe}» уже существует", voices_dropdown(value=old_name)
     os.rename(old_path, new_path)
     return f"Переименован в «{safe}»", voices_dropdown(value=safe)
+
+
+def voices_urls_json():
+    voices = get_saved_voices()
+    paths = {
+        v: os.path.join(VOICES_DIR, f"{v}.wav").replace(os.sep, "/")
+        for v in voices
+    }
+    return json.dumps(paths)
