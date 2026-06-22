@@ -117,10 +117,11 @@ def build():
             )
 
         hidden_delete_btn.click(
-            fn=_open_delete, inputs=[hist_file_box], outputs=[delete_modal, del_text, pending_delete], js=_HIST_JS
+            fn=_open_delete, inputs=[hist_file_box], outputs=[delete_modal, del_text, pending_delete], js=_HIST_JS,
+            show_progress="hidden",
         )
 
-        del_no_btn.click(fn=lambda: gr.update(visible=False), outputs=[delete_modal])
+        del_no_btn.click(fn=lambda: gr.update(visible=False), outputs=[delete_modal], show_progress="hidden")
 
         def _do_delete(filename):
             if not filename:
@@ -137,7 +138,7 @@ def build():
             fn=_do_delete,
             inputs=[pending_delete],
             outputs=[file_list_html, audio_out, log_out, delete_done],
-        ).then(fn=lambda: gr.update(visible=False), outputs=[delete_modal])
+        ).then(fn=lambda: gr.update(visible=False), outputs=[delete_modal], show_progress="hidden")
 
         # ── Rename flow ────────────────────────────────────────────────────
         def _open_rename(val):
@@ -148,10 +149,11 @@ def build():
             return gr.update(visible=True), gr.update(value=stem), filename
 
         hidden_rename_btn.click(
-            fn=_open_rename, inputs=[hist_file_box], outputs=[rename_modal, rename_input, pending_rename], js=_HIST_JS
+            fn=_open_rename, inputs=[hist_file_box], outputs=[rename_modal, rename_input, pending_rename], js=_HIST_JS,
+            show_progress="hidden",
         )
 
-        rename_cancel_btn.click(fn=lambda: gr.update(visible=False), outputs=[rename_modal])
+        rename_cancel_btn.click(fn=lambda: gr.update(visible=False), outputs=[rename_modal], show_progress="hidden")
 
         def _do_rename(filename, new_name):
             if not filename:
@@ -179,7 +181,7 @@ def build():
             fn=_do_rename,
             inputs=[pending_rename, rename_input],
             outputs=[file_list_html, audio_out, log_out, rename_done],
-        ).then(fn=lambda: gr.update(visible=False), outputs=[rename_modal])
+        ).then(fn=lambda: gr.update(visible=False), outputs=[rename_modal], show_progress="hidden")
 
         # Refresh list every time this tab is opened
         tab.select(fn=lambda: gr.update(value=_render_list()), outputs=[file_list_html])
