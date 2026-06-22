@@ -1197,6 +1197,19 @@
             if (!row || !row.dataset.file) return;
             window.__ttsHistFile = row.dataset.file;
             const action = btn.dataset.action;
+
+            if (action === 'download') {
+                const filename = row.dataset.file;
+                voiceLog('hist download: ' + filename, 'click');
+                const a = document.createElement('a');
+                a.href = '/gradio_api/file=.output_audio/' + encodeURIComponent(filename);
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                return;
+            }
+
             let targetId;
             if      (action === 'play')   targetId = 'tts_hist_play_btn';
             else if (action === 'rename') targetId = 'tts_hist_rename_btn';

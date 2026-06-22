@@ -417,6 +417,16 @@ footer {
     border-color: var(--color-accent, #6366f1);
 }
 
+.tts-hist-dl-btn {
+    color: var(--body-text-color, #374151);
+}
+
+.tts-hist-dl-btn:hover {
+    background: #eff6ff !important;
+    border-color: #3b82f6 !important;
+    color: #3b82f6 !important;
+}
+
 .tts-hist-del-btn:hover {
     background: #fee2e2 !important;
     border-color: #ef4444 !important;
