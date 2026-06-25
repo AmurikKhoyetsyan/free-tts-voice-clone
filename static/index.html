@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>TTS — Синтез речи</title>
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/tabs.css">
+    <link rel="stylesheet" href="/static/css/forms.css">
+    <link rel="stylesheet" href="/static/css/audio.css">
+    <link rel="stylesheet" href="/static/css/voices.css">
+    <link rel="stylesheet" href="/static/css/history.css">
+    <link rel="stylesheet" href="/static/css/modal.css">
+    <link rel="stylesheet" href="/static/css/logger.css">
+</head>
+<body>
+
+<header class="app-header">
+    <h1>Синтез речи и клонирование голоса</h1>
+</header>
+
+<nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="windows">Windows голоса</button>
+    <button class="tab" data-tab="cloning">Клонирование (XTTS v2)</button>
+    <button class="tab" data-tab="saved">Мои голоса</button>
+    <button class="tab" data-tab="history">История</button>
+</nav>
+
+<main class="app-main">
+
+    <!-- ============== Windows голоса ============== -->
+    <section class="tab-panel active" data-panel="windows">
+        <div class="panel-info" id="win-info">Загрузка списка голосов…</div>
+        <div class="grid-2">
+            <div class="col">
+                <label class="label">Текст
+                    <textarea id="win-text" rows="6" placeholder="Введите текст…"></textarea>
+                </label>
+                <label class="label">Голос
+                    <select id="win-voice"></select>
+                </label>
+                <div class="grid-2">
+                    <label class="label">Скорость <span class="hint" id="win-rate-val">150</span>
+                        <input type="range" id="win-rate" min="50" max="350" step="10" value="150">
+                    </label>
+                    <label class="label">Громкость (%) <span class="hint" id="win-vol-val">90</span>
+                        <input type="range" id="win-vol" min="0" max="100" step="5" value="90">
+                    </label>
+                </div>
+                <button class="btn btn-primary" id="win-go">Синтезировать</button>
+            </div>
+            <div class="col">
+                <div class="result-block">
+                    <div class="result-label">Результат</div>
+                    <div class="audio-player" data-player="win"></div>
+                    <div class="status" id="win-status"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Клонирование (XTTS) ============== -->
+    <section class="tab-panel" data-panel="cloning">
+        <div class="panel-info" id="xtts-info">Загрузка статуса XTTS…</div>
+        <div class="panel-info hint">Загрузи <b>10–30 секунд</b> чистой записи голоса (без музыки, без шума).</div>
+        <div class="grid-2">
+            <div class="col">
+                <label class="label">Текст
+                    <textarea id="xtts-text" rows="6" placeholder="Введите текст…"></textarea>
+                </label>
+                <label class="label">Образец голоса
+                    <input type="file" id="xtts-audio" accept="audio/*">
+                </label>
+                <div class="audio-player" data-player="xtts-sample"></div>
+                <div class="row gap">
+                    <label class="label fill">Сохранить голос как
+                        <input type="text" id="xtts-save-name" placeholder="Имя голоса…">
+                    </label>
+                    <button class="btn" id="xtts-save-btn">Сохранить</button>
+                </div>
+                <label class="label">Язык текста
+                    <select id="xtts-lang"></select>
+                </label>
+                <button class="btn btn-primary" id="xtts-go">Клонировать и синтезировать</button>
+            </div>
+            <div class="col">
+                <div class="result-block">
+                    <div class="result-label">Результат</div>
+                    <div class="audio-player" data-player="xtts"></div>
+                    <div class="status" id="xtts-status"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Мои голоса ============== -->
+    <section class="tab-panel" data-panel="saved">
+        <div class="grid-2">
+            <div class="col">
+                <label class="label">Выберите голос
+                    <div class="voice-select-wrap">
+                        <select id="saved-voice"></select>
+                    </div>
+                </label>
+                <div class="row gap">
+                    <input type="text" id="saved-rename" class="fill" placeholder="Новое имя…">
+                    <button class="btn" id="saved-rename-btn">Переименовать</button>
+                    <button class="btn btn-danger" id="saved-delete-btn" aria-label="Удалить" title="Удалить"></button>
+                </div>
+                <label class="label">Текст
+                    <textarea id="saved-text" rows="6" placeholder="Введите текст…"></textarea>
+                </label>
+                <label class="label">Язык
+                    <select id="saved-lang"></select>
+                </label>
+                <button class="btn btn-primary" id="saved-go">Синтезировать</button>
+            </div>
+            <div class="col">
+                <div class="result-block">
+                    <div class="result-label">Результат</div>
+                    <div class="audio-player" data-player="saved"></div>
+                    <div class="status" id="saved-status"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== История ============== -->
+    <section class="tab-panel" data-panel="history">
+        <div class="grid-2">
+            <div class="col">
+                <div class="hist-toolbar">
+                    <div class="hist-title">Записи</div>
+                    <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
+                </div>
+                <div id="hist-list" class="hist-list"></div>
+            </div>
+            <div class="col">
+                <div class="result-block">
+                    <div class="result-label">Воспроизведение</div>
+                    <div class="audio-player" data-player="hist"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<!-- ============== modals ============== -->
+<div class="modal" id="modal-delete" hidden>
+    <div class="modal-box">
+        <h3>Удалить аудио</h3>
+        <p id="modal-delete-text"></p>
+        <div class="modal-actions">
+            <button class="btn" data-modal-close>Отмена</button>
+            <button class="btn btn-danger" id="modal-delete-confirm">Удалить</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modal-rename" hidden>
+    <div class="modal-box">
+        <h3>Переименовать аудио</h3>
+        <label class="label">Новое имя
+            <input type="text" id="modal-rename-input">
+        </label>
+        <div class="modal-actions">
+            <button class="btn" data-modal-close>Отмена</button>
+            <button class="btn btn-primary" id="modal-rename-confirm">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============== toast / notifications ============== -->
+<div class="toast-host" id="toasts"></div>
+
+<!-- ============== logger panel ============== -->
+<button id="log-toggle" type="button" title="Показать/скрыть лог">ЛОГ</button>
+<div id="log-panel" hidden>
+    <div class="log-hdr">
+        <span class="log-title">Активность</span>
+        <button class="log-btn" id="log-clear" title="Очистить">⌫</button>
+        <button class="log-btn" id="log-close" title="Скрыть">×</button>
+    </div>
+    <div class="log-progress hidden" id="log-progress">
+        <div class="lp-head">
+            <span class="lp-text">Готово к работе</span>
+            <span class="lp-pct">0%</span>
+        </div>
+        <div class="lp-bar">
+            <div class="lp-fill"></div>
+        </div>
+        <div class="lp-meta">
+            <span class="lp-stage"></span>
+            <span class="lp-eta"></span>
+        </div>
+    </div>
+    <div class="log-body" id="log-body"></div>
+    <div class="log-resize" id="log-resize" title="Потяните, чтобы изменить высоту"></div>
+</div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

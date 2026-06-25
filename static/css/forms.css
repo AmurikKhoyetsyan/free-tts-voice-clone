@@ -1,0 +1,187 @@
+/* ---- inputs ---- */
+textarea,
+input[type="text"],
+input[type="number"],
+input[type="file"],
+select {
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    outline: none;
+    transition: border-color .12s, box-shadow .12s;
+    width: 100%;
+    min-width: 0;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 80px;
+    line-height: 1.5;
+}
+
+textarea:hover,
+input:hover,
+select:hover {
+    border-color: var(--border-strong);
+}
+
+textarea:focus,
+input:focus,
+select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input[type="file"] {
+    padding: 7px 10px;
+    cursor: pointer;
+}
+
+input[type="file"]::file-selector-button {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    margin-right: 10px;
+    transition: background .12s;
+}
+
+input[type="file"]::file-selector-button:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+select {
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%2371717a' d='M2.5 4.5L6 8l3.5-3.5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 32px;
+    cursor: pointer;
+}
+
+/* ---- range ---- */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    padding: 0;
+    border: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    transition: transform .1s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    cursor: pointer;
+}
+
+/* ---- buttons ---- */
+.btn {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s, transform .05s;
+    white-space: nowrap;
+}
+
+.btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+.btn-danger {
+    color: var(--danger);
+    border-color: var(--border);
+}
+
+.btn-danger:hover {
+    background: var(--danger-soft);
+    border-color: var(--danger);
+}
+
+.btn-ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.btn-ghost:hover {
+    background: var(--surface-2);
+    color: var(--text);
+}
+
+/* delete (trash) icon-only button uses ::before */
+#saved-delete-btn {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#saved-delete-btn::before {
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: currentColor;
+    -webkit-mask: var(--icon-delete) center/contain no-repeat;
+            mask: var(--icon-delete) center/contain no-repeat;
+}
