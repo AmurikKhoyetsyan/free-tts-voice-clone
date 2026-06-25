@@ -1,7 +1,6 @@
+import WaveSurfer from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7.10.1/dist/wavesurfer.esm.js';
 import { ICONS } from './icons.js';
 import { audioManager } from './audio-manager.js';
-
-// Custom audio player rendered into a host element with `data-player` attr.
 
 const fmt = (sec) => {
     if (!isFinite(sec) || sec < 0) return '0:00';
@@ -13,28 +12,41 @@ const fmt = (sec) => {
 export class AudioPlayer {
     constructor(host) {
         this.host = host;
-        this.audio = new Audio();
-        this.audio.preload = 'metadata';
         this.url = null;
         this.filename = null;
+        this.ws = null;
+        this._cbs = {};
         this._renderEmpty();
-        this._wireAudio();
         this._unsubscribe = audioManager.subscribe(active => {
-            if (active !== this && !this.audio.paused) {
+            if (active !== this && this.ws && this.ws.isPlaying()) {
                 this.pause();
             }
         });
     }
 
+    // External event bus: player.on('play', cb), player.on('pause', cb), player.on('ended', cb)
+    on(event, cb) {
+        if (!this._cbs[event]) this._cbs[event] = [];
+        this._cbs[event].push(cb);
+        return this;
+    }
+
+    _emit(event) {
+        (this._cbs[event] || []).forEach(cb => { try { cb(); } catch (_) {} });
+    }
+
     setSource(url, filename = null) {
         this.url = url;
         this.filename = filename;
+        if (this.ws) {
+            this.ws.destroy();
+            this.ws = null;
+        }
         if (!url) {
             this._renderEmpty();
             return;
         }
-        this.audio.src = url;
-        this._render();
+        this._render(url);
     }
 
     setLoading(on) {
@@ -42,25 +54,26 @@ export class AudioPlayer {
     }
 
     play() {
-        if (!this.url) return;
+        if (!this.ws) return;
         audioManager.play(this);
-        this.audio.play().catch(() => {});
+        this.ws.play();
     }
 
     pause() {
-        try { this.audio.pause(); } catch (_) {}
+        if (this.ws) this.ws.pause();
     }
 
     stop() {
-        try {
-            this.audio.pause();
-            this.audio.currentTime = 0;
-        } catch (_) {}
+        if (this.ws) {
+            this.ws.pause();
+            this.ws.setTime(0);
+        }
         audioManager.stop(this);
     }
 
     destroy() {
         this.stop();
+        if (this.ws) { this.ws.destroy(); this.ws = null; }
         if (this._unsubscribe) this._unsubscribe();
     }
 
@@ -69,41 +82,68 @@ export class AudioPlayer {
         this.host.innerHTML = '<span>Здесь появится аудио</span>';
     }
 
-    _render() {
+    _render(url) {
         this.host.classList.remove('empty');
         this.host.innerHTML = `
             <button class="ap-play" aria-label="Воспроизвести">${ICONS.play}</button>
-            <div class="ap-progress"><div class="ap-fill"></div></div>
+            <div class="ap-wave"></div>
             <div class="ap-time">0:00 / 0:00</div>
             <button class="ap-download" aria-label="Скачать">${ICONS.download}</button>
         `;
-        this._wirePlayButton();
-        this._wireProgress();
-        this._wireDownload();
-    }
 
-    _wirePlayButton() {
-        const btn = this.host.querySelector('.ap-play');
-        btn.addEventListener('click', () => {
-            if (this.audio.paused) this.play();
-            else this.pause();
+        const waveEl  = this.host.querySelector('.ap-wave');
+        const timeEl  = this.host.querySelector('.ap-time');
+        const playBtn = this.host.querySelector('.ap-play');
+
+        this.ws = WaveSurfer.create({
+            container: waveEl,
+            waveColor: '#d1d5db',
+            progressColor: '#f97316',
+            cursorColor: '#f97316',
+            cursorWidth: 2,
+            height: 40,
+            barWidth: 2,
+            barGap: 1,
+            barRadius: 2,
+            normalize: true,
+            interact: true,
+            url,
         });
-    }
 
-    _wireProgress() {
-        const bar = this.host.querySelector('.ap-progress');
-        bar.addEventListener('click', (e) => {
-            const rect = bar.getBoundingClientRect();
-            const frac = (e.clientX - rect.left) / rect.width;
-            if (isFinite(this.audio.duration)) {
-                this.audio.currentTime = Math.max(0, Math.min(this.audio.duration, this.audio.duration * frac));
-            }
+        this.ws.on('play', () => {
+            playBtn.innerHTML = ICONS.pause;
+            playBtn.setAttribute('aria-label', 'Пауза');
+            this._emit('play');
         });
-    }
 
-    _wireDownload() {
-        const btn = this.host.querySelector('.ap-download');
-        btn.addEventListener('click', () => {
+        this.ws.on('pause', () => {
+            playBtn.innerHTML = ICONS.play;
+            playBtn.setAttribute('aria-label', 'Воспроизвести');
+            this._emit('pause');
+        });
+
+        this.ws.on('finish', () => {
+            playBtn.innerHTML = ICONS.play;
+            playBtn.setAttribute('aria-label', 'Воспроизвести');
+            audioManager.stop(this);
+            this._emit('ended');
+        });
+
+        this.ws.on('timeupdate', (currentTime) => {
+            const dur = this.ws.getDuration() || 0;
+            timeEl.textContent = `${fmt(currentTime)} / ${fmt(dur)}`;
+        });
+
+        this.ws.on('ready', () => {
+            timeEl.textContent = `0:00 / ${fmt(this.ws.getDuration() || 0)}`;
+        });
+
+        playBtn.addEventListener('click', () => {
+            if (this.ws.isPlaying()) this.pause();
+            else this.play();
+        });
+
+        this.host.querySelector('.ap-download').addEventListener('click', () => {
             if (!this.url) return;
             const a = document.createElement('a');
             a.href = this.url;
@@ -112,34 +152,5 @@ export class AudioPlayer {
             a.click();
             a.remove();
         });
-    }
-
-    _wireAudio() {
-        this.audio.addEventListener('play', () => this._setPlayingUI(true));
-        this.audio.addEventListener('pause', () => this._setPlayingUI(false));
-        this.audio.addEventListener('ended', () => {
-            this._setPlayingUI(false);
-            audioManager.stop(this);
-        });
-        this.audio.addEventListener('timeupdate', () => this._updateTime());
-        this.audio.addEventListener('loadedmetadata', () => this._updateTime());
-    }
-
-    _setPlayingUI(playing) {
-        const btn = this.host.querySelector('.ap-play');
-        if (!btn) return;
-        btn.innerHTML = playing ? ICONS.pause : ICONS.play;
-        btn.setAttribute('aria-label', playing ? 'Пауза' : 'Воспроизвести');
-    }
-
-    _updateTime() {
-        const fill = this.host.querySelector('.ap-fill');
-        const time = this.host.querySelector('.ap-time');
-        if (!fill || !time) return;
-        const cur = this.audio.currentTime || 0;
-        const dur = this.audio.duration || 0;
-        const pct = dur > 0 ? (cur / dur) * 100 : 0;
-        fill.style.width = pct + '%';
-        time.textContent = `${fmt(cur)} / ${fmt(dur)}`;
     }
 }

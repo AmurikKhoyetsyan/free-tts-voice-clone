@@ -14,19 +14,10 @@ export async function init() {
     let activeName = null;
     let isPlaying = false;
 
-    // Track play/pause state from the underlying audio element so row icons stay in sync
-    player.audio.addEventListener('play', () => {
-        isPlaying = true;
-        _syncPlayIcons();
-    });
-    player.audio.addEventListener('pause', () => {
-        isPlaying = false;
-        _syncPlayIcons();
-    });
-    player.audio.addEventListener('ended', () => {
-        isPlaying = false;
-        _syncPlayIcons();
-    });
+    // Track play/pause state so row icons stay in sync with WaveSurfer events
+    player.on('play',  () => { isPlaying = true;  _syncPlayIcons(); });
+    player.on('pause', () => { isPlaying = false; _syncPlayIcons(); });
+    player.on('ended', () => { isPlaying = false; _syncPlayIcons(); });
 
     function _syncPlayIcons() {
         listEl.querySelectorAll('.hist-row').forEach(row => {

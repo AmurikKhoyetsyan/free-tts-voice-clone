@@ -7,7 +7,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    min-height: 56px;
+    min-height: 64px;
     position: relative;
 }
 
@@ -32,7 +32,7 @@
     transition: background .12s, transform .08s;
 }
 
-.audio-player .ap-play:hover { background: var(--accent-hover); }
+.audio-player .ap-play:hover  { background: var(--accent-hover); }
 .audio-player .ap-play:active { transform: scale(0.95); }
 
 .audio-player .ap-play svg {
@@ -41,23 +41,18 @@
     fill: #fff;
 }
 
-.audio-player .ap-progress {
+/* WaveSurfer container */
+.audio-player .ap-wave {
     flex: 1;
-    height: 4px;
-    background: var(--border);
-    border-radius: 2px;
+    min-width: 0;
+    min-height: 40px;
     cursor: pointer;
-    position: relative;
-    min-width: 60px;
 }
 
-.audio-player .ap-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    background: var(--accent);
-    border-radius: 2px;
-    width: 0;
-    pointer-events: none;
+/* WaveSurfer v7 renders a wrapper div — make it rounded */
+.audio-player .ap-wave > div {
+    border-radius: 4px;
+    overflow: hidden;
 }
 
 .audio-player .ap-time {
