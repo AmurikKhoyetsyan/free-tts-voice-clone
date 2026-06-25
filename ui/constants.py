@@ -32,28 +32,6 @@ def build_icons_js() -> str:
     return "window.__ttsIconSvg = {\n" + ",\n".join(entries) + "\n};"
 
 
-STOP_ALL_JS = (
-    "(...args) => { "
-    "if (window.__ttsAudio) window.__ttsAudio.stop(); "
-    "else document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch(_) {} }); "
-    "return args; }"
-)
-
-PLAY_PREVIEW_JS = """
-(...args) => {
-    const root = document.querySelector('#voice_preview_audio');
-    if (!root) return args;
-    const tryPlay = (attempt = 0) => {
-        const el = root.querySelector('audio');
-        if (!el || !el.src) {
-            if (attempt < 20) setTimeout(() => tryPlay(attempt + 1), 100);
-            return;
-        }
-        if (window.__ttsAudio) {
-            window.__ttsAudio.play(el.src).catch(() => {});
-        }
-    };
-    tryPlay();
-    return args;
-}
-"""
+STOP_ALL_JS     = _load_js("snippets/stop_all.js")
+PLAY_PREVIEW_JS = _load_js("snippets/play_preview.js")
+HIST_FILE_JS    = _load_js("snippets/hist_file.js")

@@ -4,9 +4,7 @@ from core.history_manager import load_audio
 from ui.components.history_list import build as build_history_list, render_list
 from ui.modals.delete_modal import build as build_delete_modal, wire as wire_delete_modal
 from ui.modals.rename_modal import build as build_rename_modal, wire as wire_rename_modal
-
-# JS snippet: reads the filename set by the event-delegation click handler in global.js
-_HIST_JS = "(...args) => { const f = window.__ttsHistFile || ''; if (window.voiceLog) window.voiceLog('[hist-js] file=' + f); return [f]; }"
+from ui.constants import HIST_FILE_JS as _HIST_JS
 
 
 def build():
