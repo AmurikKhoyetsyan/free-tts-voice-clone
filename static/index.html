@@ -12,6 +12,9 @@
     <link rel="stylesheet" href="/static/css/history.css">
     <link rel="stylesheet" href="/static/css/modal.css">
     <link rel="stylesheet" href="/static/css/logger.css">
+    <link rel="stylesheet" href="/static/css/custom-select.css">
+    <link rel="stylesheet" href="/static/css/file-upload.css">
+    <link rel="stylesheet" href="/static/css/loader.css">
 </head>
 <body>
 
@@ -37,7 +40,7 @@
                     <textarea id="win-text" rows="6" placeholder="Введите текст…"></textarea>
                 </label>
                 <label class="label">Голос
-                    <select id="win-voice"></select>
+                    <div id="win-voice-mount"></div>
                 </label>
                 <div class="grid-2">
                     <label class="label">Скорость <span class="hint" id="win-rate-val">150</span>
@@ -69,7 +72,7 @@
                     <textarea id="xtts-text" rows="6" placeholder="Введите текст…"></textarea>
                 </label>
                 <label class="label">Образец голоса
-                    <input type="file" id="xtts-audio" accept="audio/*">
+                    <div id="xtts-upload-mount"></div>
                 </label>
                 <div class="audio-player" data-player="xtts-sample"></div>
                 <div class="row gap">
@@ -79,7 +82,7 @@
                     <button class="btn" id="xtts-save-btn">Сохранить</button>
                 </div>
                 <label class="label">Язык текста
-                    <select id="xtts-lang"></select>
+                    <div id="xtts-lang-mount"></div>
                 </label>
                 <button class="btn btn-primary" id="xtts-go">Клонировать и синтезировать</button>
             </div>
@@ -98,9 +101,7 @@
         <div class="grid-2">
             <div class="col">
                 <label class="label">Выберите голос
-                    <div class="voice-select-wrap">
-                        <select id="saved-voice"></select>
-                    </div>
+                    <div id="saved-voice-mount"></div>
                 </label>
                 <div class="row gap">
                     <input type="text" id="saved-rename" class="fill" placeholder="Новое имя…">
@@ -111,7 +112,7 @@
                     <textarea id="saved-text" rows="6" placeholder="Введите текст…"></textarea>
                 </label>
                 <label class="label">Язык
-                    <select id="saved-lang"></select>
+                    <div id="saved-lang-mount"></div>
                 </label>
                 <button class="btn btn-primary" id="saved-go">Синтезировать</button>
             </div>

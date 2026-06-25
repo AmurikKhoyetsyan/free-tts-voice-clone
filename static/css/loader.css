@@ -1,0 +1,100 @@
+/* ---- generic overlay spinner ---- */
+.loader-ov {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 247, 237, 0.7);
+    backdrop-filter: blur(1px);
+    -webkit-backdrop-filter: blur(1px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: inherit;
+    z-index: 5;
+    pointer-events: none;
+    animation: lo-fade-in .12s ease;
+}
+
+@keyframes lo-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.loader-spin {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--accent-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: lo-spin .8s linear infinite;
+}
+
+@keyframes lo-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ---- inline pulsing skeleton placeholders ---- */
+.sk-row {
+    height: 44px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+}
+
+.sk-bar,
+.sk-line {
+    height: 14px;
+    border-radius: 4px;
+    background: linear-gradient(
+        90deg,
+        var(--border) 0%,
+        var(--surface-2) 50%,
+        var(--border) 100%
+    );
+    background-size: 200% 100%;
+    animation: sk-shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-bar { width: 60%; }
+
+.sk-line {
+    margin: 8px 0;
+}
+
+@keyframes sk-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ---- spinner inside a select trigger / button while busy ---- */
+.cs-trigger.cs-loading .cs-chev,
+.btn.btn-loading {
+    position: relative;
+}
+
+.btn.btn-loading {
+    color: transparent !important;
+}
+
+.btn.btn-loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: lo-spin .7s linear infinite;
+}
+
+.btn-primary.btn-loading::after {
+    border-color: rgba(255, 255, 255, 0.4);
+    border-top-color: #fff;
+}

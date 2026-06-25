@@ -4,6 +4,7 @@ import { ICONS } from '../icons.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
 import { openConfirm, openPrompt } from '../modal.js';
+import { skeletonRows } from '../loader.js';
 
 export async function init() {
     const listEl = document.getElementById('hist-list');
@@ -11,30 +12,61 @@ export async function init() {
     const player = new AudioPlayer(document.querySelector('[data-player="hist"]'));
 
     let activeName = null;
+    let isPlaying = false;
+
+    // Track play/pause state from the underlying audio element so row icons stay in sync
+    player.audio.addEventListener('play', () => {
+        isPlaying = true;
+        _syncPlayIcons();
+    });
+    player.audio.addEventListener('pause', () => {
+        isPlaying = false;
+        _syncPlayIcons();
+    });
+    player.audio.addEventListener('ended', () => {
+        isPlaying = false;
+        _syncPlayIcons();
+    });
+
+    function _syncPlayIcons() {
+        listEl.querySelectorAll('.hist-row').forEach(row => {
+            const btn = row.querySelector('[data-action="play"]');
+            if (!btn) return;
+            const isThisRow = row.dataset.file === activeName && isPlaying;
+            btn.innerHTML = isThisRow ? ICONS.pause : ICONS.play;
+            btn.title = isThisRow ? 'Пауза' : 'Воспроизвести';
+        });
+    }
 
     const render = (files) => {
         if (!files.length) {
             listEl.innerHTML = '<div class="hist-empty">Нет аудиозаписей</div>';
             return;
         }
-        listEl.innerHTML = files.map(name => `
-            <div class="hist-row${name === activeName ? ' active' : ''}" data-file="${escapeAttr(name)}">
+        listEl.innerHTML = files.map(name => {
+            const thisActive = name === activeName;
+            const playIcon = thisActive && isPlaying ? ICONS.pause : ICONS.play;
+            const playTitle = thisActive && isPlaying ? 'Пауза' : 'Воспроизвести';
+            return `
+            <div class="hist-row${thisActive ? ' active' : ''}" data-file="${escapeAttr(name)}">
                 <span class="hist-name" title="${escapeAttr(name)}">${escapeHtml(name)}</span>
                 <div class="hist-btns">
-                    <button class="hist-btn accent" data-action="play" title="Воспроизвести">${ICONS.play}</button>
+                    <button class="hist-btn accent" data-action="play" title="${playTitle}">${playIcon}</button>
                     <button class="hist-btn"        data-action="rename" title="Переименовать">${ICONS.edit}</button>
                     <button class="hist-btn"        data-action="download" title="Скачать">${ICONS.download}</button>
                     <button class="hist-btn danger" data-action="delete" title="Удалить">${ICONS.trash}</button>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     };
 
     async function refresh() {
+        skeletonRows(listEl, 4);
         try {
             const data = await getJSON('/api/history');
             render(data.files);
         } catch (e) {
+            listEl.innerHTML = '<div class="hist-empty">Ошибка загрузки</div>';
             toast(e.message, 'err');
         }
     }
@@ -48,14 +80,22 @@ export async function init() {
         const url = `/api/history/${encodeURIComponent(name)}/audio`;
 
         if (action === 'play') {
-            activeName = name;
-            player.setSource(url, name);
-            player.play();
-            listEl.querySelectorAll('.hist-row').forEach(r =>
-                r.classList.toggle('active', r.dataset.file === name)
-            );
+            if (activeName === name) {
+                // same row — toggle play/pause
+                if (isPlaying) player.pause();
+                else player.play();
+            } else {
+                // different row — load and play
+                activeName = name;
+                listEl.querySelectorAll('.hist-row').forEach(r =>
+                    r.classList.toggle('active', r.dataset.file === name)
+                );
+                player.setSource(url, name);
+                player.play();
+            }
             return;
         }
+
         if (action === 'download') {
             const a = document.createElement('a');
             a.href = url;
@@ -65,6 +105,7 @@ export async function init() {
             a.remove();
             return;
         }
+
         if (action === 'rename') {
             const stem = name.endsWith('.wav') ? name.slice(0, -4) : name;
             const newName = await openPrompt({ title: 'Переименовать аудио', initial: stem });
@@ -82,6 +123,7 @@ export async function init() {
             }
             return;
         }
+
         if (action === 'delete') {
             const ok = await openConfirm({
                 title: 'Удалить аудио',
@@ -94,6 +136,7 @@ export async function init() {
                 toast(r.status, 'ok');
                 if (activeName === name) {
                     activeName = null;
+                    isPlaying = false;
                     player.setSource(null);
                 }
                 await refresh();
@@ -105,7 +148,6 @@ export async function init() {
     });
 
     refreshBtn.addEventListener('click', refresh);
-
     events.addEventListener('history-changed', refresh);
 
     await refresh();
