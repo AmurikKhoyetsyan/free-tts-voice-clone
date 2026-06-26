@@ -140,6 +140,7 @@ export class AudioPlayer {
         this.filename = null;
         this._audio = null;
         this._wave  = null;
+        this._raf   = null;
         this._cbs   = {};
         this._renderEmpty();
         this._unsubscribe = audioManager.subscribe(active => {
@@ -160,6 +161,7 @@ export class AudioPlayer {
     }
 
     setSource(url, filename = null) {
+        this._stopRaf();
         this.url      = url;
         this.filename = filename;
         if (this._audio) { this._audio.pause(); this._audio.src = ''; this._audio = null; }
@@ -188,10 +190,26 @@ export class AudioPlayer {
     }
 
     destroy() {
+        this._stopRaf();
         this.stop();
         if (this._audio) { this._audio.src = ''; this._audio = null; }
         if (this._wave)  { this._wave.destroy(); this._wave = null; }
         if (this._unsubscribe) this._unsubscribe();
+    }
+
+    _startRaf(audio, wave, timeEl) {
+        const tick = () => {
+            const dur = audio.duration;
+            const cur = audio.currentTime;
+            if (isFinite(dur) && dur > 0) wave.setProgress(cur / dur);
+            timeEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+            this._raf = requestAnimationFrame(tick);
+        };
+        this._raf = requestAnimationFrame(tick);
+    }
+
+    _stopRaf() {
+        if (this._raf !== null) { cancelAnimationFrame(this._raf); this._raf = null; }
     }
 
     _renderEmpty() {
@@ -222,25 +240,23 @@ export class AudioPlayer {
         audio.addEventListener('play', () => {
             playBtn.innerHTML = ICONS.pause;
             playBtn.setAttribute('aria-label', 'Пауза');
+            this._startRaf(audio, wave, timeEl);
             this._emit('play');
         });
         audio.addEventListener('pause', () => {
+            this._stopRaf();
             playBtn.innerHTML = ICONS.play;
             playBtn.setAttribute('aria-label', 'Воспроизвести');
             this._emit('pause');
         });
         audio.addEventListener('ended', () => {
+            this._stopRaf();
             playBtn.innerHTML = ICONS.play;
             playBtn.setAttribute('aria-label', 'Воспроизвести');
             wave.setProgress(0);
+            timeEl.textContent = `0:00 / ${fmt(audio.duration)}`;
             audioManager.stop(this);
             this._emit('ended');
-        });
-        audio.addEventListener('timeupdate', () => {
-            const dur = audio.duration;
-            const cur = audio.currentTime;
-            if (isFinite(dur) && dur > 0) wave.setProgress(cur / dur);
-            timeEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
         });
         audio.addEventListener('loadedmetadata', () => {
             timeEl.textContent = `0:00 / ${fmt(audio.duration)}`;
