@@ -1,0 +1,118 @@
+/* ---- custom audio player ---- */
+.audio-player {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    position: relative;
+}
+
+.audio-player.empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    justify-content: center;
+}
+
+.audio-player .ap-play {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .12s, transform .08s;
+}
+
+.audio-player .ap-play:hover  { background: var(--accent-hover); }
+.audio-player .ap-play:active { transform: scale(0.95); }
+
+.audio-player .ap-play svg {
+    width: 16px;
+    height: 16px;
+    fill: #fff;
+}
+
+/* Waveform canvas container */
+.audio-player .ap-wave {
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    cursor: pointer;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.audio-player .ap-time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+    min-width: 80px;
+    text-align: right;
+}
+
+.audio-player .ap-download {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    transition: background .12s, color .12s, border-color .12s;
+}
+
+.audio-player .ap-download:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.audio-player .ap-download svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* loader overlay */
+.audio-player.loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(2px);
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+.audio-player.loading::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+    border: 3px solid var(--accent-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: ap-spin 0.8s linear infinite;
+    z-index: 1;
+}
+
+@keyframes ap-spin {
+    to { transform: rotate(360deg); }
+}

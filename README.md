@@ -1,10 +1,10 @@
-# TTS — Free Text to Speech & AI Voice Cloning (Windows)
+# TTS — Text-to-Speech & AI Voice Cloning (Windows)
 
 > **Offline speech synthesis + neural voice cloning** on your local machine.  
-> No API keys. No internet required for basic TTS. Runs 100% locally.
+> No API keys. No cloud. Runs 100% locally.
 
-[![Python](https://img.shields.io/badge/Python-3.10-blue)](https://www.python.org/)
-[![Gradio](https://img.shields.io/badge/UI-Gradio-orange)](https://gradio.app/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688)](https://fastapi.tiangolo.com/)
 [![XTTS v2](https://img.shields.io/badge/Voice%20Cloning-XTTS%20v2-green)](https://github.com/coqui-ai/TTS)
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue)](https://www.microsoft.com/windows)
@@ -13,77 +13,67 @@
 
 ## What is this?
 
-A local **text-to-speech (TTS) web app** with four tabs:
+A local **text-to-speech web app** with four tabs served by **FastAPI** and a hand-written
+**HTML / CSS / ES-module** frontend — no React, no Gradio, no external UI framework.
 
-| Tab                         | Engine                           | Internet                      |
-|-----------------------------|----------------------------------|-------------------------------|
-| **Windows Voices**          | pyttsx3 + Windows SAPI / OneCore | Not required                  |
-| **Voice Cloning (XTTS v2)** | Coqui XTTS v2 (neural network)   | Only for first model download |
-| **My Voices**               | Reuses saved voice profiles      | Not required                  |
-| **History**                 | File manager for generated audio | Not required                  |
-
-**Voice cloning** lets you upload a 10–30 second voice sample and synthesize any text in that voice — in Russian,
-English, German, French, Spanish, Italian, Polish, or Ukrainian.  
-**My Voices** lets you save a cloned voice once and reuse it anytime without re-uploading the sample.  
-**History** shows every generated audio file in a scrollable list with per-row play, rename, and delete controls.
+| Tab | Engine | Internet required |
+|-----|--------|-------------------|
+| **Windows Voices** | pyttsx3 + Windows SAPI / OneCore | No |
+| **Voice Cloning (XTTS v2)** | Coqui XTTS v2 (neural network) | Only for first model download |
+| **My Voices** | Reuses saved voice profiles | No |
+| **History** | File manager for generated audio | No |
 
 ---
 
 ## Features
 
-- **Free & open source** — no subscriptions, no cloud, no data sent anywhere
-- **Offline TTS** — works without internet using built-in Windows voices (Irina, Pavel, David, Zira, and more)
-- **AI voice cloning** — powered by [Coqui XTTS v2](https://github.com/coqui-ai/TTS), one of the best open-source
-  multilingual TTS models
-- **Saved voice profiles** — save a cloned voice by name and reuse it instantly without re-uploading
-- **Rename & delete voices** — manage your saved voice library from the UI
-- **Gradio web UI** — simple browser interface, no coding required
+- **Fully offline** — base TTS uses built-in Windows voices (Irina, Pavel, Zira, David, ...)
+- **AI voice cloning** — [Coqui XTTS v2](https://github.com/coqui-ai/TTS): zero-shot multilingual synthesis
+- **Saved voice profiles** — save a cloned voice by name, reuse without re-uploading
+- **Canvas waveform player** — custom `<canvas>` audio player with WaveSurfer-style bars, no CDN, 60 fps smooth progress via `requestAnimationFrame`
+- **SSE progress streaming** — real-time synthesis progress streamed from server to browser via Server-Sent Events
+- **Lazy tab loading** — each tab initialises only when first visited; page load is instant
+- **No external JS dependencies** — every module is a local ES module served from `static/js/`
 - **Multilingual** — Russian, English, German, French, Spanish, Italian, Polish, Ukrainian
-- **GPU acceleration** — CUDA support for fast voice cloning on NVIDIA GPUs
-- **Named WAV export** — generated files saved as `audio-YYYY-MM-DD_HH-MM-SS.wav`
-- **History tab** — scrollable list of all generated audio files; play, rename, or delete each file in-place with confirmation modals
-- **Microphone recording** — record a voice sample directly in the browser
-- **Real-time progress** — floating activity log panel shows synthesis stages and estimated time
-- **Singleton audio manager** — only one audio source plays at a time across all tabs
+- **GPU acceleration** — CUDA auto-detected for fast XTTS cloning
+- **History management** — play, rename, delete generated files from the UI
 
 ---
 
 ## Supported Languages (Voice Cloning)
 
-| Label      | Code |
-|------------|------|
-| Русский    | `ru` |
-| English    | `en` |
-| Deutsch    | `de` |
-| Français   | `fr` |
-| Español    | `es` |
-| Italiano   | `it` |
-| Polski     | `pl` |
-| Українська | `uk` |
+| Label | Code |
+|-------|------|
+| Russian | `ru` |
+| English | `en` |
+| Deutsch | `de` |
+| Francais | `fr` |
+| Espanol | `es` |
+| Italiano | `it` |
+| Polski | `pl` |
+| Ukrainian | `uk` |
 
 ---
 
 ## Requirements
 
-| Component  | Version                                    |
-|------------|--------------------------------------------|
-| OS         | Windows 10 / 11                            |
-| Python     | 3.10 (recommended)                         |
-| GPU        | NVIDIA CUDA (optional, for faster cloning) |
-| Disk space | ~500 MB base, ~4 GB with XTTS v2 model     |
+| Component | Version |
+|-----------|---------|
+| OS | Windows 10 / 11 |
+| Python | 3.10+ |
+| GPU | NVIDIA CUDA (optional, faster XTTS cloning) |
+| Disk space | ~500 MB base / ~4 GB with XTTS v2 model |
 
 ---
 
 ## Installation
 
-### 1. Clone or download the repository
+### 1. Clone or download
 
 ```bash
 git clone https://github.com/AmurKhoyetsyan/tts.git
 cd tts
 ```
-
-Or download the ZIP and extract it.
 
 ### 2. Install base dependencies
 
@@ -91,27 +81,16 @@ Or download the ZIP and extract it.
 pip install -r requirements.txt
 ```
 
-This installs:
-
-| Package               | Purpose                              |
-|-----------------------|--------------------------------------|
-| `gradio >= 6.0`       | Web UI framework                     |
-| `pyttsx3 >= 2.90`     | Windows SAPI wrapper for offline TTS |
-| `numpy >= 1.22.0`     | Audio array operations               |
-| `soundfile >= 0.12.0` | WAV file read/write                  |
-
 ### 3. (Optional) Unlock additional Windows voices
 
-Windows includes **OneCore voices** (Irina, Pavel, Zira, David, etc.) that are hidden from SAPI by default. To unlock
-them, run once as administrator:
+Windows hides OneCore voices (Irina, Pavel, ...) from SAPI by default.
+Run **once as administrator**:
 
 ```
 add_voices_admin.bat
 ```
 
-This runs `add_voices.py` with elevated privileges and registers all available OneCore voices in the Windows registry
-under `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech\Voices`. After running, restart the app — new voices will appear in
-the dropdown.
+After running, restart the app — new voices appear in the dropdown.
 
 ### 4. (Optional) Install XTTS v2 for voice cloning
 
@@ -119,15 +98,17 @@ the dropdown.
 install_xtts.bat
 ```
 
-This installs Coqui TTS and downloads the XTTS v2 model (~2 GB library + ~1.8 GB model weights on first launch).
-Requires internet. After installation, restart the app.
+Downloads the Coqui TTS library and XTTS v2 model weights (~2 GB library + ~1.8 GB model on first launch).
 
 **Manual install:**
 
 ```bash
 pip install TTS
+
+# GPU (CUDA 11.8):
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
-# or for CPU only:
+
+# CPU only:
 pip install torch torchaudio
 ```
 
@@ -136,144 +117,11 @@ pip install torch torchaudio
 ## Running
 
 ```bash
-# Option 1 — double-click:
-run.bat
-
-# Option 2 — terminal:
 python app.py
 ```
 
-The app opens automatically at `http://127.0.0.1:7860`
-
-To stop: close the terminal window or press `Ctrl+C`.
-
----
-
-## How It Works
-
-### Tab: Windows Voices
-
-Uses **Windows SAPI via pyttsx3** — fully offline, near-instant synthesis.
-
-**Controls:**
-
-| Setting | Range         | Default              | Description        |
-|---------|---------------|----------------------|--------------------|
-| Text    | —             | —                    | Text to synthesize |
-| Voice   | System voices | Irina (if available) | Windows SAPI voice |
-| Speed   | 50–350 wpm    | 150                  | Words per minute   |
-| Volume  | 0–100%        | 90%                  | Output volume      |
-
-**How synthesis works internally:**
-
-1. `pyttsx3` initializes the Windows SAPI5 engine
-2. A `started-word` event listener tracks per-word progress (used for the progress bar)
-3. Audio is synthesized into a temporary WAV file via `engine.save_to_file()`
-4. The temp file is read, converted to a numpy array, and saved as a timestamped file in `.output_audio/`
-5. The result is streamed back to the browser in real time
-
----
-
-### Tab: Voice Cloning (XTTS v2)
-
-Uses **Coqui XTTS v2** — a state-of-the-art multilingual zero-shot TTS model.
-
-**Steps:**
-
-1. Upload a clean voice sample (WAV/MP3, 10–30 seconds recommended, no background noise or music)
-2. Or record directly from your microphone
-3. Enter the text you want synthesized
-4. Select the target language
-5. Click **"Clone and Synthesize"**
-6. (Optional) Enter a name and click **"Save"** to store the voice for future reuse
-
-**Performance:**
-
-| Hardware          | Approximate time                     |
-|-------------------|--------------------------------------|
-| NVIDIA GPU (CUDA) | ~5–15 seconds                        |
-| CPU only          | 1–5 minutes depending on text length |
-
-**How voice cloning works internally:**
-
-1. The model is loaded lazily on first use and cached globally (`_tts_model`)
-2. `torch.load()` and `Xtts.load_checkpoint()` are temporarily patched for compatibility with newer PyTorch versions
-3. CUDA is detected automatically; falls back to CPU if unavailable
-4. `tts.tts_to_file(text, speaker_wav, language, file_path)` generates the audio
-5. Output is post-processed through `core/audio.py` and saved with a timestamp
-
----
-
-### Tab: History
-
-Browse and manage every audio file generated by the app.
-
-**Controls (per row):**
-
-| Button | Action                                                               |
-|--------|----------------------------------------------------------------------|
-| ▶      | Loads the file into the player on the right and starts playback      |
-| ✏      | Opens a rename modal — enter a new name and click "Save"             |
-| 🗑     | Opens a delete confirmation modal — click "Delete" to confirm        |
-
-The list is sorted newest-first and refreshes automatically each time the tab is opened.  
-After a rename or delete the row updates in-place without a full page reload.  
-Flash messages and activity log entries are shown for every action.
-
----
-
-### Tab: My Voices
-
-Reuse previously saved voice profiles — no need to re-upload an audio sample.
-
-**Steps:**
-
-1. Select a saved voice from the dropdown (click ▶ to preview it inline)
-2. Enter the text and select the language
-3. Click **"Synthesize"**
-
-**Voice management:**
-
-| Action  | How                                                                 |
-|---------|---------------------------------------------------------------------|
-| Save    | In the "Voice Cloning" tab — enter a name and click "Save"          |
-| Preview | Click the ▶ button next to the voice name in the dropdown           |
-| Rename  | Select a voice, type a new name in the rename field, click "Rename" |
-| Delete  | Select a voice and click 🗑                                         |
-| Refresh | Click ⟳ to reload the list (useful after saving in another tab)     |
-
-Saved voices are stored as WAV files in the `saved_voices/` directory.
-
----
-
-## UI Features
-
-### Activity Log Panel
-
-A floating panel (toggled with the **ЛОГ** button on the right edge) shows:
-
-- Real-time synthesis progress with percentage and estimated time remaining
-- Click events on UI elements
-- Synthesis stage labels (e.g. "Loading model", "Synthesizing word 12/45")
-- Completion and error states
-
-The panel is draggable and resizable. Its position and size persist across page reloads via `sessionStorage`.
-
-### Equalizer Loader
-
-While synthesis is running, an animated equalizer overlay appears on Gradio loading components. It turns green on
-success and red on error.
-
-### Singleton Audio Manager (`window.__ttsAudio`)
-
-A JavaScript singleton ensures only one audio source plays at a time across all tabs. It:
-
-- Intercepts `HTMLMediaElement.play()` at the prototype level
-- Intercepts `AudioBufferSourceNode.start()` for Web Audio API sources (WaveSurfer)
-- Suspends/resumes all registered `AudioContext` instances
-- Exposes a public API: `play(url)`, `stop()`, `subscribe(fn)`, `isPlaying`, `currentAudio`
-
-Switching tabs automatically stops all playback.
+The server starts at `http://127.0.0.1:7860` and opens the browser automatically.  
+Stop with `Ctrl+C`.
 
 ---
 
@@ -281,206 +129,199 @@ Switching tabs automatically stops all playback.
 
 ```
 tts/
-├── app.py                      # Entry point — assembles tabs, loads CSS/JS, launches Gradio
-├── requirements.txt            # Base Python dependencies
-├── run.bat                     # One-click launch script
-├── install_xtts.bat            # XTTS v2 installer script
-├── add_voices.py               # OneCore voice registration (run via add_voices_admin.bat)
-├── add_voices_admin.bat        # Launches add_voices.py with administrator rights
-│
-├── static/                     # Static front-end assets (loaded at runtime)
-│   ├── styles.css              # All CSS: logger panel, EQ loader, dropdown play buttons
-│   └── js/
-│       ├── global.js           # Audio manager singleton + activity logger + progress bar
-│       └── inject_options.js   # Injects ▶/⏹ play buttons into voice dropdown options
-│
-├── core/                       # Business logic (no UI dependencies)
-│   ├── audio.py                # WAV file I/O, timestamped file export
-│   └── voice_manager.py        # Save / load / rename / delete voice profiles
-│
-├── services/                   # TTS synthesis engines
-│   ├── tts_windows.py          # Windows SAPI synthesis via pyttsx3
-│   └── tts_xtts.py             # Coqui XTTS v2 neural voice cloning
-│
-├── ui/                         # Gradio tab components
-│   ├── constants.py            # Shared JS snippets (STOP_ALL_JS, PLAY_PREVIEW_JS) + file loaders
-│   ├── progress_stream.py      # Worker-thread progress streaming bridge for Gradio
-│   ├── windows_tab.py          # "Windows Voices" tab layout and event handlers
-│   ├── cloning_tab.py          # "Voice Cloning (XTTS v2)" tab layout and event handlers
-│   ├── my_voices_tab.py        # "My Voices" tab layout and event handlers
-│   └── history_tab.py          # "History" tab — file list, play/rename/delete modals
-│
-├── saved_voices/               # User-saved voice profiles (WAV files, git-ignored)
-├── voice_for_copy/             # Sample WAV files for testing voice cloning
-│   ├── voice_1.wav
-│   └── voice_2.wav
-└── .output_audio/              # Generated audio output (git-ignored)
+|-- app.py                      # FastAPI setup, middleware, router mounting, entrypoint
+|-- requirements.txt
+|-- install_xtts.bat            # XTTS v2 installer
+|-- add_voices_admin.bat        # OneCore voice registration (requires admin)
+|-- add_voices.py               # Registry script called by the bat above
+|
+|-- middleware/
+|   `-- no_cache.py             # NoCacheStaticMiddleware -- forces fresh JS/CSS on reload
+|
+|-- routers/                    # FastAPI routers (one file per API group)
+|   |-- voices.py               # GET/POST/PUT/DELETE /api/voices/*
+|   |-- xtts.py                 # GET /api/xtts/status
+|   |-- synthesis.py            # POST /api/synthesize/{windows,xtts,saved}
+|   `-- history.py              # GET/PUT/DELETE /api/history/*
+|
+|-- core/                       # Business logic -- no FastAPI dependencies
+|   |-- schemas.py              # Shared Pydantic models (RenameBody)
+|   |-- audio.py                # WAV I/O: wav_to_numpy, save_named_audio
+|   |-- history_manager.py      # History file CRUD
+|   `-- voice_manager.py        # Saved voices CRUD
+|
+|-- services/                   # External integrations and synthesis engines
+|   |-- sse.py                  # SSE streaming helper: run_synth_stream, sse_frame
+|   |-- tts_windows.py          # Windows SAPI synthesis via pyttsx3
+|   `-- tts_xtts.py             # Coqui XTTS v2 neural voice cloning
+|
+`-- static/                     # Frontend -- plain HTML/CSS/ES modules, no framework
+    |-- index.html              # Single-page shell with all 4 tabs
+    |-- css/
+    |   |-- base.css            # CSS variables, layout, toasts
+    |   |-- tabs.css
+    |   |-- forms.css
+    |   |-- audio.css           # Audio player styles (.ap-wave, .ap-play, ...)
+    |   |-- custom-select.css
+    |   |-- voices.css
+    |   |-- history.css
+    |   |-- modal.css
+    |   |-- logger.css
+    |   |-- file-upload.css
+    |   `-- loader.css
+    `-- js/
+        |-- app.js              # Entry point -- lazy tab initialisation
+        |-- api.js              # fetch helpers + SSE stream parser
+        |-- audio-manager.js    # Singleton: only one AudioPlayer plays at a time
+        |-- audio-player.js     # Custom audio player (play/pause/seek/download)
+        |-- wave-renderer.js    # Canvas waveform renderer (WaveSurfer look-alike, no CDN)
+        |-- custom-select.js    # Custom dropdown select component
+        |-- events.js           # Cross-tab EventTarget bus
+        |-- file-upload.js      # Drag-and-drop file upload component
+        |-- icons.js            # Inline SVG strings
+        |-- loader.js           # Spinner and skeleton helpers
+        |-- logger.js           # Floating activity log panel
+        |-- modal.js            # Promise-based confirm/prompt modals
+        |-- tabs.js             # Tab switching
+        |-- toast.js            # Toast notifications
+        `-- tabs/
+            |-- windows.js      # Windows Voices tab
+            |-- cloning.js      # XTTS Voice Cloning tab
+            |-- saved.js        # My Voices tab
+            `-- history.js      # History tab
 ```
 
 ---
 
-## Code Architecture
+## Architecture
 
-### Data Flow: Windows TTS
+### Backend — FastAPI
 
-```
-User input (text, voice, rate, volume)
-    │
-    ▼
-ui/windows_tab.py  →  _synthesize()  [input validation]
-    │
-    ▼
-ui/progress_stream.py  →  stream()
-    ├── spawns worker thread
-    ├── worker calls: services/tts_windows.synthesize(text, voice, rate, volume, progress=cb)
-    │       ├── pyttsx3.init()  →  set voice / rate / volume
-    │       ├── connect('started-word', on_word)  →  word-by-word progress
-    │       ├── engine.save_to_file()  →  temp WAV
-    │       ├── core/audio.wav_to_numpy()  →  read temp WAV
-    │       └── core/audio.save_named_audio()  →  .output_audio/audio-YYYY-MM-DD_HH-MM-SS.wav
-    └── main thread yields progress events to Gradio status textbox
-    │
-    ▼
-Browser: JS polls status textbox every 200ms → updates progress bar + activity log
-    │
-    ▼
-Final yield: (audio_path, "✓ Done — VoiceName (X.Xs)")
-```
+`app.py` is a thin entry point. All logic lives in focused modules:
 
-### Data Flow: XTTS Voice Cloning
+| Layer | Responsibility |
+|-------|----------------|
+| `routers/` | HTTP route handlers, request/response validation |
+| `services/sse.py` | Runs synthesis in a worker thread, streams progress via SSE |
+| `services/tts_*.py` | Synthesis engines -- accept `progress=cb` callback |
+| `core/` | Pure business logic: file I/O, CRUD, Pydantic schemas |
+| `middleware/` | HTTP-level concerns (cache headers) |
+
+### SSE Synthesis Flow
 
 ```
-User input (text, speaker_audio, language)
-    │
-    ▼
-ui/cloning_tab.py  →  _synthesize()  [input validation]
-    │
-    ▼
-ui/progress_stream.py  →  stream()
-    ├── spawns worker thread
-    ├── worker calls: services/tts_xtts.synthesize(text, speaker_wav, language, progress=cb)
-    │       ├── _get_model()  →  lazy-load XTTS v2, cache in _tts_model global
-    │       │       ├── patch torch.load() for weights_only compatibility
-    │       │       ├── patch Xtts.load_checkpoint() for strict=False
-    │       │       ├── TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-    │       │       └── .to("cuda") or .to("cpu")
-    │       ├── tts.tts_to_file(text, speaker_wav, language, file_path=tmp)
-    │       ├── core/audio.wav_to_numpy()  →  read temp WAV
-    │       └── core/audio.save_named_audio()  →  .output_audio/audio-YYYY-MM-DD_HH-MM-SS.wav
-    └── main thread yields progress events to Gradio
-    │
-    ▼
-(Optional) User clicks "Save" →  core/voice_manager.save_voice(audio_path, name)
-    └── copies WAV to saved_voices/{name}.wav
+POST /api/synthesize/{engine}
+        |
+        v
+routers/synthesis.py  -->  run_synth_stream(core_fn, args)
+        |
+        |-- spawns worker thread
+        |       `-- core_fn(*args, progress=cb)
+        |               |-- cb(0.1, "Initialising...")  -->  queue.put(("progress", ...))
+        |               |-- cb(0.5, "Synthesising...")  -->  queue.put(("progress", ...))
+        |               `-- returns (audio_path, status)
+        |
+        `-- async generator polls queue --> yields SSE frames
+                event: progress  data: {"value": 0.5, "desc": "Synthesising..."}
+                event: done      data: {"audio_url": "...", "filename": "...", "status": "..."}
+                event: error     data: {"status": "... error ..."}
 ```
 
-### Data Flow: My Voices Preview
+### Frontend — ES Modules
+
+`app.js` boots on page load. Only the **Windows** tab initialises immediately; all other tabs
+initialise lazily the first time the user clicks them — reducing startup API calls from 4 to 1.
 
 ```
-User clicks ▶ on a dropdown option
-    │
-    ▼
-static/js/inject_options.js  →  playVoice(name)
-    ├── reads URL map from #voice_urls_data hidden textbox
-    ├── builds candidate URL list:
-    │       /gradio_api/file={abs_path}
-    │       /file={abs_path}
-    │       /gradio_api/file=saved_voices/{name}.wav
-    │       /file=saved_voices/{name}.wav
-    └── window.__ttsAudio.play(url)  →  tries each URL in order
-            ├── stops all other audio (pause + currentTime=0)
-            ├── suspends all AudioContext instances
-            └── plays via internal <audio> element
+app.js
+  |-- launch('windows')              <-- immediate on page load
+  `-- on tab click --> launch(name)  <-- lazy init, once per tab
 ```
 
-### `ui/progress_stream.py` — Streaming Bridge
+### Audio Player and Waveform
 
-Bridges blocking synthesis functions with Gradio's async generator interface:
+`AudioPlayer` (`audio-player.js`) owns a native `<audio>` element for playback and a
+`WaveRenderer` (`wave-renderer.js`) for the canvas waveform.
 
-```python
-def stream(core_fn, args):
-    # Runs core_fn(*args, progress=cb) in a worker thread.
-    # Worker puts progress events into a Queue.
-    # Main thread (generator) yields from the Queue without sleep-polling.
-    # Yields:  (None, "[NN%] description")  for each progress event
-    # Yields:  (audio_path, final_status)   as the final result
-```
-
-Progress format: `[NNN%] description` — parsed by browser JS to update the progress bar.
-
-### `ui/constants.py` — Shared JS Snippets
-
-| Name              | Type   | Description                                                                                  |
-|-------------------|--------|----------------------------------------------------------------------------------------------|
-| `STOP_ALL_JS`     | `str`  | JS that stops all audio before synthesis starts. Used as `js=` on every synthesize button.   |
-| `PLAY_PREVIEW_JS` | `str`  | JS that plays the hidden preview audio through `window.__ttsAudio` when a voice is selected. |
-| `_load_css()`     | `func` | Reads `static/styles.css` and returns its content as a string.                               |
-| `_load_js(name)`  | `func` | Reads `static/js/{name}` and returns its content as a string.                                |
+- **Waveform**: fetches audio via `fetch` + Web Audio API `decodeAudioData`, computes per-bar
+  peak amplitudes, draws with Canvas 2D -- same visual as WaveSurfer bar mode
+  (`barWidth:2  barGap:1  barRadius:2  height:40`).
+- **Smooth progress**: a `requestAnimationFrame` loop (60 fps) updates the waveform fill and
+  time display while audio plays.
+- **Singleton**: `audioManager` ensures only one player plays at a time across all tabs.
 
 ---
 
-## Output Files
+## API Reference
 
-| Location         | Pattern                         | Created by                         |
-|------------------|---------------------------------|------------------------------------|
-| `.output_audio/` | `audio-YYYY-MM-DD_HH-MM-SS.wav` | Every synthesis (Windows or XTTS)  |
-| `saved_voices/`  | `{name}.wav`                    | "Save" button in Voice Cloning tab |
+### Voices
 
-Both directories are created automatically on first run and excluded from git.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/voices/windows` | List Windows SAPI voices + default |
+| `GET` | `/api/voices/saved` | List saved voice profiles |
+| `GET` | `/api/voices/saved/{name}/audio` | Stream saved voice WAV |
+| `POST` | `/api/voices/saved` | Upload + save a voice profile |
+| `PUT` | `/api/voices/saved/{name}` | Rename a saved voice |
+| `DELETE` | `/api/voices/saved/{name}` | Delete a saved voice |
+
+### XTTS
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/xtts/status` | XTTS install status + language map |
+
+### Synthesis (SSE)
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/synthesize/windows` | `{text, voice, rate, volume}` | Synthesise with Windows SAPI |
+| `POST` | `/api/synthesize/xtts` | multipart `{audio, text, language}` | Clone + synthesise with XTTS |
+| `POST` | `/api/synthesize/saved` | `{text, voice, language}` | Synthesise with saved voice |
+
+All synthesis endpoints return `text/event-stream` (SSE).
+
+### History
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/history` | List generated audio files (newest first) |
+| `GET` | `/api/history/{name}/audio` | Download a generated WAV |
+| `PUT` | `/api/history/{name}` | Rename a history file |
+| `DELETE` | `/api/history/{name}` | Delete a history file |
 
 ---
 
 ## Troubleshooting
 
-**No voices appear in the Windows Voices dropdown**
+**No voices in Windows Voices dropdown**  
+Run `add_voices_admin.bat` as administrator, then restart the app.
 
-Run `add_voices_admin.bat` as administrator, then restart the app. This registers OneCore voices in the Windows
-registry.
+**Voice Cloning tab shows "XTTS v2 not installed"**  
+Run `install_xtts.bat` and restart. The model (~1.8 GB) is downloaded on first use.
 
-**Voice Cloning tab shows "XTTS v2 is not installed"**
-
-Run `install_xtts.bat` and restart the app. The model (~1.8 GB) is downloaded on first synthesis.
-
-**`RuntimeError` or `TypeError` during voice cloning**
-
-PyTorch version mismatch. The app patches `torch.load()` automatically, but if issues persist:
-
+**RuntimeError during voice cloning**  
+PyTorch version mismatch. The app patches `torch.load` and `Xtts.load_checkpoint` automatically.
+If errors persist:
 ```bash
 pip install torch==2.1.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
-# or for CPU:
-pip install torch==2.1.0 torchaudio==2.1.0
 ```
 
-**Synthesis starts but produces no audio / empty file**
+**Waveform does not appear**  
+The canvas waveform decodes audio via the Web Audio API (supported in all modern browsers).
+If the waveform is flat, the audio file may be silent or corrupted.
 
-- Windows TTS: check that the selected voice is installed in `Control Panel → Speech Recognition → Text to Speech`
-- XTTS: the speaker WAV sample must be mono or stereo PCM, at least 3 seconds long
-
-**The browser doesn't open automatically**
-
-Open manually: [http://127.0.0.1:7860](http://127.0.0.1:7860)
-
-**Port 7860 is already in use**
-
-Another Gradio app is running. Stop it or change the port in `app.py`:
-
+**Port 7860 already in use**  
+Change the port in `app.py`:
 ```python
-app.launch(inbrowser=True, server_port=7861, allowed_paths=[VOICES_DIR, OUTPUT_DIR])
+uvicorn.run(app, host="127.0.0.1", port=7861, log_level="info")
 ```
 
-**Activity log panel is missing**
-
-The JS may not have loaded (old browser cache). Press `Ctrl+Shift+R` to hard-reload, or restart the server.
-
----
-
-## Related Projects
-
-- [Coqui TTS](https://github.com/coqui-ai/TTS) — the underlying XTTS v2 engine
-- [Gradio](https://github.com/gradio-app/gradio) — the web UI framework used
+**Old JS still loading after a code change**  
+The server sends `Cache-Control: no-store` for all JS/CSS. Do a hard refresh: `Ctrl + Shift + R`.
 
 ---
 
 ## License
 
-MIT — free to use, modify, and distribute.
+MIT -- free to use, modify, and distribute.

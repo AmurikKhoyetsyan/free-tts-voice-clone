@@ -1,0 +1,6 @@
+/* Saved voice select has inline preview play button on each option — handled
+   in JS by rendering a custom dropdown next to the native select. */
+
+.voice-select-wrap {
+    position: relative;
+}
