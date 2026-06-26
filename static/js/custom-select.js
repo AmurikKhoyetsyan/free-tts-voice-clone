@@ -1,19 +1,5 @@
 import { ICONS } from './icons.js';
 
-// Custom select with optional per-option action button (e.g. play preview).
-//
-// Usage:
-//   const sel = new CustomSelect(hostEl, {
-//       placeholder: 'Выберите голос',
-//       onChange: (value) => {},
-//       onAction: (value) => {},   // optional — show extra button per option
-//       actionIcon: ICONS.play,    // icon for that button
-//       actionTitle: 'Прослушать', // tooltip
-//   });
-//   sel.setOptions([{value: 'x', label: 'X'}, ...]);
-//   sel.setValue('x');
-//   sel.value;  // → 'x'
-
 const docOpenSelects = new Set();
 
 document.addEventListener('click', (e) => {
@@ -32,7 +18,6 @@ export class CustomSelect {
         this.opts = opts;
         this.options = [];
         this.value = null;
-        this.activeOptionEl = null;
         this._build();
     }
 
@@ -56,23 +41,33 @@ export class CustomSelect {
 
         this.popup = document.createElement('div');
         this.popup.className = 'cs-popup';
-        this.popup.hidden = true;
+        this.popup.style.display = 'none';
 
         this.root.append(this.trigger, this.popup);
         this.host.appendChild(this.root);
 
-        this.trigger.addEventListener('click', () => this.toggle());
+        this.root.addEventListener('click', (e) => {
+            e.stopPropagation();
 
-        this.popup.addEventListener('click', (e) => {
-            const optEl = e.target.closest('.cs-opt');
-            if (!optEl) return;
-            const value = optEl.dataset.value;
+            // Action button (e.g. preview play): only fire onAction, keep dropdown open
             if (e.target.closest('.cs-opt-action')) {
-                e.stopPropagation();
-                if (this.opts.onAction) this.opts.onAction(value);
+                const optEl = e.target.closest('.cs-opt');
+                if (optEl && this.opts.onAction) {
+                    this.opts.onAction(optEl.dataset.value);
+                }
                 return;
             }
-            this.setValue(value, true);
+
+            // Trigger button: toggle open/close
+            if (e.target.closest('.cs-trigger')) {
+                this.toggle();
+                return;
+            }
+
+            // Option row: select value and close
+            const optEl = e.target.closest('.cs-opt');
+            if (!optEl) return;
+            this.setValue(optEl.dataset.value, true);
             this.close();
         });
     }
@@ -102,7 +97,6 @@ export class CustomSelect {
     setValue(value, fire = false) {
         this.value = value;
         this._renderValue();
-        // re-mark active
         this.popup.querySelectorAll('.cs-opt').forEach(el =>
             el.classList.toggle('cs-opt-active', el.dataset.value === value)
         );
@@ -133,19 +127,19 @@ export class CustomSelect {
     }
 
     open() {
-        this.popup.hidden = false;
+        this.popup.style.display = 'block';
         this.root.classList.add('cs-open');
         docOpenSelects.add(this);
     }
 
     close() {
-        this.popup.hidden = true;
+        this.popup.style.display = 'none';
         this.root.classList.remove('cs-open');
         docOpenSelects.delete(this);
     }
 
     toggle() {
-        if (this.popup.hidden) this.open();
+        if (this.popup.style.display === 'none') this.open();
         else this.close();
     }
 

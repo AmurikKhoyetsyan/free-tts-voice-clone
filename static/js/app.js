@@ -12,18 +12,31 @@ const deleteIcon = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' 
 document.documentElement.style.setProperty('--icon-delete',
     `url("data:image/svg+xml;utf8,${encodeURIComponent(deleteIcon)}")`);
 
-async function initOne(name, fn) {
+const inits = {
+    windows: initWindows,
+    cloning: initCloning,
+    saved:   initSaved,
+    history: initHistory,
+};
+
+const ready = new Set();
+
+async function launch(name) {
+    if (ready.has(name) || !inits[name]) return;
+    ready.add(name);
     try {
-        await fn();
+        await inits[name]();
         log(`${name} tab готов`, 'done');
     } catch (e) {
         log(`${name} tab: ` + e.message, 'err');
     }
 }
 
-Promise.all([
-    initOne('Windows', initWindows),
-    initOne('Cloning', initCloning),
-    initOne('Saved',   initSaved),
-    initOne('History', initHistory),
-]);
+// Boot only the default (Windows) tab on page load
+launch('windows');
+
+// Lazily init other tabs the first time the user clicks on them
+document.getElementById('tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tab]');
+    if (tab) launch(tab.dataset.tab);
+});

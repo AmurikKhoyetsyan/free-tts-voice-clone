@@ -39,9 +39,9 @@
                 <label class="label">Текст
                     <textarea id="win-text" rows="6" placeholder="Введите текст…"></textarea>
                 </label>
-                <label class="label">Голос
+                <div class="label">Голос
                     <div id="win-voice-mount"></div>
-                </label>
+                </div>
                 <div class="grid-2">
                     <label class="label">Скорость <span class="hint" id="win-rate-val">150</span>
                         <input type="range" id="win-rate" min="50" max="350" step="10" value="150">
@@ -71,9 +71,9 @@
                 <label class="label">Текст
                     <textarea id="xtts-text" rows="6" placeholder="Введите текст…"></textarea>
                 </label>
-                <label class="label">Образец голоса
+                <div class="label">Образец голоса
                     <div id="xtts-upload-mount"></div>
-                </label>
+                </div>
                 <div class="audio-player" data-player="xtts-sample"></div>
                 <div class="row gap">
                     <label class="label fill">Сохранить голос как
@@ -81,9 +81,9 @@
                     </label>
                     <button class="btn" id="xtts-save-btn">Сохранить</button>
                 </div>
-                <label class="label">Язык текста
+                <div class="label">Язык текста
                     <div id="xtts-lang-mount"></div>
-                </label>
+                </div>
                 <button class="btn btn-primary" id="xtts-go">Клонировать и синтезировать</button>
             </div>
             <div class="col">
@@ -100,9 +100,9 @@
     <section class="tab-panel" data-panel="saved">
         <div class="grid-2">
             <div class="col">
-                <label class="label">Выберите голос
+                <div class="label">Выберите голос
                     <div id="saved-voice-mount"></div>
-                </label>
+                </div>
                 <div class="row gap">
                     <input type="text" id="saved-rename" class="fill" placeholder="Новое имя…">
                     <button class="btn" id="saved-rename-btn">Переименовать</button>
@@ -111,9 +111,9 @@
                 <label class="label">Текст
                     <textarea id="saved-text" rows="6" placeholder="Введите текст…"></textarea>
                 </label>
-                <label class="label">Язык
+                <div class="label">Язык
                     <div id="saved-lang-mount"></div>
-                </label>
+                </div>
                 <button class="btn btn-primary" id="saved-go">Синтезировать</button>
             </div>
             <div class="col">
@@ -200,6 +200,6 @@
     <div class="log-resize" id="log-resize" title="Потяните, чтобы изменить высоту"></div>
 </div>
 
-<script type="module" src="/static/js/app.js"></script>
+<script type="module" src="/static/js/app.js?v=4"></script>
 </body>
 </html>
