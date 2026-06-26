@@ -1,6 +1,16 @@
-import WaveSurfer from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7.10.1/dist/wavesurfer.esm.js';
 import { ICONS } from './icons.js';
 import { audioManager } from './audio-manager.js';
+
+// Kick off CDN fetch immediately but don't block module init
+let _wsPromise = null;
+function _loadWS() {
+    if (!_wsPromise) {
+        _wsPromise = import('https://cdn.jsdelivr.net/npm/wavesurfer.js@7.10.1/dist/wavesurfer.esm.js')
+            .then(m => m.default);
+    }
+    return _wsPromise;
+}
+_loadWS(); // start fetching in background right away
 
 const fmt = (sec) => {
     if (!isFinite(sec) || sec < 0) return '0:00';
@@ -38,15 +48,13 @@ export class AudioPlayer {
     setSource(url, filename = null) {
         this.url = url;
         this.filename = filename;
-        if (this.ws) {
-            this.ws.destroy();
-            this.ws = null;
-        }
-        if (!url) {
-            this._renderEmpty();
-            return;
-        }
-        this._render(url);
+        if (this.ws) { this.ws.destroy(); this.ws = null; }
+        if (!url) { this._renderEmpty(); return; }
+        this._renderShell(url);
+        _loadWS().then(WaveSurfer => {
+            if (this.url !== url) return; // source changed while WS was loading
+            this._attachWaveSurfer(WaveSurfer, url);
+        });
     }
 
     setLoading(on) {
@@ -82,18 +90,39 @@ export class AudioPlayer {
         this.host.innerHTML = '<span>Здесь появится аудио</span>';
     }
 
-    _render(url) {
+    _renderShell(url) {
         this.host.classList.remove('empty');
         this.host.innerHTML = `
             <button class="ap-play" aria-label="Воспроизвести">${ICONS.play}</button>
-            <div class="ap-wave"></div>
+            <div class="ap-wave ap-wave-loading"></div>
             <div class="ap-time">0:00 / 0:00</div>
             <button class="ap-download" aria-label="Скачать">${ICONS.download}</button>
         `;
 
+        this.host.querySelector('.ap-play').addEventListener('click', () => {
+            if (this.ws) {
+                if (this.ws.isPlaying()) this.pause();
+                else this.play();
+            }
+        });
+
+        this.host.querySelector('.ap-download').addEventListener('click', () => {
+            if (!this.url) return;
+            const a = document.createElement('a');
+            a.href = this.url;
+            a.download = this.filename || 'audio.wav';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        });
+    }
+
+    _attachWaveSurfer(WaveSurfer, url) {
         const waveEl  = this.host.querySelector('.ap-wave');
         const timeEl  = this.host.querySelector('.ap-time');
         const playBtn = this.host.querySelector('.ap-play');
+        if (!waveEl) return;
+        waveEl.classList.remove('ap-wave-loading');
 
         this.ws = WaveSurfer.create({
             container: waveEl,
@@ -130,27 +159,12 @@ export class AudioPlayer {
         });
 
         this.ws.on('timeupdate', (currentTime) => {
-            const dur = this.ws.getDuration() || 0;
-            timeEl.textContent = `${fmt(currentTime)} / ${fmt(dur)}`;
+            if (!timeEl) return;
+            timeEl.textContent = `${fmt(currentTime)} / ${fmt(this.ws.getDuration() || 0)}`;
         });
 
         this.ws.on('ready', () => {
-            timeEl.textContent = `0:00 / ${fmt(this.ws.getDuration() || 0)}`;
-        });
-
-        playBtn.addEventListener('click', () => {
-            if (this.ws.isPlaying()) this.pause();
-            else this.play();
-        });
-
-        this.host.querySelector('.ap-download').addEventListener('click', () => {
-            if (!this.url) return;
-            const a = document.createElement('a');
-            a.href = this.url;
-            a.download = this.filename || 'audio.wav';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
+            if (timeEl) timeEl.textContent = `0:00 / ${fmt(this.ws.getDuration() || 0)}`;
         });
     }
 }

@@ -55,6 +55,19 @@
     overflow: hidden;
 }
 
+/* Shown while WaveSurfer JS is still downloading */
+.audio-player .ap-wave.ap-wave-loading {
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--border) 0%, var(--surface-2) 50%, var(--border) 100%);
+    background-size: 200% 100%;
+    animation: ap-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes ap-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
 .audio-player .ap-time {
     font-family: var(--mono);
     font-size: 11px;
