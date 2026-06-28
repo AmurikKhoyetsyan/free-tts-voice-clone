@@ -54,15 +54,21 @@ def _get_model():
     return _tts_model, None
 
 
+_status_cache = None
+
 def check_status():
+    global _status_cache
+    if _status_cache is not None:
+        return _status_cache
     try:
         from TTS.api import TTS
         import torch
         cuda = torch.cuda.is_available()
         device_name = torch.cuda.get_device_name(0) if cuda else "CPU"
-        return f"XTTS v2 установлен | Устройство: {device_name}"
+        _status_cache = f"XTTS v2 установлен | Устройство: {device_name}"
     except ImportError:
-        return "XTTS v2 не установлен. Запусти install_xtts.bat и перезапусти приложение."
+        _status_cache = "XTTS v2 не установлен. Запусти install_xtts.bat и перезапусти приложение."
+    return _status_cache
 
 
 def _emit(progress, value, desc):

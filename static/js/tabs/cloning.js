@@ -5,7 +5,6 @@ import { toast } from '../toast.js';
 import { events } from '../events.js';
 import { CustomSelect } from '../custom-select.js';
 import { FileUpload } from '../file-upload.js';
-import { withLoader } from '../loader.js';
 
 export async function init() {
     const text = document.getElementById('xtts-text');
@@ -34,16 +33,13 @@ export async function init() {
         placeholder: 'Выберите язык…',
     });
 
-    await withLoader(document.getElementById('xtts-lang-mount'), async () => {
-        try {
-            const data = await getJSON('/api/xtts/status');
-            info.textContent = data.status;
-            langSel.setOptions(Object.keys(data.languages).map(k => ({ value: k, label: k })));
-            if (data.languages['Русский']) langSel.setValue('Русский');
-            else if (Object.keys(data.languages).length) langSel.setValue(Object.keys(data.languages)[0]);
-        } catch (e) {
-            info.textContent = 'XTTS статус недоступен';
-        }
+    getJSON('/api/xtts/status').then(data => {
+        info.textContent = data.status;
+        langSel.setOptions(Object.keys(data.languages).map(k => ({ value: k, label: k })));
+        if (data.languages['Русский']) langSel.setValue('Русский');
+        else if (Object.keys(data.languages).length) langSel.setValue(Object.keys(data.languages)[0]);
+    }).catch(() => {
+        info.textContent = 'XTTS статус недоступен';
     });
 
     saveBtn.addEventListener('click', async () => {
