@@ -1,5 +1,6 @@
 import { getJSON, synthesizeStream } from '../api.js';
 import { AudioPlayer } from '../audio-player.js';
+import { audioManager } from '../audio-manager.js';
 import { log, progress } from '../logger.js';
 import { toast } from '../toast.js';
 import { CustomSelect } from '../custom-select.js';
@@ -39,6 +40,7 @@ export async function init() {
         if (!text.value.trim())  { toast('Введите текст для синтеза', 'warn'); return; }
         if (!voiceSel.value)     { toast('Выберите голос', 'warn'); return; }
 
+        audioManager.stopAll();
         btn.disabled = true;
         player.setLoading(true);
         status.className = 'status busy';

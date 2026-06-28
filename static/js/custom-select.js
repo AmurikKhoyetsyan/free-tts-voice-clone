@@ -136,6 +136,7 @@ export class CustomSelect {
         this.popup.style.display = 'none';
         this.root.classList.remove('cs-open');
         docOpenSelects.delete(this);
+        if (this.opts.onClose) this.opts.onClose();
     }
 
     toggle() {

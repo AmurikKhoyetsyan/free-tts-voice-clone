@@ -47,6 +47,10 @@ export async function init() {
         actionActiveIcon: ICONS.pause,
         actionTitle: 'Прослушать образец',
 
+        onClose: () => {
+            if (!previewAudio.paused) previewAudio.pause();
+        },
+
         onChange: (name) => {
             renameInput.value = name || '';
             // stop preview without touching the result player
@@ -149,7 +153,7 @@ export async function init() {
         if (!voiceSel.value)    { toast('Выберите голос', 'warn'); return; }
         if (!text.value.trim()) { toast('Введите текст для синтеза', 'warn'); return; }
 
-        if (!previewAudio.paused) previewAudio.pause();
+        audioManager.stopAll();
 
         btn.disabled = true;
         player.setLoading(true);

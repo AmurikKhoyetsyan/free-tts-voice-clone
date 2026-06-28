@@ -1,5 +1,6 @@
 import { getJSON, uploadForm, synthesizeStream } from '../api.js';
 import { AudioPlayer } from '../audio-player.js';
+import { audioManager } from '../audio-manager.js';
 import { log, progress } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
@@ -70,6 +71,7 @@ export async function init() {
         fd.append('text', text.value);
         fd.append('language', langSel.value || '');
 
+        audioManager.stopAll();
         btn.disabled = true;
         outPlayer.setLoading(true);
         status.className = 'status busy';
