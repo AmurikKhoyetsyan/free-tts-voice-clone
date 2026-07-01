@@ -1,7 +1,7 @@
 import { getJSON, postJSON, synthesizeStream } from '../api.js';
 import { FileUpload } from '../file-upload.js';
 import { CustomSelect } from '../custom-select.js';
-import { log } from '../logger.js';
+import { log, logLocal } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
 
@@ -331,6 +331,7 @@ export async function init() {
         // Pixel position (empty string = use alignment preset)
         fd.append('pos_x_px', posXpx !== null ? String(posXpx) : '');
         fd.append('pos_y_px', posYpx !== null ? String(posYpx) : '');
+        fd.append('preview_width', String(Math.round(vidInner.offsetWidth)));
 
         await synthesizeStream(
             '/api/video/burn',
@@ -345,6 +346,7 @@ export async function init() {
                     if (desc) {
                         statusEl.textContent = parseFfmpegDesc(desc) || 'Обработка…';
                         appendLog(desc);
+                        logLocal('[FFmpeg] ' + desc, 'info');
                     }
                 },
                 done(payload) {

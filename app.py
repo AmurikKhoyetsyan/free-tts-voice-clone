@@ -21,6 +21,8 @@ from middleware.no_cache import NoCacheStaticMiddleware
 from routers import voices, xtts, synthesis, history
 from routers import subtitles as subtitles_router
 from routers import video as video_router
+from routers import log_router
+from core.log import server_log
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -57,6 +59,7 @@ app.include_router(synthesis.router)
 app.include_router(history.router)
 app.include_router(subtitles_router.router)
 app.include_router(video_router.router)
+app.include_router(log_router.router)
 
 
 @app.get("/")
@@ -75,4 +78,5 @@ if __name__ == "__main__":
             pass
 
     threading.Thread(target=_open_browser, daemon=True).start()
+    server_log("Server started")
     uvicorn.run(app, host="127.0.0.1", port=7860, log_level="info")

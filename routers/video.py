@@ -1,8 +1,9 @@
-import os, re, json, shutil, subprocess, tempfile, threading, queue
+import os, re, json, shutil, subprocess, tempfile, threading, queue, datetime
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from core.schemas import RenameBody
+from core.log import write_log
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
@@ -274,6 +275,7 @@ def burn_subtitles(
     sub_height_px: int   = Form(0),
     pos_x_px:      str   = Form(""),
     pos_y_px:      str   = Form(""),
+    preview_width: int   = Form(0),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -362,6 +364,14 @@ def burn_subtitles(
                 fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
                          else _probe_dimensions(tmp_in)
 
+                # Scale CSS-pixel UI values → video-space pixels so sizes match the preview
+                if preview_width > 0 and fw > 0:
+                    px_scale = fw / preview_width
+                    style_dict["FontSize"] = max(1, round(float(style_dict["FontSize"]) * px_scale))
+                    for _k in ("PadX", "PadY", "Outline", "Shadow"):
+                        if _k in style_dict:
+                            style_dict[_k] = float(style_dict[_k]) * px_scale
+
                 # Build optional position override tag
                 pos_tag = ""
                 if use_pos:
@@ -409,6 +419,8 @@ def burn_subtitles(
                        "-vf", vf_chain,
                        *codec_args, tmp_out]
 
+                ts0 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                write_log(f"[{ts0}] [FFmpeg] cmd: {' '.join(cmd)}")
                 q.put(("progress", 0.12, "Запуск FFmpeg…"))
                 try:
                     proc = subprocess.Popen(
@@ -433,6 +445,7 @@ def burn_subtitles(
                             if not line:
                                 continue
                             q.put(("log", line))
+                            write_log(f"[FFmpeg] {line}")
                             if "time=" in line and total_sec > 0:
                                 try:
                                     t_str = line.split("time=")[1].split()[0]
