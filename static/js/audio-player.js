@@ -2,6 +2,8 @@ import { ICONS }        from './icons.js';
 import { audioManager } from './audio-manager.js';
 import { WaveRenderer } from './wave-renderer.js';
 
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
 const fmt = (sec) => {
     if (!isFinite(sec) || sec < 0) return '0:00';
     const m = Math.floor(sec / 60);
@@ -75,12 +77,27 @@ export class AudioPlayer {
         (this._cbs[event] || []).forEach(cb => { try { cb(); } catch (_) {} });
     }
 
-    _startRaf(audio, wave, timeEl) {
-        const tick = () => {
-            const dur = audio.duration;
-            const cur = audio.currentTime;
-            if (isFinite(dur) && dur > 0) wave.setProgress(cur / dur);
-            timeEl.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+    _startRaf(audio, wave, curEl) {
+        let baseWall  = performance.now();
+        let baseAudio = audio.currentTime;
+
+        const tick = (wall) => {
+            const dur  = audio.duration;
+            const real = audio.currentTime;
+
+            // Re-sync base if playback position drifted (seek, rate change)
+            const rate = audio.playbackRate || 1;
+            const extrapolated = baseAudio + (wall - baseWall) / 1000 * rate;
+            if (Math.abs(real - extrapolated) > 0.08) {
+                baseAudio = real;
+                baseWall  = wall;
+            }
+
+            if (isFinite(dur) && dur > 0) {
+                const cur = Math.min(dur, baseAudio + (wall - baseWall) / 1000 * rate);
+                wave.setProgress(cur / dur);
+                curEl.textContent = fmt(cur);
+            }
             this._raf = requestAnimationFrame(tick);
         };
         this._raf = requestAnimationFrame(tick);
@@ -98,15 +115,32 @@ export class AudioPlayer {
     _renderShell(url) {
         this.host.classList.remove('empty');
         this.host.innerHTML = `
-            <button class="ap-play" aria-label="Воспроизвести">${ICONS.play}</button>
-            <div class="ap-wave"></div>
-            <div class="ap-time">0:00 / 0:00</div>
-            <button class="ap-download" aria-label="Скачать">${ICONS.download}</button>
+            <div class="ap-wave-bg">
+                <div class="ap-wave"></div>
+            </div>
+            <div class="ap-timestamps">
+                <span class="ap-time-cur">0:00</span>
+                <span class="ap-time-dur">0:00</span>
+            </div>
+            <div class="ap-controls">
+                <button class="ap-vol" aria-label="Громкость">${ICONS.volume}</button>
+                <button class="ap-speed" aria-label="Скорость воспроизведения">1x</button>
+                <div class="ap-flex-gap"></div>
+                <button class="ap-skip-back" aria-label="Назад 5 сек">${ICONS.skipBack}</button>
+                <button class="ap-play" aria-label="Воспроизвести">${ICONS.play}</button>
+                <button class="ap-skip-fwd" aria-label="Вперёд 5 сек">${ICONS.skipFwd}</button>
+                <div class="ap-flex-gap"></div>
+                <button class="ap-download" aria-label="Скачать">${ICONS.download}</button>
+            </div>
         `;
 
-        const waveEl  = this.host.querySelector('.ap-wave');
-        const timeEl  = this.host.querySelector('.ap-time');
-        const playBtn = this.host.querySelector('.ap-play');
+        const waveEl   = this.host.querySelector('.ap-wave');
+        const curEl    = this.host.querySelector('.ap-time-cur');
+        const durEl    = this.host.querySelector('.ap-time-dur');
+        const playBtn  = this.host.querySelector('.ap-play');
+        const speedBtn = this.host.querySelector('.ap-speed');
+        const skipB    = this.host.querySelector('.ap-skip-back');
+        const skipF    = this.host.querySelector('.ap-skip-fwd');
 
         const audio = new Audio(url);
         this._audio = audio;
@@ -115,10 +149,26 @@ export class AudioPlayer {
         this._wave = wave;
         wave.load(url);
 
+        // Speed cycling
+        let speedIdx = 2; // 1x
+        speedBtn.addEventListener('click', () => {
+            speedIdx = (speedIdx + 1) % SPEEDS.length;
+            const s = SPEEDS[speedIdx];
+            audio.playbackRate = s;
+            speedBtn.textContent = Number.isInteger(s) ? `${s}x` : `${s}x`;
+        });
+
+        skipB.addEventListener('click', () => {
+            if (isFinite(audio.duration)) audio.currentTime = Math.max(0, audio.currentTime - 5);
+        });
+        skipF.addEventListener('click', () => {
+            if (isFinite(audio.duration)) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+        });
+
         audio.addEventListener('play', () => {
             playBtn.innerHTML = ICONS.pause;
             playBtn.setAttribute('aria-label', 'Пауза');
-            this._startRaf(audio, wave, timeEl);
+            this._startRaf(audio, wave, curEl);
             this._emit('play');
         });
         audio.addEventListener('pause', () => {
@@ -132,12 +182,12 @@ export class AudioPlayer {
             playBtn.innerHTML = ICONS.play;
             playBtn.setAttribute('aria-label', 'Воспроизвести');
             wave.setProgress(0);
-            timeEl.textContent = `0:00 / ${fmt(audio.duration)}`;
+            curEl.textContent = '0:00';
             audioManager.stop(this);
             this._emit('ended');
         });
         audio.addEventListener('loadedmetadata', () => {
-            timeEl.textContent = `0:00 / ${fmt(audio.duration)}`;
+            durEl.textContent = fmt(audio.duration);
         });
 
         playBtn.addEventListener('click', () => {
@@ -149,7 +199,7 @@ export class AudioPlayer {
             if (isFinite(audio.duration) && audio.duration > 0) {
                 audio.currentTime = ratio * audio.duration;
                 wave.setProgress(ratio);
-                timeEl.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
+                curEl.textContent = fmt(audio.currentTime);
             }
         });
 

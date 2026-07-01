@@ -6,11 +6,9 @@
 const BAR_W  = 2;   // px (logical)
 const BAR_G  = 1;   // px gap between bars
 const BAR_R  = 2;   // px corner radius
-const HEIGHT = 40;  // px
-const COLOR_TRACK    = '#d1d5db';
+const HEIGHT = 56;  // px
+const COLOR_TRACK    = '#d4d6de';
 const COLOR_PROGRESS = '#f97316';
-const COLOR_CURSOR   = '#f97316';
-const CURSOR_W = 2; // px
 
 export class WaveRenderer {
     constructor(container) {
@@ -20,7 +18,7 @@ export class WaveRenderer {
 
         this.canvas = document.createElement('canvas');
         this.canvas.style.cssText =
-            `width:100%;height:${HEIGHT}px;display:block;cursor:pointer;border-radius:4px;`;
+            `width:100%;height:${HEIGHT}px;display:block;cursor:pointer;`;
         container.appendChild(this.canvas);
         this._resize();
     }
@@ -91,6 +89,18 @@ export class WaveRenderer {
         }
         const maxV = Math.max(...this.peaks, 0.001);
         for (let i = 0; i < n; i++) this.peaks[i] /= maxV;
+
+        // Two-pass weighted smoothing for a natural, flowing waveform
+        for (let pass = 0; pass < 2; pass++) {
+            const s = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                const l = this.peaks[Math.max(0, i - 1)];
+                const c = this.peaks[i];
+                const r = this.peaks[Math.min(n - 1, i + 1)];
+                s[i] = l * 0.25 + c * 0.5 + r * 0.25;
+            }
+            this.peaks = s;
+        }
     }
 
     _draw(progress) {
@@ -102,22 +112,29 @@ export class WaveRenderer {
         const barW  = Math.round(BAR_W * dpr);
         const barR  = Math.round(BAR_R * dpr);
         const step  = Math.round((BAR_W + BAR_G) * dpr);
-        const progX = Math.round(progress * w);
+        const progX = progress * w;
 
         ctx.clearRect(0, 0, w, h);
 
-        let x = 0;
-        for (let i = 0; i < this.peaks.length && x + barW <= w; i++, x += step) {
-            const barH = Math.max(2, this.peaks[i] * h);
-            const y    = (h - barH) / 2;
-            ctx.fillStyle = x < progX ? COLOR_PROGRESS : COLOR_TRACK;
-            this._roundRect(ctx, x, y, barW, barH, barR);
-            ctx.fill();
-        }
-
-        if (progX > 0 && progX < w) {
-            ctx.fillStyle = COLOR_CURSOR;
-            ctx.fillRect(progX - Math.round(dpr), 0, Math.round(CURSOR_W * dpr), h);
+        // Draw all bars in track color, then overdraw played region in progress color
+        for (let pass = 0; pass < 2; pass++) {
+            if (pass === 1 && progX <= 0) break;
+            ctx.save();
+            if (pass === 0) {
+                ctx.fillStyle = COLOR_TRACK;
+            } else {
+                ctx.beginPath();
+                ctx.rect(0, 0, progX, h);
+                ctx.clip();
+                ctx.fillStyle = COLOR_PROGRESS;
+            }
+            let x = 0;
+            for (let i = 0; i < this.peaks.length && x + barW <= w; i++, x += step) {
+                const barH = Math.max(h * 0.06, this.peaks[i] * h);
+                this._roundRect(ctx, x, (h - barH) / 2, barW, barH, barR);
+                ctx.fill();
+            }
+            ctx.restore();
         }
     }
 
