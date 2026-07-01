@@ -1,4 +1,4 @@
-import os, json, shutil, subprocess, tempfile, threading, queue
+import os, re, json, shutil, subprocess, tempfile, threading, queue
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -147,13 +147,46 @@ def _probe_dimensions(path: str) -> tuple:
 def _srt_to_ass(srt_content: str, style_dict: dict,
                 pos_tag: str = "", frame_w: int = 0) -> str:
     """Convert SRT to ASS with embedded style and optional \\pos / margins."""
-    sd = style_dict
+    sd           = style_dict
+    border_style = int(sd.get("BorderStyle", 1))
+    font_size    = float(sd.get("FontSize", 24))
+    sub_w_px     = int(sd.get("SubWidthPx",  0))
+    sub_h_px     = int(sd.get("SubHeightPx", 0))
 
-    # Margins from max_width (text wrap region)
+    # ── Padding / Outline ─────────────────────────────────────────────────────
+    if border_style == 3:
+        # Separate horizontal/vertical padding.
+        # ASS Outline applies uniformly → use max(padX, padY) as the Outline
+        # and compensate margins so the wider-padding axis gets extra margin.
+        pad_x = float(sd.get("PadX", 6))
+        pad_y = float(sd.get("PadY", 6))
+        final_outline = max(pad_x, pad_y)
+        # Extra horizontal margin when padX > padY (outline would under-pad horizontally)
+        extra_h_margin = max(0, pad_x - pad_y)
+        # Height override: ensure box height ≥ sub_h_px
+        if sub_h_px > 0:
+            text_h_1line  = font_size * 1.35
+            needed_v_pad  = max(0, (sub_h_px - text_h_1line) / 2)
+            if needed_v_pad > final_outline:
+                extra_from_h  = needed_v_pad - final_outline  # extra beyond current
+                final_outline = needed_v_pad
+                extra_h_margin = max(0, extra_h_margin + extra_from_h)
+    else:
+        final_outline  = float(sd.get("Outline", 0))
+        extra_h_margin = 0
+
+    # ── Width → text-wrap margins ─────────────────────────────────────────────
     margin_l = margin_r = 0
-    if frame_w > 0 and "MaxWidth" in sd:
-        side = round(frame_w * (1 - float(sd["MaxWidth"]) / 100) / 2)
-        margin_l = margin_r = max(0, side)
+    if frame_w > 0:
+        if sub_w_px > 0:
+            # sub_w_px = desired text-wrap width (box = sub_w_px + 2*final_outline)
+            text_wrap = max(font_size * 2, float(sub_w_px))
+        elif "MaxWidth" in sd:
+            text_wrap = max(font_size * 2, frame_w * float(sd["MaxWidth"]) / 100)
+        else:
+            text_wrap = frame_w
+        base_margin   = max(0, int((frame_w - text_wrap) / 2))
+        margin_l = margin_r = base_margin + int(extra_h_margin)
 
     style_line = ",".join([
         "Default",
@@ -166,11 +199,11 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         str(sd.get("Bold",          "0")),
         "0", "0", "0",          # Italic, Underline, StrikeOut
         "100", "100", "0", "0", # ScaleX, ScaleY, Spacing, Angle
-        str(sd.get("BorderStyle",   "1")),
-        str(sd.get("Outline",       "0")),
+        str(border_style),
+        str(int(round(final_outline))),
         str(sd.get("Shadow",        "0")),
         str(sd.get("Alignment",     "2")),
-        str(margin_l), str(margin_r), "10", "1",
+        str(margin_l), str(margin_r), str(sd.get("MarginV", 10)), "1",
     ])
 
     header = (
@@ -220,7 +253,8 @@ def burn_subtitles(
     position:      str   = Form("bottom"),
     bg_opacity:    int   = Form(50),
     bg_color:      str   = Form("000000"),
-    bg_padding:    int   = Form(6),
+    bg_pad_x:      int   = Form(12),
+    bg_pad_y:      int   = Form(6),
     outline_size:  float = Form(1.0),
     outline_color: str   = Form("000000"),
     shadow_size:   float = Form(0.0),
@@ -230,6 +264,9 @@ def burn_subtitles(
     output_height: int   = Form(0),
     resize_mode:   str   = Form("pad"),
     max_width_pct: float = Form(90.0),
+    margin_v:      int   = Form(10),
+    sub_width_px:  int   = Form(0),
+    sub_height_px: int   = Form(0),
     pos_x_px:      str   = Form(""),
     pos_y_px:      str   = Form(""),
 ):
@@ -255,14 +292,18 @@ def burn_subtitles(
         "Bold":         -1 if bold else 0,
         "Alignment":    align,
         "MaxWidth":     max_width_pct,
+        "MarginV":      margin_v,
+        "SubWidthPx":   sub_width_px,
+        "SubHeightPx":  sub_height_px,
     }
 
     if bg_opacity > 0:
-        # BorderStyle=3 → box background; Outline=padding inside box
+        # BorderStyle=3 → box background; separate horizontal/vertical padding
         style_dict.update({
             "BorderStyle": 3,
             "BackColour":  _hex_to_ass(bg_color, bg_opacity),
-            "Outline":     bg_padding,
+            "PadX":        bg_pad_x,
+            "PadY":        bg_pad_y,
         })
         if shadow_size > 0:
             style_dict["Shadow"] = shadow_size
@@ -270,7 +311,7 @@ def burn_subtitles(
         style_dict["BorderStyle"] = 1
         if outline_size > 0:
             style_dict.update({
-                "Outline":      outline_size,
+                "Outline":       outline_size,
                 "OutlineColour": _hex_to_ass(outline_color),
             })
         if shadow_size > 0:
@@ -296,10 +337,12 @@ def burn_subtitles(
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
             )
 
-    use_pos = pos_x_px.strip() and pos_y_px.strip()
+    use_pos = bool(pos_x_px.strip() and pos_y_px.strip())
 
     total_sec = _probe_duration(video_src)
     q: queue.Queue = queue.Queue()
+
+    _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
     def worker():
         with tempfile.TemporaryDirectory() as tmp:
@@ -308,36 +351,30 @@ def burn_subtitles(
             tmp_out = os.path.join(tmp, "output." + ext)
             shutil.copy(video_src, tmp_in)
 
+            # Always probe video dimensions for correct ASS margins
+            fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
+                     else _probe_dimensions(tmp_in)
+
+            # Build optional position override tag
+            pos_tag = ""
             if use_pos:
-                fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
-                         else _probe_dimensions(tmp_in)
                 try:
                     px = int(round(float(pos_x_px)))
                     py = int(round(float(pos_y_px)))
                 except ValueError:
                     px, py = fw // 2, int(fh * 0.92)
+                pos_tag = "{\\pos(" + str(px) + "," + str(py) + ")}"
 
-                with open(srt_src, encoding="utf-8") as f:
-                    srt_content = f.read()
+            # Always convert to ASS for reliable margin/style application
+            with open(srt_src, encoding="utf-8") as f:
+                srt_content = f.read()
+            ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw)
+            tmp_sub  = os.path.join(tmp, "sub.ass")
+            with open(tmp_sub, "w", encoding="utf-8") as f:
+                f.write(ass_text)
 
-                pos_tag  = "{\\pos(" + str(px) + "," + str(py) + ")}"
-                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw)
-                tmp_sub  = os.path.join(tmp, "sub.ass")
-                with open(tmp_sub, "w", encoding="utf-8") as f:
-                    f.write(ass_text)
-                sub_filter = "subtitles=sub.ass"
-
-            else:
-                shutil.copy(srt_src, os.path.join(tmp, "sub.srt"))
-                # Build force_style string from style_dict (exclude MaxWidth)
-                style_parts = [
-                    f"{k}={v}" for k, v in style_dict.items()
-                    if k not in ("MaxWidth",)
-                ]
-                style_str  = ",".join(style_parts)
-                sub_filter = f"subtitles=sub.srt:force_style='{style_str}'"
-
-            vf_chain = f"{resize_filter},{sub_filter}" if resize_filter else sub_filter
+            sub_filter = "subtitles=sub.ass"
+            vf_chain   = f"{resize_filter},{sub_filter}" if resize_filter else sub_filter
 
             cmd = [FFMPEG, "-y", "-i", tmp_in,
                    "-vf", vf_chain,
@@ -346,23 +383,37 @@ def burn_subtitles(
             try:
                 proc = subprocess.Popen(
                     cmd, cwd=tmp,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    universal_newlines=True, bufsize=1,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=0,
+                    creationflags=_CREATE_NO_WINDOW,
                 )
-                for line in proc.stdout:
-                    line = line.rstrip()
-                    if not line:
-                        continue
-                    # Always forward FFmpeg output lines to UI
-                    q.put(("log", line))
-                    if "time=" in line and total_sec > 0:
-                        try:
-                            t_str = line.split("time=")[1].split()[0]
-                            hh, mm, ss = t_str.split(":")
-                            done = int(hh) * 3600 + int(mm) * 60 + float(ss)
-                            q.put(("progress", min(0.95, done / total_sec), line))
-                        except Exception:
-                            pass
+                # FFmpeg writes progress with \r, not \n — read raw chunks
+                buf = b""
+                while True:
+                    chunk = proc.stdout.read(1024)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    parts = re.split(rb"\r\n|\r|\n", buf)
+                    buf = parts[-1]           # keep incomplete tail
+                    for raw in parts[:-1]:
+                        line = raw.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        q.put(("log", line))
+                        if "time=" in line and total_sec > 0:
+                            try:
+                                t_str = line.split("time=")[1].split()[0]
+                                if ":" in t_str and not t_str.startswith("-"):
+                                    hh, mm, ss = t_str.split(":")
+                                    done = int(hh) * 3600 + int(mm) * 60 + float(ss)
+                                    q.put(("progress", min(0.95, done / total_sec), line))
+                            except Exception:
+                                pass
+                # Flush any remaining bytes
+                if buf.strip():
+                    q.put(("log", buf.decode("utf-8", errors="replace").strip()))
                 proc.wait()
                 if proc.returncode != 0:
                     q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))

@@ -235,12 +235,16 @@
     pointer-events: none;
     z-index: 5;
     line-height: 1.35;
-    word-break: break-word;
+    /* Break only at word boundaries; split mid-word only as last resort */
+    word-break: normal;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
+    box-sizing: border-box;
     /* default styles — overridden by JS */
     font-size: 24px;
     font-family: Arial, sans-serif;
     color: #fff;
+    word-spacing: 0.2em;
     text-shadow: -1px -1px 0 #000, 1px -1px 0 #000,
                  -1px  1px 0 #000, 1px  1px 0 #000;
 }

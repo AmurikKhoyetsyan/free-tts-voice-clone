@@ -35,7 +35,8 @@ export async function init() {
     const bgOpacityR     = document.getElementById('vid-bg-opacity');
     const bgOpacityN     = document.getElementById('vid-bg-opacity-n');
     const bgColorEl      = document.getElementById('vid-bg-color');
-    const bgPaddingEl    = document.getElementById('vid-bg-padding');
+    const bgPadXEl       = document.getElementById('vid-bg-pad-x');
+    const bgPadYEl       = document.getElementById('vid-bg-pad-y');
     const bgRadiusEl     = document.getElementById('vid-bg-radius');
 
     const outlineSizeR   = document.getElementById('vid-outline-size');
@@ -50,6 +51,9 @@ export async function init() {
     const karaokeEnEl    = document.getElementById('vid-karaoke-enable');
     const lineHeightEl   = document.getElementById('vid-line-height');
     const maxWidthEl     = document.getElementById('vid-max-width');
+    const marginVEl      = document.getElementById('vid-margin-v');
+    const subWidthEl     = document.getElementById('vid-sub-width');
+    const subHeightEl    = document.getElementById('vid-sub-height');
 
     const progressWrap   = document.getElementById('vid-progress-wrap');
     const progressFill   = document.getElementById('vid-progress-fill');
@@ -101,9 +105,9 @@ export async function init() {
     bindRN(shadowSizeR, shadowSizeN, () => applySubStyle());
 
     // Other controls → live preview
-    [fontFamilyEl, colorEl, boldEl, bgColorEl, bgPaddingEl, bgRadiusEl,
+    [fontFamilyEl, colorEl, boldEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
      outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl,
-     lineHeightEl, maxWidthEl]
+     lineHeightEl, maxWidthEl, marginVEl, subWidthEl, subHeightEl]
         .forEach(el => el && el.addEventListener('change', applySubStyle));
 
     // ── Position inputs ───────────────────────────────────────────────────────
@@ -305,7 +309,8 @@ export async function init() {
         fd.append('position',      posPresetEl.value);
         fd.append('bg_opacity',    bgOpacityN.value);
         fd.append('bg_color',      bgColorEl.value.replace('#', ''));
-        fd.append('bg_padding',    bgPaddingEl.value);
+        fd.append('bg_pad_x',      bgPadXEl ? bgPadXEl.value : '12');
+        fd.append('bg_pad_y',      bgPadYEl ? bgPadYEl.value : '6');
         fd.append('outline_size',  outlineSizeN.value);
         fd.append('outline_color', outlineColorEl.value.replace('#', ''));
         fd.append('shadow_size',   shadowSizeN.value);
@@ -315,6 +320,9 @@ export async function init() {
         fd.append('output_height', String(outputH));
         fd.append('resize_mode',   document.getElementById('vid-resize-mode').value);
         fd.append('max_width_pct', maxWidthEl.value);
+        fd.append('margin_v',     marginVEl  ? marginVEl.value  : '10');
+        fd.append('sub_width_px', subWidthEl  ? subWidthEl.value  : '0');
+        fd.append('sub_height_px', subHeightEl ? subHeightEl.value : '0');
         // Pixel position (empty string = use alignment preset)
         fd.append('pos_x_px', posXpx !== null ? String(posXpx) : '');
         fd.append('pos_y_px', posYpx !== null ? String(posYpx) : '');
@@ -347,19 +355,9 @@ export async function init() {
                     const selFmt  = formatEl.value;
                     if (selFmt) finalName = finalName.replace(/\.[^.]+$/, '') + '.' + selFmt;
 
-                    dlBtn.onclick = async (e) => {
-                        e.preventDefault();
-                        try {
-                            const resp = await fetch(payload.video_url);
-                            const blob = await resp.blob();
-                            const url  = URL.createObjectURL(blob);
-                            const a    = Object.assign(document.createElement('a'), { href: url, download: finalName });
-                            document.body.appendChild(a); a.click(); a.remove();
-                            setTimeout(() => URL.revokeObjectURL(url), 2000);
-                        } catch (err) {
-                            toast('Ошибка скачивания: ' + err.message, 'err');
-                        }
-                    };
+                    dlBtn.href = payload.video_url;
+                    dlBtn.setAttribute('download', finalName);
+                    dlBtn.onclick = null;
                     exportBlock.hidden = false;
                     log('Видео готово: ' + payload.filename, 'done');
                     toast('Видео обработано!', 'ok');
@@ -553,7 +551,8 @@ export async function init() {
         const bold         = boldEl.checked;
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
-        const bgPadding    = parseFloat(bgPaddingEl ? bgPaddingEl.value : 6) || 6;
+        const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
+        const padY         = parseFloat(bgPadYEl ? bgPadYEl.value : 6)  || 0;
         const bgRadius     = parseFloat(bgRadiusEl ? bgRadiusEl.value : 4) || 4;
         const outlineSize  = parseFloat(outlineSizeN ? outlineSizeN.value : outlineSizeR.value) || 0;
         const outlineColor = outlineColorEl.value;
@@ -561,18 +560,50 @@ export async function init() {
         const shadowColor  = shadowColorEl.value;
         const lineH        = parseFloat(lineHeightEl ? lineHeightEl.value : 1.35) || 1.35;
         const maxW         = parseFloat(maxWidthEl ? maxWidthEl.value : 90) || 90;
+        const marginV      = parseFloat(marginVEl ? marginVEl.value : 10) || 10;
+        const subW         = parseFloat(subWidthEl ? subWidthEl.value : 0) || 0;
+        const subH         = parseFloat(subHeightEl ? subHeightEl.value : 0) || 0;
 
         overlay.style.fontSize        = fontSize + 'px';
         overlay.style.fontFamily      = `"${fontFamily}", sans-serif`;
         overlay.style.color           = textColor;
         overlay.style.fontWeight      = bold ? '700' : '400';
         overlay.style.lineHeight      = lineH;
-        overlay.style.maxWidth        = maxW + '%';
-        overlay.style.backgroundColor = bgOpacity > 0 ? hexToRgba(bgColor, bgOpacity) : 'transparent';
-        overlay.style.padding         = bgOpacity > 0 ? `${bgPadding}px ${bgPadding * 2}px` : '0';
-        overlay.style.borderRadius    = bgOpacity > 0 ? bgRadius + 'px' : '0';
+        overlay.style.wordSpacing     = '0.2em';
         overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
         overlay.style.cursor          = overlay.innerHTML ? 'move' : 'default';
+
+        // Width: explicit px overrides max-width %
+        if (subW > 0) {
+            overlay.style.width    = subW + 'px';
+            overlay.style.maxWidth = 'none';
+        } else {
+            overlay.style.width    = '';
+            overlay.style.maxWidth = maxW + '%';
+        }
+
+        // Height: min-height with centered text for box feel
+        if (subH > 0) {
+            overlay.style.minHeight      = subH + 'px';
+            overlay.style.display        = 'flex';
+            overlay.style.flexDirection  = 'row';
+            overlay.style.alignItems     = 'center';
+            overlay.style.justifyContent = 'center';
+        } else {
+            overlay.style.minHeight      = '';
+            overlay.style.display        = '';
+            overlay.style.flexDirection  = '';
+            overlay.style.alignItems     = '';
+            overlay.style.justifyContent = '';
+        }
+
+        // Background — separate horizontal/vertical padding
+        overlay.style.backgroundColor = bgOpacity > 0 ? hexToRgba(bgColor, bgOpacity) : 'transparent';
+        overlay.style.padding         = bgOpacity > 0 ? `${padY}px ${padX}px` : '0';
+        overlay.style.borderRadius    = bgOpacity > 0 ? bgRadius + 'px' : '0';
+
+        // Translate marginV (video px) → overlay % for preview approximation
+        const marginVPct = videoNatH > 0 ? (marginV / videoNatH * 100) : 2;
 
         // Position
         if (posXpx !== null && posYpx !== null && videoNatW > 0) {
@@ -585,11 +616,31 @@ export async function init() {
             overlay.style.bottom = '';
             overlay.style.top    = '';
             switch (posPresetEl ? posPresetEl.value : 'bottom') {
-                case 'top':    overlay.style.top = '8%'; overlay.style.transform = 'translateX(-50%)'; break;
-                case 'middle': overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%,-50%)'; break;
-                default:       overlay.style.bottom = '8%'; overlay.style.transform = 'translateX(-50%)';
+                case 'top':
+                    overlay.style.top       = marginVPct + '%';
+                    overlay.style.transform = 'translateX(-50%)';
+                    break;
+                case 'middle':
+                    overlay.style.top       = '50%';
+                    overlay.style.transform = 'translate(-50%,-50%)';
+                    break;
+                default:
+                    overlay.style.bottom    = marginVPct + '%';
+                    overlay.style.transform = 'translateX(-50%)';
             }
         }
+
+        // Single-line preference: keep on one line if text fits, wrap only if it doesn't
+        fitOverlayLine();
+    }
+
+    function fitOverlayLine() {
+        if (!overlay.textContent.trim()) return;
+        // Measure text width in no-wrap mode
+        overlay.style.whiteSpace = 'nowrap';
+        const overflows = overlay.scrollWidth > overlay.offsetWidth;
+        // If text genuinely overflows the available box width → allow wrap
+        overlay.style.whiteSpace = overflows ? 'pre-wrap' : 'nowrap';
     }
 }
 
