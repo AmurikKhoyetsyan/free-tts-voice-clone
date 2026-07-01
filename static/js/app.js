@@ -5,6 +5,8 @@ import { init as initWindows } from './tabs/windows.js';
 import { init as initCloning } from './tabs/cloning.js';
 import { init as initSaved } from './tabs/saved.js';
 import { init as initHistory } from './tabs/history.js';
+import { init as initSubtitles } from './tabs/subtitles.js';
+import { init as initVideo } from './tabs/video.js';
 
 import { log } from './logger.js';
 
@@ -13,10 +15,12 @@ document.documentElement.style.setProperty('--icon-delete',
     `url("data:image/svg+xml;utf8,${encodeURIComponent(deleteIcon)}")`);
 
 const inits = {
-    windows: initWindows,
-    cloning: initCloning,
-    saved:   initSaved,
-    history: initHistory,
+    windows:   initWindows,
+    cloning:   initCloning,
+    saved:     initSaved,
+    history:   initHistory,
+    subtitles: initSubtitles,
+    video:     initVideo,
 };
 
 const ready = new Set();

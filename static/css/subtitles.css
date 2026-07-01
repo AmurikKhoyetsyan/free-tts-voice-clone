@@ -1,0 +1,214 @@
+/* ---- Subtitles tab ---- */
+.sub-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* SRT editor */
+.sub-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.sub-editor::-webkit-scrollbar { width: 4px; }
+.sub-editor::-webkit-scrollbar-track { background: transparent; }
+.sub-editor::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+.sub-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 4px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    align-items: start;
+}
+
+.sub-row-num {
+    grid-row: 1 / 3;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-dim);
+    padding-top: 6px;
+    text-align: center;
+}
+
+.sub-row-times {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.sub-row-times input {
+    font-family: var(--mono);
+    font-size: 11px;
+    width: 110px;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+}
+
+.sub-row-times input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.sub-arrow {
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.sub-row-text {
+    grid-column: 2;
+    font-size: 13px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    resize: vertical;
+    min-height: 40px;
+    font-family: var(--font);
+    line-height: 1.4;
+}
+
+.sub-row-text:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.sub-del-btn {
+    grid-row: 1 / 3;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color .12s, background .12s;
+    padding: 0;
+    align-self: center;
+}
+
+.sub-del-btn:hover {
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+
+.sub-del-btn svg { width: 14px; height: 14px; }
+
+.sub-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+/* Saved SRT list */
+.sub-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.sub-file-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    cursor: pointer;
+    transition: border-color .12s, background .12s;
+}
+
+.sub-file-row:hover { background: var(--surface); border-color: var(--accent); }
+
+.sub-file-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sub-file-btns {
+    display: flex;
+    gap: 4px;
+}
+
+.sub-file-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color .12s, background .12s;
+    padding: 0;
+}
+
+.sub-file-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.sub-file-btn.danger:hover { color: var(--danger); background: var(--danger-soft); }
+.sub-file-btn svg { width: 14px; height: 14px; }
+
+/* Video tab */
+.vid-preview-wrap {
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#vid-preview {
+    width: 100%;
+    max-height: 320px;
+    display: none;
+}
+
+.vid-empty {
+    color: #666;
+    font-size: 13px;
+    padding: 32px;
+    text-align: center;
+}
+
+/* Color input */
+input[type="color"] {
+    width: 40px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2px;
+    cursor: pointer;
+    background: var(--surface);
+}

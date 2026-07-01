@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 
 from middleware.no_cache import NoCacheStaticMiddleware
 from routers import voices, xtts, synthesis, history
+from routers import subtitles as subtitles_router
+from routers import video as video_router
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -30,6 +32,8 @@ app.include_router(voices.router)
 app.include_router(xtts.router)
 app.include_router(synthesis.router)
 app.include_router(history.router)
+app.include_router(subtitles_router.router)
+app.include_router(video_router.router)
 
 
 @app.get("/")

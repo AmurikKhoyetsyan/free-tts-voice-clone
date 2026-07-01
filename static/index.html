@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/static/css/custom-select.css">
     <link rel="stylesheet" href="/static/css/file-upload.css">
     <link rel="stylesheet" href="/static/css/loader.css">
+    <link rel="stylesheet" href="/static/css/subtitles.css">
 </head>
 <body>
 
@@ -27,6 +28,8 @@
     <button class="tab" data-tab="cloning">Клонирование (XTTS v2)</button>
     <button class="tab" data-tab="saved">Мои голоса</button>
     <button class="tab" data-tab="history">История</button>
+    <button class="tab" data-tab="subtitles">Субтитры</button>
+    <button class="tab" data-tab="video">Видео</button>
 </nav>
 
 <main class="app-main">
@@ -140,6 +143,125 @@
                 <div class="result-block">
                     <div class="result-label">Воспроизведение</div>
                     <div class="audio-player" data-player="hist"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Субтитры ============== -->
+    <section class="tab-panel" data-panel="subtitles">
+        <div class="grid-2">
+            <div class="col">
+                <label class="label">Текст для субтитров
+                    <textarea id="sub-text" rows="8" placeholder="Введите текст…"></textarea>
+                </label>
+                <div class="grid-2">
+                    <label class="label">Скорость чтения <span class="hint" id="sub-wpm-val">150</span> сл/мин
+                        <input type="range" id="sub-wpm" min="80" max="300" step="10" value="150">
+                    </label>
+                    <label class="label">Макс. символов <span class="hint" id="sub-chars-val">60</span>
+                        <input type="range" id="sub-chars" min="30" max="120" step="5" value="60">
+                    </label>
+                </div>
+                <div class="label">Разбивка
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                            <input type="radio" name="sub-split" value="sentence" checked> По предложениям
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                            <input type="radio" name="sub-split" value="line"> По строкам
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                            <input type="radio" name="sub-split" value="auto"> Авто
+                        </label>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="sub-generate">Создать субтитры</button>
+            </div>
+            <div class="col">
+                <div class="sub-panel">
+                    <div class="result-label">Редактор субтитров</div>
+                    <div id="sub-editor" class="sub-editor">
+                        <div class="sub-empty">Создайте субтитры из текста слева</div>
+                    </div>
+                    <div class="row gap" id="sub-save-row" style="display:none">
+                        <input type="text" id="sub-save-name" class="fill" placeholder="Имя файла (без .srt)…">
+                        <button class="btn btn-primary" id="sub-save-btn">Сохранить .srt</button>
+                    </div>
+                    <div class="status" id="sub-status"></div>
+                </div>
+                <div class="sub-panel" style="margin-top:14px">
+                    <div class="result-label">Сохранённые файлы</div>
+                    <div id="sub-list" class="sub-list">
+                        <div class="sub-empty">Нет сохранённых файлов</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Видео + Субтитры ============== -->
+    <section class="tab-panel" data-panel="video">
+        <div class="panel-info" id="vid-ffmpeg-warn" style="display:none">
+            ⚠️ FFmpeg не найден. Скачайте с <b>ffmpeg.org</b> и добавьте в PATH, либо поместите ffmpeg.exe в папку <code>ffmpeg/</code> проекта.
+        </div>
+        <div class="grid-2">
+            <div class="col">
+                <div class="label">Видео файл
+                    <div id="vid-upload-mount"></div>
+                </div>
+                <div class="label">Субтитры (SRT)
+                    <div id="vid-srt-mount"></div>
+                    <div id="vid-srt-upload-mount"></div>
+                </div>
+                <div class="grid-2">
+                    <label class="label">Размер шрифта <span class="hint" id="vid-size-val">24</span>
+                        <input type="range" id="vid-font-size" min="12" max="72" step="2" value="24">
+                    </label>
+                    <label class="label">Цвет текста
+                        <input type="color" id="vid-font-color" value="#ffffff">
+                    </label>
+                </div>
+                <label class="label">Позиция субтитров
+                    <select id="vid-position">
+                        <option value="bottom" selected>Снизу</option>
+                        <option value="top">Сверху</option>
+                        <option value="middle">По центру</option>
+                    </select>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+                    <input type="checkbox" id="vid-outline" checked> Обводка текста
+                </label>
+                <button class="btn btn-primary" id="vid-go">Добавить субтитры (FFmpeg)</button>
+            </div>
+            <div class="col">
+                <div class="result-block" style="position:static;top:auto">
+                    <div class="result-label">Предпросмотр</div>
+                    <div class="vid-preview-wrap">
+                        <video id="vid-preview" controls></video>
+                        <div class="vid-empty" id="vid-empty">Загрузите видео для предпросмотра</div>
+                    </div>
+                    <div class="status" id="vid-status"></div>
+                </div>
+                <div class="result-block" id="vid-export-block" hidden style="position:static;top:auto;margin-top:12px">
+                    <div class="result-label">Экспорт</div>
+                    <div class="row gap">
+                        <select id="vid-format" class="fill">
+                            <option value="">Оригинальный формат</option>
+                            <option value="mp4">MP4</option>
+                            <option value="mkv">MKV</option>
+                            <option value="avi">AVI</option>
+                            <option value="webm">WebM</option>
+                            <option value="mov">MOV</option>
+                        </select>
+                        <a id="vid-download-btn" class="btn btn-primary" download>Скачать</a>
+                    </div>
+                </div>
+                <div class="sub-panel" style="margin-top:14px">
+                    <div class="result-label">История видео</div>
+                    <div id="vid-history-list" class="sub-list">
+                        <div class="sub-empty">Нет обработанных видео</div>
+                    </div>
                 </div>
             </div>
         </div>
