@@ -1,10 +1,9 @@
-import { getJSON, postJSON, putJSON, del, synthesizeStream } from '../api.js';
+import { getJSON, postJSON, synthesizeStream } from '../api.js';
 import { FileUpload } from '../file-upload.js';
 import { CustomSelect } from '../custom-select.js';
-import { ICONS } from '../icons.js';
 import { log, progress } from '../logger.js';
 import { toast } from '../toast.js';
-import { skeletonRows } from '../loader.js';
+import { events } from '../events.js';
 
 function escHtml(s) {
     return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -24,7 +23,6 @@ export async function init() {
     const exportBlock= document.getElementById('vid-export-block');
     const formatEl   = document.getElementById('vid-format');
     const dlBtn      = document.getElementById('vid-download-btn');
-    const historyEl  = document.getElementById('vid-history-list');
 
     let uploadedVideoName = null;
     let outputVideoUrl    = null;
@@ -157,7 +155,7 @@ export async function init() {
                     exportBlock.hidden = false;
                     log('Видео готово: ' + payload.filename, 'done');
                     toast('Видео обработано!', 'ok');
-                    refreshHistory(historyEl);
+                    events.dispatchEvent(new CustomEvent('video-changed'));
                 },
                 error(msg) {
                     goBtn.disabled = false;
@@ -169,51 +167,6 @@ export async function init() {
             }
         );
     });
-
-    // History list actions
-    historyEl.addEventListener('click', async (e) => {
-        const btn  = e.target.closest('.sub-file-btn[data-action]');
-        if (!btn) return;
-        const row  = btn.closest('.sub-file-row');
-        const name = row.dataset.file;
-        const act  = btn.dataset.action;
-
-        if (act === 'play') {
-            showPreview(`/api/video/output/${encodeURIComponent(name)}`, null);
-            return;
-        }
-        if (act === 'download') {
-            const a = document.createElement('a');
-            a.href = `/api/video/output/${encodeURIComponent(name)}`;
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            return;
-        }
-        if (act === 'rename') {
-            const newName = prompt(`Переименовать «${name}» в:`, name.replace(/\.[^.]+$/, ''));
-            if (!newName || newName.trim() === '') return;
-            try {
-                const r = await putJSON(`/api/video/history/${encodeURIComponent(name)}`, { new_name: newName.trim() });
-                toast(r.status, 'ok');
-                log(r.status, 'done');
-                await refreshHistory(historyEl);
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-        }
-        if (act === 'delete') {
-            if (!confirm(`Удалить «${name}»?`)) return;
-            try {
-                const r = await del(`/api/video/history/${encodeURIComponent(name)}`);
-                toast(r.status, 'ok');
-                await refreshHistory(historyEl);
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-        }
-    });
-
-    await refreshHistory(historyEl);
 
     function showPreview(videoUrl, srtName) {
         vidPreview.src = videoUrl;
@@ -239,26 +192,3 @@ export async function init() {
     }
 }
 
-async function refreshHistory(historyEl) {
-    skeletonRows(historyEl, 3);
-    try {
-        const data = await getJSON('/api/video/history');
-        if (!data.files.length) {
-            historyEl.innerHTML = '<div class="sub-empty">Нет обработанных видео</div>';
-            return;
-        }
-        historyEl.innerHTML = data.files.map(name => `
-            <div class="sub-file-row" data-file="${escHtml(name)}">
-                <span class="sub-file-name" title="${escHtml(name)}">${escHtml(name)}</span>
-                <div class="sub-file-btns">
-                    <button class="sub-file-btn" data-action="play"     title="Предпросмотр">${ICONS.play}</button>
-                    <button class="sub-file-btn" data-action="rename"   title="Переименовать">${ICONS.edit}</button>
-                    <button class="sub-file-btn" data-action="download" title="Скачать">${ICONS.download}</button>
-                    <button class="sub-file-btn danger" data-action="delete" title="Удалить">${ICONS.trash}</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (e) {
-        historyEl.innerHTML = '<div class="sub-empty">Ошибка загрузки</div>';
-    }
-}

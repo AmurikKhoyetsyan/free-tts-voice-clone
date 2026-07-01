@@ -2,15 +2,38 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 6px 4px 12px;
+    padding: 0 0 16px;
 }
 
-.hist-title {
+/* Section switcher (Аудио / Субтитры / Видео) */
+.hist-type-tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--surface-2);
+    border-radius: var(--radius);
+    padding: 3px;
+}
+
+.hist-type-btn {
+    border: none;
+    background: transparent;
+    padding: 6px 18px;
+    font-family: inherit;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    cursor: pointer;
+    border-radius: calc(var(--radius) - 2px);
+    transition: color .12s, background .12s, box-shadow .12s;
+}
+
+.hist-type-btn:hover { color: var(--text); }
+
+.hist-type-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+    font-weight: 600;
 }
 
 .hist-list {

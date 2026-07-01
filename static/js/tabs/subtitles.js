@@ -1,8 +1,8 @@
-import { getJSON, postJSON, putJSON, del } from '../api.js';
+import { postJSON } from '../api.js';
 import { ICONS } from '../icons.js';
 import { toast } from '../toast.js';
-import { skeletonRows } from '../loader.js';
 import { log } from '../logger.js';
+import { events } from '../events.js';
 
 // ── SRT helpers ──────────────────────────────────────────────────────────────
 
@@ -74,35 +74,33 @@ function escHtml(s) {
 // ── Tab init ─────────────────────────────────────────────────────────────────
 
 export async function init() {
-    const textEl    = document.getElementById('sub-text');
-    const wpmEl     = document.getElementById('sub-wpm');
-    const wpmVal    = document.getElementById('sub-wpm-val');
-    const charsEl   = document.getElementById('sub-chars');
-    const charsVal  = document.getElementById('sub-chars-val');
-    const genBtn    = document.getElementById('sub-generate');
-    const editorEl  = document.getElementById('sub-editor');
-    const saveRow   = document.getElementById('sub-save-row');
+    const textEl     = document.getElementById('sub-text');
+    const wpmEl      = document.getElementById('sub-wpm');
+    const wpmVal     = document.getElementById('sub-wpm-val');
+    const charsEl    = document.getElementById('sub-chars');
+    const charsVal   = document.getElementById('sub-chars-val');
+    const genBtn     = document.getElementById('sub-generate');
+    const editorEl   = document.getElementById('sub-editor');
+    const saveRow    = document.getElementById('sub-save-row');
     const saveNameEl = document.getElementById('sub-save-name');
-    const saveBtn   = document.getElementById('sub-save-btn');
-    const statusEl  = document.getElementById('sub-status');
-    const listEl    = document.getElementById('sub-list');
+    const saveBtn    = document.getElementById('sub-save-btn');
+    const statusEl   = document.getElementById('sub-status');
 
-    // Range labels
     wpmEl.addEventListener('input',   () => { wpmVal.textContent  = wpmEl.value; });
     charsEl.addEventListener('input', () => { charsVal.textContent = charsEl.value; });
 
-    // Generate subtitles
     genBtn.addEventListener('click', () => {
         const text = textEl.value.trim();
         if (!text) { toast('Введите текст', 'warn'); return; }
-        const wpm   = parseInt(wpmEl.value, 10);
-        const chars = parseInt(charsEl.value, 10);
-        const mode  = document.querySelector('input[name="sub-split"]:checked').value;
-        const subs  = generateSubs(text, wpm, chars, mode);
+        const subs = generateSubs(
+            text,
+            parseInt(wpmEl.value, 10),
+            parseInt(charsEl.value, 10),
+            document.querySelector('input[name="sub-split"]:checked').value
+        );
         renderEditor(subs, editorEl, saveRow);
     });
 
-    // Save SRT
     saveBtn.addEventListener('click', async () => {
         const subs = collectSubs(editorEl);
         if (!subs.length) { toast('Нет субтитров для сохранения', 'warn'); return; }
@@ -121,16 +119,12 @@ export async function init() {
             statusEl.textContent = r.status;
             statusEl.className = 'status ok';
             log(r.status, 'done');
-            await refreshList(listEl);
+            events.dispatchEvent(new CustomEvent('subtitles-changed'));
             // Скачать сразу после сохранения
             const blob = new Blob([content], { type: 'text/plain' });
             const dlUrl = URL.createObjectURL(blob);
-            const dlA = document.createElement('a');
-            dlA.href = dlUrl;
-            dlA.download = r.name;
-            document.body.appendChild(dlA);
-            dlA.click();
-            dlA.remove();
+            const dlA = Object.assign(document.createElement('a'), { href: dlUrl, download: r.name });
+            document.body.appendChild(dlA); dlA.click(); dlA.remove();
             URL.revokeObjectURL(dlUrl);
         } catch (e) {
             toast(e.message, 'err');
@@ -138,63 +132,6 @@ export async function init() {
             statusEl.className = 'status err';
         }
     });
-
-    // SRT file list actions
-    listEl.addEventListener('click', async (e) => {
-        const btn  = e.target.closest('.sub-file-btn[data-action]');
-        if (!btn) return;
-        const row  = btn.closest('.sub-file-row');
-        const name = row.dataset.file;
-        const act  = btn.dataset.action;
-
-        if (act === 'download') {
-            try {
-                const r = await getJSON(`/api/subtitles/${encodeURIComponent(name)}`);
-                const blob = new Blob([r.content], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = name;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-        }
-        if (act === 'load') {
-            try {
-                const r = await getJSON(`/api/subtitles/${encodeURIComponent(name)}`);
-                const subs = parseSRTContent(r.content);
-                renderEditor(subs, editorEl, saveRow);
-                saveNameEl.value = name.endsWith('.srt') ? name.slice(0, -4) : name;
-                toast('Загружено: ' + name, 'ok');
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-        }
-        if (act === 'rename') {
-            const newName = prompt(`Переименовать «${name}» в:`, name.replace(/\.srt$/, ''));
-            if (!newName || newName.trim() === '') return;
-            try {
-                const r = await putJSON(`/api/subtitles/${encodeURIComponent(name)}`, { new_name: newName.trim() });
-                toast(r.status, 'ok');
-                log(r.status, 'done');
-                await refreshList(listEl);
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-        }
-        if (act === 'delete') {
-            if (!confirm(`Удалить «${name}»?`)) return;
-            try {
-                const r = await del(`/api/subtitles/${encodeURIComponent(name)}`);
-                toast(r.status, 'ok');
-                await refreshList(listEl);
-            } catch (e) { toast(e.message, 'err'); }
-            return;
-        }
-    });
-
-    await refreshList(listEl);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -259,26 +196,3 @@ function parseSRTContent(content) {
     }).filter(Boolean);
 }
 
-async function refreshList(listEl) {
-    skeletonRows(listEl, 3);
-    try {
-        const data = await getJSON('/api/subtitles');
-        if (!data.files.length) {
-            listEl.innerHTML = '<div class="sub-empty">Нет сохранённых файлов</div>';
-            return;
-        }
-        listEl.innerHTML = data.files.map(name => `
-            <div class="sub-file-row" data-file="${escHtml(name)}">
-                <span class="sub-file-name" title="${escHtml(name)}">${escHtml(name)}</span>
-                <div class="sub-file-btns">
-                    <button class="sub-file-btn" data-action="load"     title="Загрузить в редактор">${ICONS.open}</button>
-                    <button class="sub-file-btn" data-action="rename"   title="Переименовать">${ICONS.edit}</button>
-                    <button class="sub-file-btn" data-action="download" title="Скачать">${ICONS.download}</button>
-                    <button class="sub-file-btn danger" data-action="delete" title="Удалить">${ICONS.trash}</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (e) {
-        listEl.innerHTML = '<div class="sub-empty">Ошибка загрузки</div>';
-    }
-}
