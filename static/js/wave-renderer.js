@@ -1,20 +1,17 @@
-// Canvas waveform renderer.
-// Visual parameters match the original WaveSurfer bar-mode config:
-//   waveColor: #d1d5db  progressColor: #f97316  cursorColor: #f97316
-//   barWidth: 2  barGap: 1  barRadius: 2  height: 40  normalize: true
-
-const BAR_W  = 2;   // px (logical)
-const BAR_G  = 1;   // px gap between bars
-const BAR_R  = 2;   // px corner radius
-const HEIGHT = 56;  // px
+const BAR_W  = 2;
+const BAR_G  = 1;
+const BAR_R  = 2;
+const HEIGHT = 56;
 const COLOR_TRACK    = '#d4d6de';
 const COLOR_PROGRESS = '#f97316';
+const COLOR_HOVER    = '#fdba74'; // lighter orange for hover preview
 
 export class WaveRenderer {
     constructor(container) {
         this.container = container;
         this.peaks     = null;
         this._progress = 0;
+        this._hover    = null;
 
         this.canvas = document.createElement('canvas');
         this.canvas.style.cssText =
@@ -50,6 +47,24 @@ export class WaveRenderer {
         this.canvas.addEventListener('click', (e) => {
             const rect = this.canvas.getBoundingClientRect();
             handler(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)));
+        });
+    }
+
+    onHover(handler) {
+        this.canvas.addEventListener('mousemove', (e) => {
+            const rect  = this.canvas.getBoundingClientRect();
+            const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            this._hover = ratio;
+            this._draw(this._progress);
+            handler(ratio);
+        });
+    }
+
+    onLeave(handler) {
+        this.canvas.addEventListener('mouseleave', () => {
+            this._hover = null;
+            this._draw(this._progress);
+            handler();
         });
     }
 
@@ -113,27 +128,42 @@ export class WaveRenderer {
         const barR  = Math.round(BAR_R * dpr);
         const step  = Math.round((BAR_W + BAR_G) * dpr);
         const progX = progress * w;
+        const hoverX = this._hover !== null ? this._hover * w : null;
 
         ctx.clearRect(0, 0, w, h);
 
-        // Draw all bars in track color, then overdraw played region in progress color
-        for (let pass = 0; pass < 2; pass++) {
-            if (pass === 1 && progX <= 0) break;
-            ctx.save();
-            if (pass === 0) {
-                ctx.fillStyle = COLOR_TRACK;
-            } else {
-                ctx.beginPath();
-                ctx.rect(0, 0, progX, h);
-                ctx.clip();
-                ctx.fillStyle = COLOR_PROGRESS;
-            }
+        const drawBars = () => {
             let x = 0;
             for (let i = 0; i < this.peaks.length && x + barW <= w; i++, x += step) {
                 const barH = Math.max(h * 0.06, this.peaks[i] * h);
                 this._roundRect(ctx, x, (h - barH) / 2, barW, barH, barR);
                 ctx.fill();
             }
+        };
+
+        // Pass 1: all bars in track color (gray)
+        ctx.fillStyle = COLOR_TRACK;
+        drawBars();
+
+        // Pass 2: hover region (left to cursor) in light orange
+        if (hoverX !== null && hoverX > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, hoverX, h);
+            ctx.clip();
+            ctx.fillStyle = COLOR_HOVER;
+            drawBars();
+            ctx.restore();
+        }
+
+        // Pass 3: played region in full orange — always on top
+        if (progX > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, progX, h);
+            ctx.clip();
+            ctx.fillStyle = COLOR_PROGRESS;
+            drawBars();
             ctx.restore();
         }
     }

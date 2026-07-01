@@ -117,6 +117,7 @@ export class AudioPlayer {
         this.host.innerHTML = `
             <div class="ap-wave-bg">
                 <div class="ap-wave"></div>
+                <span class="ap-hover-time" aria-hidden="true"></span>
             </div>
             <div class="ap-timestamps">
                 <span class="ap-time-cur">0:00</span>
@@ -134,13 +135,15 @@ export class AudioPlayer {
             </div>
         `;
 
-        const waveEl   = this.host.querySelector('.ap-wave');
-        const curEl    = this.host.querySelector('.ap-time-cur');
-        const durEl    = this.host.querySelector('.ap-time-dur');
-        const playBtn  = this.host.querySelector('.ap-play');
-        const speedBtn = this.host.querySelector('.ap-speed');
-        const skipB    = this.host.querySelector('.ap-skip-back');
-        const skipF    = this.host.querySelector('.ap-skip-fwd');
+        const waveEl    = this.host.querySelector('.ap-wave');
+        const waveBgEl  = this.host.querySelector('.ap-wave-bg');
+        const hoverTime = this.host.querySelector('.ap-hover-time');
+        const curEl     = this.host.querySelector('.ap-time-cur');
+        const durEl     = this.host.querySelector('.ap-time-dur');
+        const playBtn   = this.host.querySelector('.ap-play');
+        const speedBtn  = this.host.querySelector('.ap-speed');
+        const skipB     = this.host.querySelector('.ap-skip-back');
+        const skipF     = this.host.querySelector('.ap-skip-fwd');
 
         const audio = new Audio(url);
         this._audio = audio;
@@ -148,6 +151,18 @@ export class AudioPlayer {
         const wave = new WaveRenderer(waveEl);
         this._wave = wave;
         wave.load(url);
+
+        // Hover: show time tooltip + light-orange tint left-to-cursor
+        wave.onHover((ratio) => {
+            if (!isFinite(audio.duration) || audio.duration <= 0) return;
+            hoverTime.textContent = fmt(ratio * audio.duration);
+            const waveRect = waveEl.getBoundingClientRect();
+            const bgRect   = waveBgEl.getBoundingClientRect();
+            const xInBg    = (waveRect.left - bgRect.left) + ratio * waveRect.width;
+            hoverTime.style.left = `${xInBg}px`;
+            hoverTime.classList.add('visible');
+        });
+        wave.onLeave(() => hoverTime.classList.remove('visible'));
 
         // Speed cycling
         let speedIdx = 2; // 1x
