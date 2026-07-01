@@ -304,3 +304,91 @@ input[type="color"] {
     opacity: .75;
     margin-top: 1px;
 }
+
+/* ── Timeline ──────────────────────────────────────────────────────────────── */
+.sub-timeline {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    overflow: hidden;
+    user-select: none;
+}
+
+.sub-tl-ruler {
+    position: relative;
+    height: 22px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.sub-tl-mark {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 10px;
+    background: var(--border-strong);
+    transform: translateX(-50%);
+}
+
+.sub-tl-label {
+    position: absolute;
+    top: 11px;
+    font-size: 9px;
+    color: var(--text-dim);
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.sub-tl-track {
+    position: relative;
+    height: 40px;
+}
+
+.sub-tl-block {
+    position: absolute;
+    height: 26px;
+    top: 7px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    box-sizing: border-box;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 6px;
+    overflow: hidden;
+    transition: background .08s;
+}
+
+.sub-tl-block:hover  { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.sub-tl-block:active { cursor: grabbing; }
+
+.sub-tl-block-lbl {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--accent);
+    pointer-events: none;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.sub-tl-hdl {
+    position: absolute;
+    top: 0;
+    width: 7px;
+    height: 100%;
+    background: var(--accent);
+    opacity: 0;
+    cursor: ew-resize;
+    transition: opacity .1s;
+    flex-shrink: 0;
+    z-index: 2;
+}
+
+.sub-tl-block:hover .sub-tl-hdl { opacity: .5; }
+.sub-tl-hdl:hover { opacity: 1 !important; }
+.sub-tl-hdl-l { left: 0;  border-radius: 2px 0 0 2px; }
+.sub-tl-hdl-r { right: 0; border-radius: 0 2px 2px 0; }

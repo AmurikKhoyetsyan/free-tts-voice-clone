@@ -4,7 +4,7 @@ import { toast } from '../toast.js';
 import { log } from '../logger.js';
 import { events } from '../events.js';
 
-// ── SRT helpers ──────────────────────────────────────────────────────────────
+// ── SRT helpers ───────────────────────────────────────────────────────────────
 
 function srtTime(sec) {
     const h  = Math.floor(sec / 3600);
@@ -26,12 +26,10 @@ function generateSubs(text, wpm, maxChars, splitMode) {
     const trimmed = text.trim();
     if (!trimmed) return [];
     let segs = [];
-
     if (splitMode === 'line') {
         segs = trimmed.split('\n').map(s => s.trim()).filter(Boolean);
     } else if (splitMode === 'sentence') {
-        segs = (trimmed.match(/[^.!?…\n]+[.!?…]*/g) || [trimmed])
-            .map(s => s.trim()).filter(Boolean);
+        segs = (trimmed.match(/[^.!?…\n]+[.!?…]*/g) || [trimmed]).map(s => s.trim()).filter(Boolean);
     } else {
         const sentences = (trimmed.match(/[^.!?…\n]+[.!?…]*/g) || [trimmed]);
         for (const sent of sentences) {
@@ -41,20 +39,15 @@ function generateSubs(text, wpm, maxChars, splitMode) {
             const words = s.split(/\s+/);
             let cur = '';
             for (const w of words) {
-                if (cur && (cur + ' ' + w).length > maxChars) {
-                    if (cur) segs.push(cur);
-                    cur = w;
-                } else {
-                    cur = cur ? cur + ' ' + w : w;
-                }
+                if (cur && (cur + ' ' + w).length > maxChars) { if (cur) segs.push(cur); cur = w; }
+                else { cur = cur ? cur + ' ' + w : w; }
             }
             if (cur) segs.push(cur);
         }
     }
-
     let t = 0;
     return segs.map((text, i) => {
-        const dur   = Math.max(1.0, (text.split(/\s+/).length / wpm) * 60);
+        const dur = Math.max(1.0, (text.split(/\s+/).length / wpm) * 60);
         const start = t;
         t += dur + 0.1;
         return { index: i + 1, start, end: start + dur, text };
@@ -62,16 +55,158 @@ function generateSubs(text, wpm, maxChars, splitMode) {
 }
 
 function subsToSRT(subs) {
-    return subs.map(s =>
-        `${s.index}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${s.text}`
-    ).join('\n\n') + '\n';
+    return subs.map(s => `${s.index}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${s.text}`).join('\n\n') + '\n';
 }
 
 function escHtml(s) {
     return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
-// ── Tab init ─────────────────────────────────────────────────────────────────
+// ── Timeline component ────────────────────────────────────────────────────────
+
+class SubTimeline {
+    constructor(container, onUpdate) {
+        this.el       = container;
+        this.onUpdate = onUpdate; // (idx, newStart, newEnd)
+        this.subs     = [];
+        this.dur      = 0;
+        this._drag    = null;
+        this._build();
+    }
+
+    _build() {
+        this.ruler = document.createElement('div');
+        this.ruler.className = 'sub-tl-ruler';
+        this.track = document.createElement('div');
+        this.track.className = 'sub-tl-track';
+        this.el.append(this.ruler, this.track);
+
+        this.track.addEventListener('mousedown', e => this._startDrag(e));
+        document.addEventListener('mousemove',  e => this._doDrag(e));
+        document.addEventListener('mouseup',    () => this._endDrag());
+    }
+
+    render(subs) {
+        this.subs = subs.map(s => ({ ...s }));
+        this.dur  = Math.max(...subs.map(s => s.end), 5);
+        this._redraw();
+        this.el.hidden = false;
+    }
+
+    updateBlock(idx, start, end) {
+        if (!this.subs[idx]) return;
+        this.subs[idx].start = start;
+        this.subs[idx].end   = end;
+        this._redraw();
+    }
+
+    removeBlock(idx) {
+        this.subs.splice(idx, 1);
+        this.subs.forEach((s, i) => s.index = i + 1);
+        if (!this.subs.length) { this.el.hidden = true; return; }
+        this.dur = Math.max(...this.subs.map(s => s.end), 5);
+        this._redraw();
+    }
+
+    _redraw() {
+        // ─ ruler ─
+        this.ruler.innerHTML = '';
+        const step = this.dur <= 30 ? 5 : this.dur <= 120 ? 15 : this.dur <= 600 ? 60 : 120;
+        for (let t = 0; t <= this.dur + 0.001; t += step) {
+            const pct = Math.min(t / this.dur * 100, 100);
+            const m   = document.createElement('div');
+            m.className = 'sub-tl-mark';
+            m.style.left = pct + '%';
+            const l = document.createElement('span');
+            l.className  = 'sub-tl-label';
+            l.style.left = pct + '%';
+            l.textContent = t >= 60
+                ? `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, '0')}`
+                : `${Math.round(t)}s`;
+            this.ruler.append(m, l);
+        }
+
+        // ─ blocks ─
+        this.track.innerHTML = '';
+        this.subs.forEach((s, i) => {
+            const lp  = s.start / this.dur * 100;
+            const wp  = Math.max((s.end - s.start) / this.dur * 100, 0.4);
+            const blk = document.createElement('div');
+            blk.className  = 'sub-tl-block';
+            blk.dataset.i  = i;
+            blk.style.left  = lp + '%';
+            blk.style.width = wp + '%';
+            blk.title       = `${srtTime(s.start)} → ${srtTime(s.end)}\n${s.text}`;
+
+            const hL = document.createElement('div');
+            hL.className = 'sub-tl-hdl sub-tl-hdl-l';
+            hL.dataset.i = i; hL.dataset.side = 'l';
+
+            const hR = document.createElement('div');
+            hR.className = 'sub-tl-hdl sub-tl-hdl-r';
+            hR.dataset.i = i; hR.dataset.side = 'r';
+
+            const lbl = document.createElement('span');
+            lbl.className   = 'sub-tl-block-lbl';
+            lbl.textContent = `${i + 1}`;
+
+            blk.append(hL, lbl, hR);
+            this.track.appendChild(blk);
+        });
+    }
+
+    _startDrag(e) {
+        const hdl = e.target.closest('.sub-tl-hdl');
+        const blk = e.target.closest('.sub-tl-block');
+        if (!hdl && !blk) return;
+        e.preventDefault();
+        const idx  = parseInt((hdl || blk).dataset.i);
+        const rect = this.track.getBoundingClientRect();
+        this._drag = {
+            idx,
+            side: hdl ? hdl.dataset.side : 'move',
+            x0:   e.clientX,
+            tw:   rect.width,
+            s0:   this.subs[idx].start,
+            e0:   this.subs[idx].end,
+        };
+        document.body.style.userSelect = 'none';
+    }
+
+    _doDrag(e) {
+        if (!this._drag) return;
+        const { idx, side, x0, tw, s0, e0 } = this._drag;
+        const dt  = (e.clientX - x0) / tw * this.dur;
+        const MIN = 0.1;
+        let ns = s0, ne = e0;
+
+        if (side === 'l') {
+            ns = Math.max(0, Math.min(s0 + dt, e0 - MIN));
+        } else if (side === 'r') {
+            ne = Math.max(s0 + MIN, e0 + dt);
+        } else {
+            const d    = e0 - s0;
+            const prev = idx > 0 ? this.subs[idx - 1].end + 0.01 : 0;
+            const next = idx < this.subs.length - 1 ? this.subs[idx + 1].start - d - 0.01 : Infinity;
+            ns = Math.max(prev, Math.min(s0 + dt, next));
+            ne = ns + d;
+        }
+
+        ns = Math.round(ns * 100) / 100;
+        ne = Math.round(ne * 100) / 100;
+        this.subs[idx].start = ns;
+        this.subs[idx].end   = ne;
+        this._redraw();
+        this.onUpdate(idx, ns, ne);
+    }
+
+    _endDrag() {
+        this._drag = null;
+        document.body.style.userSelect = '';
+    }
+}
+
+// ── Tab init ──────────────────────────────────────────────────────────────────
 
 export async function init() {
     const textEl     = document.getElementById('sub-text');
@@ -81,6 +216,7 @@ export async function init() {
     const charsVal   = document.getElementById('sub-chars-val');
     const genBtn     = document.getElementById('sub-generate');
     const editorEl   = document.getElementById('sub-editor');
+    const timelineEl = document.getElementById('sub-timeline');
     const saveRow    = document.getElementById('sub-save-row');
     const saveNameEl = document.getElementById('sub-save-name');
     const saveBtn    = document.getElementById('sub-save-btn');
@@ -88,6 +224,16 @@ export async function init() {
 
     wpmEl.addEventListener('input',   () => { wpmVal.textContent  = wpmEl.value; });
     charsEl.addEventListener('input', () => { charsVal.textContent = charsEl.value; });
+
+    // Timeline instance — created once, reused
+    const timeline = new SubTimeline(timelineEl, (idx, ns, ne) => {
+        // Push new values back into the editor inputs
+        const rows = editorEl.querySelectorAll('.sub-row');
+        if (rows[idx]) {
+            rows[idx].querySelector('.sub-time-in').value  = srtTime(ns);
+            rows[idx].querySelector('.sub-time-out').value = srtTime(ne);
+        }
+    });
 
     genBtn.addEventListener('click', () => {
         const text = textEl.value.trim();
@@ -98,7 +244,7 @@ export async function init() {
             parseInt(charsEl.value, 10),
             document.querySelector('input[name="sub-split"]:checked').value
         );
-        renderEditor(subs, editorEl, saveRow);
+        renderEditor(subs, editorEl, saveRow, timeline);
     });
 
     saveBtn.addEventListener('click', async () => {
@@ -107,8 +253,8 @@ export async function init() {
         let name = saveNameEl.value.trim();
         if (!name) {
             const now = new Date();
-            const pad = n => String(n).padStart(2, '0');
-            name = `subtitle-${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+            const p   = n => String(n).padStart(2, '0');
+            name = `subtitle-${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}_${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`;
             saveNameEl.value = name;
         }
         const content = subsToSRT(subs);
@@ -117,36 +263,37 @@ export async function init() {
             const r = await postJSON('/api/subtitles', { name, content });
             toast(r.status, 'ok');
             statusEl.textContent = r.status;
-            statusEl.className = 'status ok';
+            statusEl.className   = 'status ok';
             log(r.status, 'done');
             events.dispatchEvent(new CustomEvent('subtitles-changed'));
-            // Скачать сразу после сохранения
-            const blob = new Blob([content], { type: 'text/plain' });
+            const blob  = new Blob([content], { type: 'text/plain' });
             const dlUrl = URL.createObjectURL(blob);
-            const dlA = Object.assign(document.createElement('a'), { href: dlUrl, download: r.name });
+            const dlA   = Object.assign(document.createElement('a'), { href: dlUrl, download: r.name });
             document.body.appendChild(dlA); dlA.click(); dlA.remove();
             URL.revokeObjectURL(dlUrl);
         } catch (e) {
             toast(e.message, 'err');
             statusEl.textContent = '❌ ' + e.message;
-            statusEl.className = 'status err';
+            statusEl.className   = 'status err';
         }
     });
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Editor helpers ────────────────────────────────────────────────────────────
 
-function renderEditor(subs, editorEl, saveRow) {
+function renderEditor(subs, editorEl, saveRow, timeline) {
     if (!subs.length) {
         editorEl.innerHTML = '<div class="sub-empty">Нет субтитров</div>';
         saveRow.style.display = 'none';
+        timeline.el.hidden = true;
         return;
     }
+
     editorEl.innerHTML = subs.map((s, i) => `
         <div class="sub-row" data-index="${i}">
             <div class="sub-row-num">${s.index}</div>
             <div class="sub-row-times">
-                <input class="sub-time-in" value="${escHtml(srtTime(s.start))}">
+                <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}">
                 <span class="sub-arrow">→</span>
                 <input class="sub-time-out" value="${escHtml(srtTime(s.end))}">
             </div>
@@ -154,18 +301,39 @@ function renderEditor(subs, editorEl, saveRow) {
             <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
         </div>
     `).join('');
+
     saveRow.style.display = 'flex';
 
+    // Attach time-input → timeline sync
+    editorEl.querySelectorAll('.sub-row').forEach((row, i) => {
+        const tIn  = row.querySelector('.sub-time-in');
+        const tOut = row.querySelector('.sub-time-out');
+        const sync = () => {
+            const ns = parseSrtTime(tIn.value);
+            const ne = parseSrtTime(tOut.value);
+            if (isFinite(ns) && isFinite(ne) && ne > ns) timeline.updateBlock(i, ns, ne);
+        };
+        tIn.addEventListener('change',  sync);
+        tOut.addEventListener('change', sync);
+    });
+
+    // Delete handler
     editorEl.addEventListener('click', (e) => {
         const btn = e.target.closest('.sub-del-btn');
         if (!btn) return;
-        btn.closest('.sub-row').remove();
+        const row = btn.closest('.sub-row');
+        const idx = parseInt(row.dataset.index);
+        row.remove();
         reIndex(editorEl);
+        timeline.removeBlock(idx);
         if (!editorEl.querySelector('.sub-row')) {
             editorEl.innerHTML = '<div class="sub-empty">Нет субтитров</div>';
             saveRow.style.display = 'none';
         }
-    }, { once: false });
+    });
+
+    // Render timeline
+    timeline.render(subs);
 }
 
 function reIndex(editorEl) {
@@ -183,16 +351,3 @@ function collectSubs(editorEl) {
         text:  row.querySelector('.sub-row-text').value.trim(),
     })).filter(s => s.text);
 }
-
-function parseSRTContent(content) {
-    const blocks = content.trim().split(/\n\s*\n/);
-    return blocks.map(block => {
-        const lines = block.trim().split('\n');
-        if (lines.length < 3) return null;
-        const index = parseInt(lines[0], 10);
-        const [startStr, endStr] = lines[1].split('-->').map(s => s.trim());
-        const text = lines.slice(2).join('\n');
-        return { index, start: parseSrtTime(startStr), end: parseSrtTime(endStr), text };
-    }).filter(Boolean);
-}
-

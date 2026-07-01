@@ -217,6 +217,7 @@
                     <div id="sub-editor" class="sub-editor">
                         <div class="sub-empty">Создайте субтитры из текста слева</div>
                     </div>
+                    <div id="sub-timeline" class="sub-timeline" hidden></div>
                     <div class="row gap" id="sub-save-row" style="display:none">
                         <input type="text" id="sub-save-name" class="fill" placeholder="Имя файла (без .srt)…">
                         <button class="btn btn-primary" id="sub-save-btn">Сохранить .srt</button>
@@ -320,8 +321,20 @@
                             <input type="color" id="vid-shadow-color" value="#000000">
                         </label>
                     </div>
+                    <div class="grid-2">
+                        <label class="label">Цвет произнесённых слов
+                            <input type="color" id="vid-karaoke-color" value="#ffdd00">
+                        </label>
+                        <label class="label" style="justify-content:flex-end;flex-direction:row;align-items:center;gap:8px;padding-top:18px">
+                            <input type="checkbox" id="vid-karaoke-enable" checked>
+                            <span>Подсвечивать слова</span>
+                        </label>
+                    </div>
                 </div>
-                <button class="btn btn-primary" id="vid-go">Добавить субтитры (FFmpeg)</button>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-primary" id="vid-go" style="flex:1">Добавить субтитры (FFmpeg)</button>
+                    <button class="btn" id="vid-reset-pos" hidden title="Сбросить позицию субтитров">↺ Позиция</button>
+                </div>
             </div>
             <div class="col">
                 <div class="result-block" style="position:static;top:auto">
