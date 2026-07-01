@@ -331,7 +331,9 @@ export async function init() {
         // Pixel position (empty string = use alignment preset)
         fd.append('pos_x_px', posXpx !== null ? String(posXpx) : '');
         fd.append('pos_y_px', posYpx !== null ? String(posYpx) : '');
-        fd.append('preview_width', String(Math.round(vidInner.offsetWidth)));
+        fd.append('preview_width',   String(Math.round(vidInner.offsetWidth)));
+        fd.append('karaoke_enabled', String(karaokeEnEl ? karaokeEnEl.checked : false));
+        fd.append('karaoke_color',   karaokeColorEl ? karaokeColorEl.value.replace('#', '') : 'ffdd00');
 
         await synthesizeStream(
             '/api/video/burn',

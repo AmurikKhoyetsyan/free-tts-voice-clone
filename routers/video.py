@@ -190,13 +190,28 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         base_margin   = max(0, int((frame_w - text_wrap) / 2))
         margin_l = margin_r = base_margin + int(extra_h_margin)
 
+    karaoke_on = bool(sd.get("KaraokeEnabled", False))
+    if karaoke_on:
+        primary_c   = _hex_to_ass(str(sd.get("KaraokeColor", "ffdd00")))
+        secondary_c = str(sd.get("PrimaryColour", "&H00FFFFFF"))
+    else:
+        primary_c   = str(sd.get("PrimaryColour", "&H00FFFFFF"))
+        secondary_c = "&HFF000000"  # transparent — not visible in non-karaoke mode
+
+    # When using box background (BorderStyle=3), keep OutlineColour transparent
+    # so it doesn't draw an opaque border that hides the BackColour alpha
+    if border_style == 3:
+        outline_c = "&HFF000000"  # fully transparent border
+    else:
+        outline_c = str(sd.get("OutlineColour", "&H00000000"))
+
     style_line = ",".join([
         "Default",
         str(sd.get("FontName",      "Arial")),
         str(sd.get("FontSize",      "24")),
-        str(sd.get("PrimaryColour", "&H00FFFFFF")),
-        "&H000000FF",
-        str(sd.get("OutlineColour", "&H00000000")),
+        primary_c,
+        secondary_c,
+        outline_c,
         str(sd.get("BackColour",    "&H00000000")),
         str(sd.get("Bold",          "0")),
         "0", "0", "0",          # Italic, Underline, StrikeOut
@@ -236,6 +251,12 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         try:
             start_s, end_s = lines[1].split(" --> ")
             text = "\\N".join(l for l in lines[2:] if l.strip())
+            if karaoke_on:
+                dur   = s2sec(end_s) - s2sec(start_s)
+                words = text.replace("\\N", " ").split()
+                if words:
+                    cs   = max(1, round(dur * 100 / len(words)))
+                    text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
             events.append(
                 f"Dialogue: 0,{_ass_time(s2sec(start_s))},{_ass_time(s2sec(end_s))},"
                 f"Default,,0,0,0,,{pos_tag}{text}"
@@ -273,9 +294,11 @@ def burn_subtitles(
     margin_v:      int   = Form(10),
     sub_width_px:  int   = Form(0),
     sub_height_px: int   = Form(0),
-    pos_x_px:      str   = Form(""),
-    pos_y_px:      str   = Form(""),
-    preview_width: int   = Form(0),
+    pos_x_px:        str   = Form(""),
+    pos_y_px:        str   = Form(""),
+    preview_width:   int   = Form(0),
+    karaoke_enabled: str   = Form("false"),
+    karaoke_color:   str   = Form("ffdd00"),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -293,15 +316,17 @@ def burn_subtitles(
 
     # Build style dict
     style_dict: dict = {
-        "FontName":     font_family,
-        "FontSize":     font_size,
-        "PrimaryColour": _hex_to_ass(font_color),
-        "Bold":         -1 if bold else 0,
-        "Alignment":    align,
-        "MaxWidth":     max_width_pct,
-        "MarginV":      margin_v,
-        "SubWidthPx":   sub_width_px,
-        "SubHeightPx":  sub_height_px,
+        "FontName":       font_family,
+        "FontSize":       font_size,
+        "PrimaryColour":  _hex_to_ass(font_color),
+        "Bold":           -1 if bold else 0,
+        "Alignment":      align,
+        "MaxWidth":       max_width_pct,
+        "MarginV":        margin_v,
+        "SubWidthPx":     sub_width_px,
+        "SubHeightPx":    sub_height_px,
+        "KaraokeEnabled": karaoke_enabled.lower() in ("true", "1", "yes"),
+        "KaraokeColor":   karaoke_color.lstrip("#"),
     }
 
     if bg_opacity > 0:
