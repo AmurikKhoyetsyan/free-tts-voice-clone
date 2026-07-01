@@ -291,16 +291,18 @@ function renderEditor(subs, editorEl, saveRow, timeline) {
 
     editorEl.innerHTML = subs.map((s, i) => `
         <div class="sub-row" data-index="${i}">
-            <div class="sub-row-num">${s.index}</div>
-            <div class="sub-row-times">
-                <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}" title="Начало">
-                <span class="sub-arrow">→</span>
-                <input class="sub-time-out" value="${escHtml(srtTime(s.end))}" title="Конец">
-                <span class="sub-arrow" style="opacity:.5;font-size:10px">⏱</span>
-                <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
-                <span style="font-size:10px;color:var(--text-dim)">с</span>
+            <div>
+                <div class="sub-row-num">${s.index}</div>
+                <div class="sub-row-times">
+                    <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}" title="Начало">
+                    <span class="sub-arrow">→</span>
+                    <input class="sub-time-out" value="${escHtml(srtTime(s.end))}" title="Конец">
+                    <span class="sub-arrow" style="opacity:.5;font-size:10px">⏱</span>
+                    <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
+                    <span style="font-size:10px;color:var(--text-dim)">с</span>
+                </div>
+                <button class="sub-del-btn" data-action="del" title="Удалить строку">${ICONS.trash}</button>
             </div>
-            <button class="sub-del-btn" data-action="del" title="Удалить строку">${ICONS.trash}</button>
             <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
         </div>
     `).join('');

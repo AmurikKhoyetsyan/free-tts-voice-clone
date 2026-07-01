@@ -186,14 +186,14 @@
         <div class="grid-2">
             <div class="col">
                 <label class="label">Текст для субтитров
-                    <textarea id="sub-text" rows="8" placeholder="Введите текст…"></textarea>
+                    <textarea id="sub-text" rows="12" placeholder="Введите текст…"></textarea>
                 </label>
                 <div class="grid-2">
                     <label class="label">Скорость чтения <span class="hint" id="sub-wpm-val">150</span> сл/мин
                         <input type="range" id="sub-wpm" min="80" max="300" step="10" value="150">
                     </label>
                     <label class="label">Макс. символов <span class="hint" id="sub-chars-val">60</span>
-                        <input type="range" id="sub-chars" min="30" max="120" step="5" value="60">
+                        <input type="range" id="sub-chars" min="1" max="120" step="1" value="60">
                     </label>
                 </div>
                 <div class="label">Разбивка
@@ -436,6 +436,14 @@
                         </select>
                         <a id="vid-download-btn" class="btn btn-primary" download>Скачать</a>
                     </div>
+                </div>
+                <div class="result-block" id="vid-sub-editor-block" hidden style="position:static;top:auto;margin-top:12px">
+                    <div class="result-label">Редактор субтитров</div>
+                    <div id="vid-sub-editor" class="sub-editor"></div>
+                    <div class="row gap" id="vid-sub-editor-save-row" style="margin-top:8px;display:none">
+                        <button class="btn btn-primary" id="vid-sub-save-btn">Сохранить SRT</button>
+                    </div>
+                    <div class="status" id="vid-sub-editor-status"></div>
                 </div>
             </div>
         </div>

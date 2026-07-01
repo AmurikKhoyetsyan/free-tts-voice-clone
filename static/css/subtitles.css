@@ -1,4 +1,9 @@
 /* ---- Subtitles tab ---- */
+#sub-text {
+    min-height: 280px;
+    resize: vertical;
+}
+
 .sub-panel {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -25,7 +30,6 @@
 
 .sub-row {
     display: grid;
-    grid-template-columns: 28px 1fr auto;
     grid-template-rows: auto auto;
     gap: 4px 8px;
     background: var(--surface-2);
@@ -73,7 +77,6 @@
 }
 
 .sub-row-text {
-    grid-column: 2;
     font-size: 13px;
     padding: 6px 8px;
     border: 1px solid var(--border);
@@ -247,21 +250,36 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 14px;
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 4px;
+}
+
+/* Checkbox in vsp-inline rows */
+.vsp-field.vsp-inline input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--accent);
+    margin: 0;
 }
 
 /* Color input */
 input[type="color"] {
-    width: 40px;
-    height: 34px;
+    width: 36px;
+    height: 28px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 2px;
+    padding: 2px 3px;
     cursor: pointer;
     background: var(--surface);
+    flex-shrink: 0;
+}
+
+input[type="color"]:hover {
+    border-color: var(--border-strong);
 }
 
 /* Preset size buttons */
@@ -408,34 +426,99 @@ input[type="color"] {
 .sub-dur-in:focus { outline: none; border-color: var(--accent); }
 
 /* ── Style-panel redesign ──────────────────────────────────────────────────── */
-.vsp-section { margin-bottom: 10px; }
+.vsp-section {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 6px;
+}
+
 .vsp-title {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: .06em;
+    letter-spacing: .07em;
     color: var(--text-dim);
-    margin-bottom: 6px;
-    padding-bottom: 4px;
+    margin-bottom: 8px;
+    padding-bottom: 5px;
     border-bottom: 1px solid var(--border);
 }
 .vsp-title small { font-weight: 400; text-transform: none; letter-spacing: 0; }
-.vsp-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; }
+
+.vsp-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    align-items: flex-end;
+}
+
 .vsp-field {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--text-muted);
+    white-space: nowrap;
 }
-.vsp-field.vsp-inline { flex-direction: row; align-items: center; gap: 5px; }
-.vsp-field select { min-width: 120px; }
-.vsp-num { width: 58px; text-align: right; }
-.rn-combo { display: flex; align-items: center; gap: 4px; }
-.rn-combo input[type="range"] { width: 76px; }
-.rn-combo .vsp-num { width: 46px; }
-.btn-sm { padding: 4px 10px; font-size: 11px; height: 28px; }
+
+.vsp-field span { white-space: nowrap; }
+
+.vsp-field.vsp-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 2px;
+}
+
+/* Override forms.css width:100% and padding for compact number inputs */
+input[type="number"].vsp-num {
+    width: 62px !important;
+    padding: 4px 6px !important;
+    font-size: 12px !important;
+    height: 28px !important;
+    text-align: right;
+    box-sizing: border-box;
+}
+
+/* Position X/Y inputs a bit wider */
+#vid-pos-x,
+#vid-pos-y {
+    width: 76px !important;
+}
+
+/* Selects inside style panel — fixed width, compact */
+.vsp-field select {
+    width: auto !important;
+    min-width: 110px;
+    padding: 4px 26px 4px 8px !important;
+    font-size: 12px !important;
+    height: 28px !important;
+}
+
+.rn-combo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rn-combo input[type="range"] {
+    width: 80px;
+    flex-shrink: 0;
+}
+
+.rn-combo input[type="number"].vsp-num {
+    width: 52px !important;
+}
+
+.btn-sm {
+    padding: 0 10px;
+    font-size: 12px;
+    height: 28px;
+    align-self: flex-end;
+    white-space: nowrap;
+}
 
 /* ── FFmpeg progress ───────────────────────────────────────────────────────── */
 #vid-progress-wrap { margin-top: 6px; }

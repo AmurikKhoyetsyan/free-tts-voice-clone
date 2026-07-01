@@ -56,6 +56,12 @@ export async function init() {
     const progressPct    = document.getElementById('vid-progress-pct');
     const ffmpegLog      = document.getElementById('vid-ffmpeg-log');
 
+    const subEditorBlock   = document.getElementById('vid-sub-editor-block');
+    const subEditorEl      = document.getElementById('vid-sub-editor');
+    const subEditorSaveRow = document.getElementById('vid-sub-editor-save-row');
+    const subEditorStatus  = document.getElementById('vid-sub-editor-status');
+    const subSaveBtn       = document.getElementById('vid-sub-save-btn');
+
     // ── State ─────────────────────────────────────────────────────────────────
     let uploadedVideoName = null;
     let currentSubs       = null;
@@ -399,12 +405,104 @@ export async function init() {
 
     // ── Subtitle overlay ──────────────────────────────────────────────────────
     async function loadSRTForOverlay(srtName) {
-        if (!srtName) { currentSubs = null; overlay.innerHTML = ''; return; }
+        if (!srtName) {
+            currentSubs = null;
+            overlay.innerHTML = '';
+            if (subEditorBlock) subEditorBlock.hidden = true;
+            return;
+        }
         try {
             const r = await getJSON(`/api/subtitles/${encodeURIComponent(srtName)}`);
             currentSubs = parseSRTContent(r.content);
+            renderVidSubEditor(currentSubs, srtName);
         } catch (_) { currentSubs = null; }
         updateOverlay();
+    }
+
+    function renderVidSubEditor(subs, srtName) {
+        if (!subEditorBlock) return;
+        if (!subs || !subs.length) { subEditorBlock.hidden = true; return; }
+
+        subEditorBlock.hidden = false;
+        subEditorStatus.textContent = '';
+
+        subEditorEl.innerHTML = subs.map((s, i) => `
+            <div class="sub-row" data-index="${i}">
+                <div>
+                    <div class="sub-row-num">${i + 1}</div>
+                    <div class="sub-row-times">
+                        <input class="sub-time-in"  value="${srtTimeV(s.start)}" title="Начало">
+                        <span class="sub-arrow">→</span>
+                        <input class="sub-time-out" value="${srtTimeV(s.end)}" title="Конец">
+                        <span class="sub-arrow" style="opacity:.5;font-size:10px">⏱</span>
+                        <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
+                        <span style="font-size:10px;color:var(--text-dim)">с</span>
+                    </div>
+                </div>
+                <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
+            </div>
+        `).join('');
+
+        subEditorSaveRow.style.display = 'flex';
+
+        subEditorEl.querySelectorAll('.sub-row').forEach((row, i) => {
+            const tIn  = row.querySelector('.sub-time-in');
+            const tOut = row.querySelector('.sub-time-out');
+            const tDur = row.querySelector('.sub-dur-in');
+            const tTxt = row.querySelector('.sub-row-text');
+
+            const syncFromTimes = () => {
+                const ns = parseSrtTime(tIn.value);
+                const ne = parseSrtTime(tOut.value);
+                if (isFinite(ns) && isFinite(ne) && ne > ns) {
+                    tDur.value = (ne - ns).toFixed(2);
+                    if (currentSubs[i]) { currentSubs[i].start = ns; currentSubs[i].end = ne; }
+                    updateOverlay();
+                }
+            };
+            const syncFromDur = () => {
+                const ns  = parseSrtTime(tIn.value);
+                const dur = parseFloat(tDur.value);
+                if (isFinite(ns) && isFinite(dur) && dur > 0) {
+                    const ne = ns + dur;
+                    tOut.value = srtTimeV(ne);
+                    if (currentSubs[i]) currentSubs[i].end = ne;
+                    updateOverlay();
+                }
+            };
+
+            tIn.addEventListener('change',  syncFromTimes);
+            tOut.addEventListener('change', syncFromTimes);
+            tDur.addEventListener('change', syncFromDur);
+            tTxt.addEventListener('input',  () => {
+                if (currentSubs[i]) currentSubs[i].text = tTxt.value;
+                updateOverlay();
+            });
+        });
+
+        subSaveBtn.onclick = async () => {
+            const collected = Array.from(subEditorEl.querySelectorAll('.sub-row')).map((row, i) => ({
+                index: i + 1,
+                start: parseSrtTime(row.querySelector('.sub-time-in').value),
+                end:   parseSrtTime(row.querySelector('.sub-time-out').value),
+                text:  row.querySelector('.sub-row-text').value.trim(),
+            })).filter(s => s.text);
+
+            const content = subsToSRTV(collected);
+            subEditorStatus.textContent = '';
+            try {
+                const r = await postJSON('/api/subtitles', { name: srtName, content });
+                toast(r.status || 'Сохранено', 'ok');
+                subEditorStatus.textContent = '✓ Сохранено';
+                subEditorStatus.className   = 'status ok';
+                events.dispatchEvent(new CustomEvent('subtitles-changed'));
+                await refreshSRTList();
+            } catch (e) {
+                toast(e.message, 'err');
+                subEditorStatus.textContent = '❌ ' + e.message;
+                subEditorStatus.className   = 'status err';
+            }
+        };
     }
 
     function updateOverlay() {
@@ -534,11 +632,23 @@ function parseSrtTime(str) {
 }
 
 function parseSRTContent(content) {
-    return content.trim().split(/\n\s*\n/).map(block => {
+    return content.trim().split(/\n\s*\n/).map((block, i) => {
         const lines = block.trim().split('\n');
         if (lines.length < 3) return null;
         const [startStr, endStr] = lines[1].split('-->').map(s => s.trim());
         const text = lines.slice(2).join('\n');
-        return { start: parseSrtTime(startStr), end: parseSrtTime(endStr), text };
+        return { index: i + 1, start: parseSrtTime(startStr), end: parseSrtTime(endStr), text };
     }).filter(Boolean);
+}
+
+function srtTimeV(sec) {
+    const h  = Math.floor(sec / 3600);
+    const m  = Math.floor((sec % 3600) / 60);
+    const s  = Math.floor(sec % 60);
+    const ms = Math.round((sec % 1) * 1000);
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+}
+
+function subsToSRTV(subs) {
+    return subs.map(s => `${s.index}\n${srtTimeV(s.start)} --> ${srtTimeV(s.end)}\n${s.text}`).join('\n\n') + '\n';
 }
