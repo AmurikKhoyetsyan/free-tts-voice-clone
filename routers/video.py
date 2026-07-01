@@ -198,12 +198,14 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         primary_c   = str(sd.get("PrimaryColour", "&H00FFFFFF"))
         secondary_c = "&HFF000000"  # transparent — not visible in non-karaoke mode
 
-    # When using box background (BorderStyle=3), keep OutlineColour transparent
-    # so it doesn't draw an opaque border that hides the BackColour alpha
     if border_style == 3:
-        outline_c = "&HFF000000"  # fully transparent border
+        # libass BorderStyle=3: OutlineColour = box fill; BackColour = shadow color
+        bg_col    = str(sd.get("BackColour", "&H00000000"))
+        outline_c = bg_col  # box fill = our bg color with opacity
+        back_c    = bg_col  # shadow in same color as box (only matters when Shadow > 0)
     else:
         outline_c = str(sd.get("OutlineColour", "&H00000000"))
+        back_c    = str(sd.get("BackColour",    "&HFF000000"))  # transparent unless shadow set
 
     style_line = ",".join([
         "Default",
@@ -212,7 +214,7 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         primary_c,
         secondary_c,
         outline_c,
-        str(sd.get("BackColour",    "&H00000000")),
+        back_c,
         str(sd.get("Bold",          "0")),
         "0", "0", "0",          # Italic, Underline, StrikeOut
         "100", "100", "0", "0", # ScaleX, ScaleY, Spacing, Angle
@@ -223,17 +225,47 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         str(margin_l), str(margin_r), str(sd.get("MarginV", 10)), "1",
     ])
 
+    # Secondary text-outline style for when both box background AND text border are requested.
+    # ASS BorderStyle=3 has no text stroke — we render a transparent-fill overlay (Layer 1)
+    # whose only visible element is the OutlineColour stroke around each glyph.
+    text_outline_size   = float(sd.get("TextOutlineSize",   0))
+    text_outline_colour = str(sd.get("TextOutlineColour", "&H00000000"))
+    has_text_outline    = (border_style == 3 and text_outline_size > 0)
+
+    extra_style = ""
+    if has_text_outline:
+        ol_line = ",".join([
+            "TextOutline",
+            str(sd.get("FontName",  "Arial")),
+            str(sd.get("FontSize",  "24")),
+            "&HFF000000",          # PrimaryColour = transparent (fill invisible, only stroke shows)
+            "&HFF000000",          # SecondaryColour = transparent
+            text_outline_colour,   # OutlineColour = user's border color
+            "&HFF000000",          # BackColour = transparent
+            str(sd.get("Bold", "0")),
+            "0", "0", "0",
+            "100", "100", "0", "0",
+            "1",                   # BorderStyle=1 (text stroke mode)
+            str(int(round(text_outline_size))),
+            "0",                   # Shadow=0
+            str(sd.get("Alignment", "2")),
+            str(margin_l), str(margin_r), str(sd.get("MarginV", 10)), "1",
+        ])
+        extra_style = f"Style: {ol_line}\n"
+
     res_line = ""
     if frame_w > 0 and frame_h > 0:
         res_line = f"PlayResX: {frame_w}\nPlayResY: {frame_h}\n"
 
-    header = (
-        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\n\n"
-        "[V4+ Styles]\n"
+    fmt_line = (
         "Format: Name, FontName, FontSize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
-        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: {style_line}\n\n"
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+    )
+    header = (
+        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\n\n"
+        f"[V4+ Styles]\n{fmt_line}\n"
+        f"Style: {style_line}\n{extra_style}\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -257,10 +289,16 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                 if words:
                     cs   = max(1, round(dur * 100 / len(words)))
                     text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
+            t0 = _ass_time(s2sec(start_s))
+            t1 = _ass_time(s2sec(end_s))
             events.append(
-                f"Dialogue: 0,{_ass_time(s2sec(start_s))},{_ass_time(s2sec(end_s))},"
-                f"Default,,0,0,0,,{pos_tag}{text}"
+                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{pos_tag}{text}"
             )
+            if has_text_outline:
+                # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
+                events.append(
+                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{pos_tag}{text}"
+                )
         except Exception:
             continue
 
@@ -337,6 +375,10 @@ def burn_subtitles(
             "PadX":        bg_pad_x,
             "PadY":        bg_pad_y,
         })
+        if outline_size > 0:
+            # Box + outline: stored separately; _srt_to_ass renders a second overlay event
+            style_dict["TextOutlineSize"]   = outline_size
+            style_dict["TextOutlineColour"] = _hex_to_ass(outline_color)
         if shadow_size > 0:
             style_dict["Shadow"] = shadow_size
     else:
@@ -393,7 +435,7 @@ def burn_subtitles(
                 if preview_width > 0 and fw > 0:
                     px_scale = fw / preview_width
                     style_dict["FontSize"] = max(1, round(float(style_dict["FontSize"]) * px_scale))
-                    for _k in ("PadX", "PadY", "Outline", "Shadow"):
+                    for _k in ("PadX", "PadY", "Outline", "Shadow", "TextOutlineSize"):
                         if _k in style_dict:
                             style_dict[_k] = float(style_dict[_k]) * px_scale
 
