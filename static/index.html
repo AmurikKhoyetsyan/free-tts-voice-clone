@@ -241,24 +241,66 @@
                     <div id="vid-srt-mount"></div>
                     <div id="vid-srt-upload-mount"></div>
                 </div>
-                <div class="grid-2">
-                    <label class="label">Размер шрифта <span class="hint" id="vid-size-val">24</span>
-                        <input type="range" id="vid-font-size" min="12" max="72" step="2" value="24">
-                    </label>
-                    <label class="label">Цвет текста
-                        <input type="color" id="vid-font-color" value="#ffffff">
-                    </label>
+                <!-- Стиль субтитров -->
+                <div class="vid-style-panel">
+                    <div class="result-label" style="margin-bottom:10px">Стиль субтитров</div>
+                    <div class="grid-2">
+                        <label class="label">Шрифт
+                            <select id="vid-font-family">
+                                <option value="Arial" selected>Arial</option>
+                                <option value="Arial Black">Arial Black</option>
+                                <option value="Impact">Impact</option>
+                                <option value="Verdana">Verdana</option>
+                                <option value="Times New Roman">Times New Roman</option>
+                                <option value="Courier New">Courier New</option>
+                            </select>
+                        </label>
+                        <label class="label">Размер <span class="hint" id="vid-size-val">24</span>px
+                            <input type="range" id="vid-font-size" min="12" max="72" step="2" value="24">
+                        </label>
+                    </div>
+                    <div class="grid-2">
+                        <label class="label">Цвет текста
+                            <div style="display:flex;align-items:center;gap:10px">
+                                <input type="color" id="vid-font-color" value="#ffffff">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                                    <input type="checkbox" id="vid-bold"> Жирный
+                                </label>
+                            </div>
+                        </label>
+                        <label class="label">Позиция
+                            <select id="vid-position">
+                                <option value="bottom" selected>Снизу</option>
+                                <option value="top">Сверху</option>
+                                <option value="middle">По центру</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="grid-2">
+                        <label class="label">Фон <span class="hint" id="vid-bg-opacity-val">50</span>%
+                            <input type="range" id="vid-bg-opacity" min="0" max="100" step="5" value="50">
+                        </label>
+                        <label class="label">Цвет фона
+                            <input type="color" id="vid-bg-color" value="#000000">
+                        </label>
+                    </div>
+                    <div class="grid-2">
+                        <label class="label">Обводка <span class="hint" id="vid-outline-val">1</span>px
+                            <input type="range" id="vid-outline-size" min="0" max="6" step="0.5" value="1">
+                        </label>
+                        <label class="label">Цвет обводки
+                            <input type="color" id="vid-outline-color" value="#000000">
+                        </label>
+                    </div>
+                    <div class="grid-2">
+                        <label class="label">Тень <span class="hint" id="vid-shadow-val">0</span>px
+                            <input type="range" id="vid-shadow-size" min="0" max="8" step="0.5" value="0">
+                        </label>
+                        <label class="label">Цвет тени
+                            <input type="color" id="vid-shadow-color" value="#000000">
+                        </label>
+                    </div>
                 </div>
-                <label class="label">Позиция субтитров
-                    <select id="vid-position">
-                        <option value="bottom" selected>Снизу</option>
-                        <option value="top">Сверху</option>
-                        <option value="middle">По центру</option>
-                    </select>
-                </label>
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-                    <input type="checkbox" id="vid-outline" checked> Обводка текста
-                </label>
                 <button class="btn btn-primary" id="vid-go">Добавить субтитры (FFmpeg)</button>
             </div>
             <div class="col">
@@ -266,6 +308,7 @@
                     <div class="result-label">Предпросмотр</div>
                     <div class="vid-preview-wrap">
                         <video id="vid-preview" controls></video>
+                        <div id="vid-sub-overlay" class="vid-sub-overlay"></div>
                         <div class="vid-empty" id="vid-empty">Загрузите видео для предпросмотра</div>
                     </div>
                     <div class="status" id="vid-status"></div>

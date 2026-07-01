@@ -103,15 +103,30 @@ def rename_history(name: str, body: RenameBody):
 
 # ── Burn subtitles ────────────────────────────────────────────────────────────
 
+def _hex_to_ass(hex_color: str, opacity: int = 100) -> str:
+    """#RRGGBB + opacity% (100=opaque, 0=transparent) → ASS &HAABBGGRR."""
+    c = hex_color.lstrip("#").upper().zfill(6)
+    r, g, b = c[0:2], c[2:4], c[4:6]
+    aa = format(max(0, min(255, int((1 - opacity / 100) * 255))), "02X")
+    return f"&H{aa}{b}{g}{r}"
+
+
 @router.post("/burn")
 def burn_subtitles(
-    video_name:    str  = Form(...),
-    srt_name:      str  = Form(...),
-    font_size:     int  = Form(24),
-    font_color:    str  = Form("ffffff"),
-    position:      str  = Form("bottom"),
-    outline:       bool = Form(True),
-    output_format: str  = Form(""),
+    video_name:    str   = Form(...),
+    srt_name:      str   = Form(...),
+    font_family:   str   = Form("Arial"),
+    font_size:     int   = Form(24),
+    font_color:    str   = Form("ffffff"),
+    bold:          bool  = Form(False),
+    position:      str   = Form("bottom"),
+    bg_opacity:    int   = Form(50),
+    bg_color:      str   = Form("000000"),
+    outline_size:  float = Form(1.0),
+    outline_color: str   = Form("000000"),
+    shadow_size:   float = Form(0.0),
+    shadow_color:  str   = Form("000000"),
+    output_format: str   = Form(""),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -125,14 +140,42 @@ def burn_subtitles(
     out_name = os.path.splitext(os.path.basename(video_name))[0] + "_sub." + ext
     out_path = os.path.join(VIDEO_OUT, out_name)
 
-    color = font_color.lstrip("#").upper().zfill(6)
-    r, g, b = color[0:2], color[2:4], color[4:6]
-    bgr_color = f"&H00{b}{g}{r}"
-
     align = {"bottom": 2, "top": 8, "middle": 5}.get(position, 2)
-    style = f"FontSize={font_size},PrimaryColour={bgr_color},Alignment={align}"
-    if outline:
-        style += ",BorderStyle=1,Outline=1,Shadow=0"
+
+    style_parts = [
+        f"FontName={font_family}",
+        f"FontSize={font_size}",
+        f"PrimaryColour={_hex_to_ass(font_color)}",
+        f"Bold={-1 if bold else 0}",
+        f"Alignment={align}",
+    ]
+
+    if bg_opacity > 0:
+        style_parts += [
+            "BorderStyle=3",
+            f"BackColour={_hex_to_ass(bg_color, bg_opacity)}",
+        ]
+        if outline_size > 0:
+            style_parts += [
+                f"Outline={outline_size}",
+                f"OutlineColour={_hex_to_ass(outline_color)}",
+            ]
+        if shadow_size > 0:
+            style_parts.append(f"Shadow={shadow_size}")
+    else:
+        style_parts.append("BorderStyle=1")
+        if outline_size > 0:
+            style_parts += [
+                f"Outline={outline_size}",
+                f"OutlineColour={_hex_to_ass(outline_color)}",
+            ]
+        if shadow_size > 0:
+            style_parts += [
+                f"Shadow={shadow_size}",
+                f"BackColour={_hex_to_ass(shadow_color)}",
+            ]
+
+    style = ",".join(style_parts)
 
     total_sec = _probe_duration(video_src)
     q: queue.Queue = queue.Queue()

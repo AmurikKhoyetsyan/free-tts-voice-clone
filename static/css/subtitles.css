@@ -180,6 +180,7 @@
 
 /* Video tab */
 .vid-preview-wrap {
+    position: relative;
     background: #000;
     border-radius: var(--radius);
     overflow: hidden;
@@ -189,7 +190,8 @@
     justify-content: center;
 }
 
-#vid-preview {
+#vid-preview,
+#hist-vid-preview {
     width: 100%;
     max-height: 320px;
     display: none;
@@ -200,6 +202,38 @@
     font-size: 13px;
     padding: 32px;
     text-align: center;
+}
+
+/* Live subtitle overlay */
+.vid-sub-overlay {
+    position: absolute;
+    left: 50%;
+    bottom: 8%;
+    transform: translateX(-50%);
+    max-width: 90%;
+    text-align: center;
+    pointer-events: none;
+    z-index: 5;
+    line-height: 1.35;
+    word-break: break-word;
+    white-space: pre-wrap;
+    /* default styles — overridden by JS */
+    font-size: 24px;
+    font-family: Arial, sans-serif;
+    color: #fff;
+    text-shadow: -1px -1px 0 #000, 1px -1px 0 #000,
+                 -1px  1px 0 #000, 1px  1px 0 #000;
+}
+
+/* Style panel */
+.vid-style-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 /* Color input */

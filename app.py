@@ -42,7 +42,12 @@ async def index():
 
 
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
+
+    # Fix "Exception in _ProactorBasePipeTransport._call_connection_lost" on Windows
+    if sys.platform.startswith("win"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     def _open_browser():
         time.sleep(1.0)
