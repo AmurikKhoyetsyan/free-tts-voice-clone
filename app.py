@@ -1,4 +1,5 @@
 import sys
+import asyncio
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -10,6 +11,7 @@ import os
 import threading
 import time
 import webbrowser
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -23,7 +25,28 @@ from routers import video as video_router
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
-app = FastAPI(title="TTS")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Suppress the harmless "Exception in callback _ProactorBasePipeTransport._call_connection_lost"
+    # noise that occurs on Windows when the browser video player aborts range-request connections.
+    # This is a known Python 3.10 / asyncio / ProactorEventLoop bug — the connection reset is
+    # expected behaviour for HTTP range streaming; the error is purely cosmetic.
+    if sys.platform.startswith("win"):
+        loop = asyncio.get_event_loop()
+
+        def _exception_handler(loop, context):
+            exc = context.get("exception")
+            msg = context.get("message", "")
+            if isinstance(exc, (ConnectionResetError, OSError)) and "_ProactorBasePipeTransport" in msg:
+                return  # known Windows asyncio noise — safe to ignore
+            loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_exception_handler)
+    yield
+
+
+app = FastAPI(title="TTS", lifespan=lifespan)
 
 app.add_middleware(NoCacheStaticMiddleware)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -42,12 +65,7 @@ async def index():
 
 
 if __name__ == "__main__":
-    import asyncio
     import uvicorn
-
-    # Fix "Exception in _ProactorBasePipeTransport._call_connection_lost" on Windows
-    if sys.platform.startswith("win"):
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     def _open_browser():
         time.sleep(1.0)

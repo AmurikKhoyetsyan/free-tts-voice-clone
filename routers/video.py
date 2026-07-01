@@ -52,10 +52,11 @@ def serve_input(name: str):
 
 @router.get("/output/{name}")
 def serve_output(name: str):
-    path = os.path.join(VIDEO_OUT, os.path.basename(name))
+    safe = os.path.basename(name)
+    path = os.path.join(VIDEO_OUT, safe)
     if not os.path.exists(path):
         raise HTTPException(404)
-    return FileResponse(path)
+    return FileResponse(path, filename=safe)
 
 
 # ── History ───────────────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ def _probe_dimensions(path: str) -> tuple:
 
 
 def _srt_to_ass(srt_content: str, style_dict: dict,
-                pos_tag: str = "", frame_w: int = 0) -> str:
+                pos_tag: str = "", frame_w: int = 0, frame_h: int = 0) -> str:
     """Convert SRT to ASS with embedded style and optional \\pos / margins."""
     sd           = style_dict
     border_style = int(sd.get("BorderStyle", 1))
@@ -206,8 +207,12 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         str(margin_l), str(margin_r), str(sd.get("MarginV", 10)), "1",
     ])
 
+    res_line = ""
+    if frame_w > 0 and frame_h > 0:
+        res_line = f"PlayResX: {frame_w}\nPlayResY: {frame_h}\n"
+
     header = (
-        "[Script Info]\nScriptType: v4.00+\nCollisions: Normal\n\n"
+        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\n\n"
         "[V4+ Styles]\n"
         "Format: Name, FontName, FontSize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
@@ -345,85 +350,113 @@ def burn_subtitles(
     _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
     def worker():
-        with tempfile.TemporaryDirectory() as tmp:
-            in_ext  = os.path.splitext(video_name)[1]
-            tmp_in  = os.path.join(tmp, "input" + in_ext)
-            tmp_out = os.path.join(tmp, "output." + ext)
-            shutil.copy(video_src, tmp_in)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                q.put(("progress", 0.05, "Копирование видео…"))
+                in_ext  = os.path.splitext(video_name)[1]
+                tmp_in  = os.path.join(tmp, "input" + in_ext)
+                tmp_out = os.path.join(tmp, "output." + ext)
+                shutil.copy(video_src, tmp_in)
 
-            # Always probe video dimensions for correct ASS margins
-            fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
-                     else _probe_dimensions(tmp_in)
+                q.put(("progress", 0.08, "Анализ видео…"))
+                fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
+                         else _probe_dimensions(tmp_in)
 
-            # Build optional position override tag
-            pos_tag = ""
-            if use_pos:
-                try:
-                    px = int(round(float(pos_x_px)))
-                    py = int(round(float(pos_y_px)))
-                except ValueError:
-                    px, py = fw // 2, int(fh * 0.92)
-                pos_tag = "{\\pos(" + str(px) + "," + str(py) + ")}"
+                # Build optional position override tag
+                pos_tag = ""
+                if use_pos:
+                    try:
+                        px = int(round(float(pos_x_px)))
+                        py = int(round(float(pos_y_px)))
+                    except ValueError:
+                        px, py = fw // 2, int(fh * 0.92)
+                    # \an5 = middle-center anchor so \pos(x,y) matches CSS translate(-50%,-50%)
+                    pos_tag = "{\\an5\\pos(" + str(px) + "," + str(py) + ")}"
 
-            # Always convert to ASS for reliable margin/style application
-            with open(srt_src, encoding="utf-8") as f:
-                srt_content = f.read()
-            ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw)
-            tmp_sub  = os.path.join(tmp, "sub.ass")
-            with open(tmp_sub, "w", encoding="utf-8") as f:
-                f.write(ass_text)
+                q.put(("progress", 0.10, "Конвертация субтитров…"))
+                with open(srt_src, encoding="utf-8") as f:
+                    srt_content = f.read()
+                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw, fh)
+                tmp_sub  = os.path.join(tmp, "sub.ass")
+                with open(tmp_sub, "w", encoding="utf-8", newline='\n') as f:
+                    f.write(ass_text)
 
-            sub_filter = "subtitles=sub.ass"
-            vf_chain   = f"{resize_filter},{sub_filter}" if resize_filter else sub_filter
-
-            cmd = [FFMPEG, "-y", "-i", tmp_in,
-                   "-vf", vf_chain,
-                   "-c:a", "copy", tmp_out]
-
-            try:
-                proc = subprocess.Popen(
-                    cmd, cwd=tmp,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    bufsize=0,
-                    creationflags=_CREATE_NO_WINDOW,
-                )
-                # FFmpeg writes progress with \r, not \n — read raw chunks
-                buf = b""
-                while True:
-                    chunk = proc.stdout.read(1024)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    parts = re.split(rb"\r\n|\r|\n", buf)
-                    buf = parts[-1]           # keep incomplete tail
-                    for raw in parts[:-1]:
-                        line = raw.decode("utf-8", errors="replace").strip()
-                        if not line:
-                            continue
-                        q.put(("log", line))
-                        if "time=" in line and total_sec > 0:
-                            try:
-                                t_str = line.split("time=")[1].split()[0]
-                                if ":" in t_str and not t_str.startswith("-"):
-                                    hh, mm, ss = t_str.split(":")
-                                    done = int(hh) * 3600 + int(mm) * 60 + float(ss)
-                                    q.put(("progress", min(0.95, done / total_sec), line))
-                            except Exception:
-                                pass
-                # Flush any remaining bytes
-                if buf.strip():
-                    q.put(("log", buf.decode("utf-8", errors="replace").strip()))
-                proc.wait()
-                if proc.returncode != 0:
-                    q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))
+                # Absolute path with Windows-safe escaping for libass
+                if os.name == "nt":
+                    esc_sub   = tmp_sub.replace("\\", "/").replace(":", "\\:")
+                    win_dir   = os.environ.get("WINDIR", "C:\\Windows")
+                    esc_fonts = (win_dir + "\\Fonts").replace("\\", "/").replace(":", "\\:")
+                    sub_filter = f"subtitles='{esc_sub}':fontsdir='{esc_fonts}'"
                 else:
-                    shutil.move(tmp_out, out_path)
-                    q.put(("done", out_name))
-            except FileNotFoundError:
-                q.put(("error", "FFmpeg не найден. Установите FFmpeg и добавьте в PATH."))
-            except Exception as e:
-                q.put(("error", str(e)))
+                    esc_sub    = tmp_sub
+                    sub_filter = f"subtitles='{esc_sub}'"
+                vf_chain   = f"{resize_filter},{sub_filter}" if resize_filter else sub_filter
+
+                # Format-specific codec args (video must be re-encoded when -vf is used)
+                if ext == 'webm':
+                    codec_args = ['-c:v', 'libvpx', '-b:v', '2M',
+                                  '-c:a', 'libvorbis', '-q:a', '4']
+                elif ext in ('mp4', 'm4v', 'mov'):
+                    codec_args = ['-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+                                  '-c:a', 'aac', '-b:a', '192k']
+                elif ext == 'mkv':
+                    codec_args = ['-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+                                  '-c:a', 'copy']
+                else:
+                    codec_args = ['-c:a', 'copy']
+
+                cmd = [FFMPEG, "-y", "-nostdin", "-i", tmp_in,
+                       "-vf", vf_chain,
+                       *codec_args, tmp_out]
+
+                q.put(("progress", 0.12, "Запуск FFmpeg…"))
+                try:
+                    proc = subprocess.Popen(
+                        cmd, cwd=tmp,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        stdin=subprocess.DEVNULL,
+                        bufsize=0,
+                        creationflags=_CREATE_NO_WINDOW,
+                    )
+                    # FFmpeg writes progress with \r, not \n — read raw chunks
+                    buf = b""
+                    while True:
+                        chunk = proc.stdout.read(1024)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        parts = re.split(rb"\r\n|\r|\n", buf)
+                        buf = parts[-1]           # keep incomplete tail
+                        for raw in parts[:-1]:
+                            line = raw.decode("utf-8", errors="replace").strip()
+                            if not line:
+                                continue
+                            q.put(("log", line))
+                            if "time=" in line and total_sec > 0:
+                                try:
+                                    t_str = line.split("time=")[1].split()[0]
+                                    if ":" in t_str and not t_str.startswith("-"):
+                                        hh, mm, ss = t_str.split(":")
+                                        done = int(hh) * 3600 + int(mm) * 60 + float(ss)
+                                        q.put(("progress", min(0.95, done / total_sec), line))
+                                except Exception:
+                                    pass
+                    # Flush any remaining bytes
+                    if buf.strip():
+                        q.put(("log", buf.decode("utf-8", errors="replace").strip()))
+                    proc.wait()
+                    if proc.returncode != 0:
+                        q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))
+                    elif not os.path.exists(tmp_out):
+                        q.put(("error", "FFmpeg не создал выходной файл"))
+                    else:
+                        shutil.move(tmp_out, out_path)
+                        q.put(("done", out_name))
+                except FileNotFoundError:
+                    q.put(("error", "FFmpeg не найден. Установите FFmpeg и добавьте в PATH."))
+        except Exception as e:
+            q.put(("error", str(e)))
 
     threading.Thread(target=worker, daemon=True).start()
 

@@ -1,7 +1,7 @@
 import { getJSON, postJSON, synthesizeStream } from '../api.js';
 import { FileUpload } from '../file-upload.js';
 import { CustomSelect } from '../custom-select.js';
-import { log, progress as logProgress } from '../logger.js';
+import { log } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
 
@@ -260,10 +260,15 @@ export async function init() {
     async function refreshSRTList() {
         try {
             const data = await getJSON('/api/subtitles');
-            srtSel.setOptions(data.files.map(f => ({ value: f, label: f })));
+            const opts = data.files.map(f => ({ value: f, label: f }));
+            srtSel.setOptions(opts);
+            if (opts.length > 0 && !srtSel.value) {
+                srtSel.setValue(opts[0].value, true);
+            }
         } catch (_) {}
     }
     await refreshSRTList();
+    events.addEventListener('subtitles-changed', refreshSRTList);
 
     new FileUpload(document.getElementById('vid-srt-upload-mount'), {
         accept: '.srt',
@@ -336,7 +341,6 @@ export async function init() {
                         const pct = Math.round(val * 100);
                         progressFill.style.width = pct + '%';
                         progressPct.textContent  = pct + '%';
-                        logProgress(val, desc || 'FFmpeg…');
                     }
                     if (desc) {
                         statusEl.textContent = parseFfmpegDesc(desc) || 'Обработка…';
@@ -569,38 +573,37 @@ export async function init() {
         overlay.style.color           = textColor;
         overlay.style.fontWeight      = bold ? '700' : '400';
         overlay.style.lineHeight      = lineH;
-        overlay.style.wordSpacing     = '0.2em';
+        overlay.style.wordSpacing     = '0.4em';
         overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
         overlay.style.cursor          = overlay.innerHTML ? 'move' : 'default';
 
-        // Width: explicit px overrides max-width %
+        // Width: convert video-space px → % of vid-inner (which matches video aspect via CSS)
         if (subW > 0) {
-            overlay.style.width    = subW + 'px';
+            overlay.style.width    = videoNatW > 0 ? (subW / videoNatW * 100) + '%' : subW + 'px';
             overlay.style.maxWidth = 'none';
         } else {
             overlay.style.width    = '';
             overlay.style.maxWidth = maxW + '%';
         }
 
-        // Height: min-height with centered text for box feel
+        // Height: exact height in video-space px → % of vid-inner height (no centering)
         if (subH > 0) {
-            overlay.style.minHeight      = subH + 'px';
-            overlay.style.display        = 'flex';
-            overlay.style.flexDirection  = 'row';
-            overlay.style.alignItems     = 'center';
-            overlay.style.justifyContent = 'center';
+            overlay.style.height    = videoNatH > 0 ? (subH / videoNatH * 100) + '%' : subH + 'px';
+            overlay.style.minHeight = '';
         } else {
-            overlay.style.minHeight      = '';
-            overlay.style.display        = '';
-            overlay.style.flexDirection  = '';
-            overlay.style.alignItems     = '';
-            overlay.style.justifyContent = '';
+            overlay.style.height    = '';
+            overlay.style.minHeight = '';
         }
+        overlay.style.display        = '';
+        overlay.style.flexDirection  = '';
+        overlay.style.alignItems     = '';
+        overlay.style.justifyContent = '';
 
-        // Background — separate horizontal/vertical padding
-        overlay.style.backgroundColor = bgOpacity > 0 ? hexToRgba(bgColor, bgOpacity) : 'transparent';
-        overlay.style.padding         = bgOpacity > 0 ? `${padY}px ${padX}px` : '0';
-        overlay.style.borderRadius    = bgOpacity > 0 ? bgRadius + 'px' : '0';
+        // Background — only visible when overlay has text
+        const hasContent = overlay.textContent.trim() !== '';
+        overlay.style.backgroundColor = (bgOpacity > 0 && hasContent) ? hexToRgba(bgColor, bgOpacity) : 'transparent';
+        overlay.style.padding         = (bgOpacity > 0 && hasContent) ? `${padY}px ${padX}px` : '0';
+        overlay.style.borderRadius    = (bgOpacity > 0 && hasContent) ? bgRadius + 'px' : '0';
 
         // Translate marginV (video px) → overlay % for preview approximation
         const marginVPct = videoNatH > 0 ? (marginV / videoNatH * 100) : 2;

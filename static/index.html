@@ -242,6 +242,17 @@
                     <div id="vid-srt-mount"></div>
                     <div id="vid-srt-upload-mount"></div>
                 </div>
+
+                <!-- Subtitle editor -->
+                <div class="sub-panel" id="vid-sub-editor-block" hidden>
+                    <div class="result-label" style="margin-bottom:6px">Редактор субтитров</div>
+                    <div id="vid-sub-editor" class="sub-editor"></div>
+                    <div class="row gap" id="vid-sub-editor-save-row" style="margin-top:8px;display:none">
+                        <button class="btn btn-primary" id="vid-sub-save-btn" style="flex:1">Сохранить SRT</button>
+                    </div>
+                    <div class="status" id="vid-sub-editor-status"></div>
+                </div>
+
                 <!-- Размер вывода -->
                 <div class="vid-style-panel">
                     <div class="result-label" style="margin-bottom:8px">Размер вывода</div>
@@ -458,17 +469,10 @@
                         <a id="vid-download-btn" class="btn btn-primary" download>Скачать</a>
                     </div>
                 </div>
-                <div class="result-block" id="vid-sub-editor-block" hidden style="position:static;top:auto;margin-top:12px">
-                    <div class="result-label">Редактор субтитров</div>
-                    <div id="vid-sub-editor" class="sub-editor"></div>
-                    <div class="row gap" id="vid-sub-editor-save-row" style="margin-top:8px;display:none">
-                        <button class="btn btn-primary" id="vid-sub-save-btn">Сохранить SRT</button>
-                    </div>
-                    <div class="status" id="vid-sub-editor-status"></div>
-                </div>
             </div>
         </div>
     </section>
+
 
 </main>
 
