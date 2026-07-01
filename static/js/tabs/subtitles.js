@@ -293,9 +293,12 @@ function renderEditor(subs, editorEl, saveRow, timeline) {
         <div class="sub-row" data-index="${i}">
             <div class="sub-row-num">${s.index}</div>
             <div class="sub-row-times">
-                <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}">
+                <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}" title="Начало">
                 <span class="sub-arrow">→</span>
-                <input class="sub-time-out" value="${escHtml(srtTime(s.end))}">
+                <input class="sub-time-out" value="${escHtml(srtTime(s.end))}" title="Конец">
+                <span class="sub-arrow" style="opacity:.5;font-size:10px">⏱</span>
+                <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
+                <span style="font-size:10px;color:var(--text-dim)">с</span>
             </div>
             <button class="sub-del-btn" data-action="del" title="Удалить строку">${ICONS.trash}</button>
             <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
@@ -304,17 +307,33 @@ function renderEditor(subs, editorEl, saveRow, timeline) {
 
     saveRow.style.display = 'flex';
 
-    // Attach time-input → timeline sync
+    // Attach time-input / duration sync → timeline
     editorEl.querySelectorAll('.sub-row').forEach((row, i) => {
         const tIn  = row.querySelector('.sub-time-in');
         const tOut = row.querySelector('.sub-time-out');
-        const sync = () => {
+        const tDur = row.querySelector('.sub-dur-in');
+
+        const syncFromTimes = () => {
             const ns = parseSrtTime(tIn.value);
             const ne = parseSrtTime(tOut.value);
-            if (isFinite(ns) && isFinite(ne) && ne > ns) timeline.updateBlock(i, ns, ne);
+            if (isFinite(ns) && isFinite(ne) && ne > ns) {
+                tDur.value = (ne - ns).toFixed(2);
+                timeline.updateBlock(i, ns, ne);
+            }
         };
-        tIn.addEventListener('change',  sync);
-        tOut.addEventListener('change', sync);
+        const syncFromDur = () => {
+            const ns  = parseSrtTime(tIn.value);
+            const dur = parseFloat(tDur.value);
+            if (isFinite(ns) && isFinite(dur) && dur > 0) {
+                const ne = ns + dur;
+                tOut.value = srtTime(ne);
+                timeline.updateBlock(i, ns, ne);
+            }
+        };
+
+        tIn.addEventListener('change',  syncFromTimes);
+        tOut.addEventListener('change', syncFromTimes);
+        tDur.addEventListener('change', syncFromDur);
     });
 
     // Delete handler

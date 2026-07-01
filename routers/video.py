@@ -58,7 +58,7 @@ def serve_output(name: str):
     return FileResponse(path)
 
 
-# ── History endpoints ─────────────────────────────────────────────────────────
+# ── History ───────────────────────────────────────────────────────────────────
 
 @router.get("/history")
 def list_history():
@@ -104,7 +104,7 @@ def rename_history(name: str, body: RenameBody):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _hex_to_ass(hex_color: str, opacity: int = 100) -> str:
-    """#RRGGBB + opacity% (100=opaque, 0=transparent) → ASS &HAABBGGRR."""
+    """#RRGGBB + opacity% → ASS &HAABBGGRR (0%=transparent, 100%=opaque)."""
     c = hex_color.lstrip("#").upper().zfill(6)
     r, g, b = c[0:2], c[2:4], c[4:6]
     aa = format(max(0, min(255, int((1 - opacity / 100) * 255))), "02X")
@@ -123,8 +123,7 @@ def _probe_duration(path: str) -> float:
     try:
         r = subprocess.run(
             [FFPROBE, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=duration",
-             "-of", "csv=p=0", path],
+             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
             capture_output=True, text=True, timeout=10,
         )
         return float(r.stdout.strip())
@@ -136,8 +135,7 @@ def _probe_dimensions(path: str) -> tuple:
     try:
         r = subprocess.run(
             [FFPROBE, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=width,height",
-             "-of", "csv=p=0", path],
+             "-show_entries", "stream=width,height", "-of", "csv=p=0", path],
             capture_output=True, text=True, timeout=10,
         )
         parts = r.stdout.strip().split(",")
@@ -146,25 +144,33 @@ def _probe_dimensions(path: str) -> tuple:
         return 1920, 1080
 
 
-def _srt_to_ass(srt_content: str, style_dict: dict, pos_tag: str = "") -> str:
-    """Convert SRT to minimal ASS with embedded style and optional \\pos tag."""
+def _srt_to_ass(srt_content: str, style_dict: dict,
+                pos_tag: str = "", frame_w: int = 0) -> str:
+    """Convert SRT to ASS with embedded style and optional \\pos / margins."""
     sd = style_dict
+
+    # Margins from max_width (text wrap region)
+    margin_l = margin_r = 0
+    if frame_w > 0 and "MaxWidth" in sd:
+        side = round(frame_w * (1 - float(sd["MaxWidth"]) / 100) / 2)
+        margin_l = margin_r = max(0, side)
+
     style_line = ",".join([
         "Default",
-        sd.get("FontName", "Arial"),
-        str(sd.get("FontSize", "24")),
-        sd.get("PrimaryColour", "&H00FFFFFF"),
-        "&H000000FF",                         # SecondaryColour
-        sd.get("OutlineColour", "&H00000000"),
-        sd.get("BackColour", "&H00000000"),
-        str(sd.get("Bold", "0")),
-        "0", "0", "0",                        # Italic, Underline, StrikeOut
-        "100", "100", "0", "0",               # ScaleX, ScaleY, Spacing, Angle
-        str(sd.get("BorderStyle", "1")),
-        str(sd.get("Outline", "0")),
-        str(sd.get("Shadow", "0")),
-        str(sd.get("Alignment", "2")),
-        "10", "10", "10", "1",                # MarginL, MarginR, MarginV, Encoding
+        str(sd.get("FontName",      "Arial")),
+        str(sd.get("FontSize",      "24")),
+        str(sd.get("PrimaryColour", "&H00FFFFFF")),
+        "&H000000FF",
+        str(sd.get("OutlineColour", "&H00000000")),
+        str(sd.get("BackColour",    "&H00000000")),
+        str(sd.get("Bold",          "0")),
+        "0", "0", "0",          # Italic, Underline, StrikeOut
+        "100", "100", "0", "0", # ScaleX, ScaleY, Spacing, Angle
+        str(sd.get("BorderStyle",   "1")),
+        str(sd.get("Outline",       "0")),
+        str(sd.get("Shadow",        "0")),
+        str(sd.get("Alignment",     "2")),
+        str(margin_l), str(margin_r), "10", "1",
     ])
 
     header = (
@@ -214,6 +220,7 @@ def burn_subtitles(
     position:      str   = Form("bottom"),
     bg_opacity:    int   = Form(50),
     bg_color:      str   = Form("000000"),
+    bg_padding:    int   = Form(6),
     outline_size:  float = Form(1.0),
     outline_color: str   = Form("000000"),
     shadow_size:   float = Form(0.0),
@@ -222,8 +229,9 @@ def burn_subtitles(
     output_width:  int   = Form(0),
     output_height: int   = Form(0),
     resize_mode:   str   = Form("pad"),
-    pos_x_pct:     str   = Form(""),
-    pos_y_pct:     str   = Form(""),
+    max_width_pct: float = Form(90.0),
+    pos_x_px:      str   = Form(""),
+    pos_y_px:      str   = Form(""),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -239,30 +247,37 @@ def burn_subtitles(
 
     align = {"bottom": 2, "top": 8, "middle": 5}.get(position, 2)
 
-    # Build style dict for both force_style and ASS approaches
+    # Build style dict
     style_dict: dict = {
         "FontName":     font_family,
         "FontSize":     font_size,
         "PrimaryColour": _hex_to_ass(font_color),
-        "Bold":          -1 if bold else 0,
-        "Alignment":     align,
+        "Bold":         -1 if bold else 0,
+        "Alignment":    align,
+        "MaxWidth":     max_width_pct,
     }
 
     if bg_opacity > 0:
+        # BorderStyle=3 → box background; Outline=padding inside box
         style_dict.update({
             "BorderStyle": 3,
             "BackColour":  _hex_to_ass(bg_color, bg_opacity),
+            "Outline":     bg_padding,
         })
-        if outline_size > 0:
-            style_dict.update({"Outline": outline_size, "OutlineColour": _hex_to_ass(outline_color)})
         if shadow_size > 0:
             style_dict["Shadow"] = shadow_size
     else:
         style_dict["BorderStyle"] = 1
         if outline_size > 0:
-            style_dict.update({"Outline": outline_size, "OutlineColour": _hex_to_ass(outline_color)})
+            style_dict.update({
+                "Outline":      outline_size,
+                "OutlineColour": _hex_to_ass(outline_color),
+            })
         if shadow_size > 0:
-            style_dict.update({"Shadow": shadow_size, "BackColour": _hex_to_ass(shadow_color)})
+            style_dict.update({
+                "Shadow":    shadow_size,
+                "BackColour": _hex_to_ass(shadow_color),
+            })
 
     # Build optional resize filter
     resize_filter = ""
@@ -281,8 +296,7 @@ def burn_subtitles(
                 f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
             )
 
-    # Decide on subtitle filter: ASS (with position) or force_style SRT
-    use_pos = pos_x_pct.strip() and pos_y_pct.strip()
+    use_pos = pos_x_px.strip() and pos_y_px.strip()
 
     total_sec = _probe_duration(video_src)
     q: queue.Queue = queue.Queue()
@@ -295,26 +309,32 @@ def burn_subtitles(
             shutil.copy(video_src, tmp_in)
 
             if use_pos:
-                # Generate ASS with \pos(x,y) override
                 fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
                          else _probe_dimensions(tmp_in)
                 try:
-                    px = round(float(pos_x_pct) / 100 * fw)
-                    py = round(float(pos_y_pct) / 100 * fh)
+                    px = int(round(float(pos_x_px)))
+                    py = int(round(float(pos_y_px)))
                 except ValueError:
                     px, py = fw // 2, int(fh * 0.92)
 
                 with open(srt_src, encoding="utf-8") as f:
                     srt_content = f.read()
+
                 pos_tag  = "{\\pos(" + str(px) + "," + str(py) + ")}"
-                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag)
+                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw)
                 tmp_sub  = os.path.join(tmp, "sub.ass")
                 with open(tmp_sub, "w", encoding="utf-8") as f:
                     f.write(ass_text)
                 sub_filter = "subtitles=sub.ass"
+
             else:
                 shutil.copy(srt_src, os.path.join(tmp, "sub.srt"))
-                style_str = ",".join(f"{k}={v}" for k, v in style_dict.items())
+                # Build force_style string from style_dict (exclude MaxWidth)
+                style_parts = [
+                    f"{k}={v}" for k, v in style_dict.items()
+                    if k not in ("MaxWidth",)
+                ]
+                style_str  = ",".join(style_parts)
                 sub_filter = f"subtitles=sub.srt:force_style='{style_str}'"
 
             vf_chain = f"{resize_filter},{sub_filter}" if resize_filter else sub_filter
@@ -322,6 +342,7 @@ def burn_subtitles(
             cmd = [FFMPEG, "-y", "-i", tmp_in,
                    "-vf", vf_chain,
                    "-c:a", "copy", tmp_out]
+
             try:
                 proc = subprocess.Popen(
                     cmd, cwd=tmp,
@@ -329,17 +350,22 @@ def burn_subtitles(
                     universal_newlines=True, bufsize=1,
                 )
                 for line in proc.stdout:
+                    line = line.rstrip()
+                    if not line:
+                        continue
+                    # Always forward FFmpeg output lines to UI
+                    q.put(("log", line))
                     if "time=" in line and total_sec > 0:
                         try:
                             t_str = line.split("time=")[1].split()[0]
                             hh, mm, ss = t_str.split(":")
                             done = int(hh) * 3600 + int(mm) * 60 + float(ss)
-                            q.put(("progress", min(0.95, done / total_sec), line.strip()[:80]))
+                            q.put(("progress", min(0.95, done / total_sec), line))
                         except Exception:
                             pass
                 proc.wait()
                 if proc.returncode != 0:
-                    q.put(("error", "FFmpeg завершился с ошибкой"))
+                    q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))
                 else:
                     shutil.move(tmp_out, out_path)
                     q.put(("done", out_name))
@@ -351,19 +377,23 @@ def burn_subtitles(
     threading.Thread(target=worker, daemon=True).start()
 
     def stream():
-        yield f"event: progress\ndata: {json.dumps({'value': 0.05, 'desc': 'Подготовка…'})}\n\n"
+        yield f"event: progress\ndata: {json.dumps({'value': 0.03, 'desc': 'Подготовка…'})}\n\n"
         while True:
-            ev, *args = q.get()
-            if ev == "progress":
-                pct, desc = args
+            item = q.get()
+            ev   = item[0]
+            if ev == "log":
+                # Forward raw FFmpeg output as a log event for the UI console
+                yield f"event: progress\ndata: {json.dumps({'value': None, 'desc': item[1]})}\n\n"
+            elif ev == "progress":
+                pct, desc = item[1], item[2]
                 yield f"event: progress\ndata: {json.dumps({'value': pct, 'desc': desc})}\n\n"
             elif ev == "done":
-                nm  = args[0]
+                nm  = item[1]
                 url = f"/api/video/output/{nm}"
                 yield f"event: done\ndata: {json.dumps({'video_url': url, 'filename': nm})}\n\n"
                 break
             elif ev == "error":
-                yield f"event: error\ndata: {json.dumps({'status': '❌ ' + args[0]})}\n\n"
+                yield f"event: error\ndata: {json.dumps({'status': '❌ ' + item[1]})}\n\n"
                 break
 
     return StreamingResponse(stream(), media_type="text/event-stream")
