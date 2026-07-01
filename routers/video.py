@@ -127,6 +127,9 @@ def burn_subtitles(
     shadow_size:   float = Form(0.0),
     shadow_color:  str   = Form("000000"),
     output_format: str   = Form(""),
+    output_width:  int   = Form(0),
+    output_height: int   = Form(0),
+    resize_mode:   str   = Form("pad"),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -177,6 +180,26 @@ def burn_subtitles(
 
     style = ",".join(style_parts)
 
+    # Build optional resize filter
+    resize_filter = ""
+    if output_width > 0 and output_height > 0:
+        w, h = output_width, output_height
+        if resize_mode == "crop":
+            resize_filter = (
+                f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{h}"
+            )
+        elif resize_mode == "stretch":
+            resize_filter = f"scale={w}:{h}"
+        else:  # pad (letterbox)
+            resize_filter = (
+                f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+            )
+
+    sub_filter = f"subtitles=sub.srt:force_style='{style}'"
+    vf_chain   = f"{resize_filter},{sub_filter}" if resize_filter else sub_filter
+
     total_sec = _probe_duration(video_src)
     q: queue.Queue = queue.Queue()
 
@@ -190,7 +213,7 @@ def burn_subtitles(
             shutil.copy(srt_src,   tmp_srt)
 
             cmd = [FFMPEG, "-y", "-i", tmp_in,
-                   "-vf", f"subtitles=sub.srt:force_style='{style}'",
+                   "-vf", vf_chain,
                    "-c:a", "copy", tmp_out]
             try:
                 proc = subprocess.Popen(

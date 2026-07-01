@@ -8,6 +8,7 @@ import { events } from '../events.js';
 export async function init() {
     const ffwarnEl      = document.getElementById('vid-ffmpeg-warn');
     const vidPreview    = document.getElementById('vid-preview');
+    const vidInner      = document.getElementById('vid-inner');
     const vidEmpty      = document.getElementById('vid-empty');
     const overlay       = document.getElementById('vid-sub-overlay');
     const statusEl      = document.getElementById('vid-status');
@@ -35,6 +36,8 @@ export async function init() {
 
     let uploadedVideoName = null;
     let currentSubs       = null;
+    let outputW           = 0;
+    let outputH           = 0;
 
     // ── FFmpeg check ──────────────────────────────────────────────────────────
     try {
@@ -45,6 +48,17 @@ export async function init() {
             goBtn.title = 'FFmpeg не установлен — скачайте с ffmpeg.org и добавьте в PATH';
         }
     } catch (_) {}
+
+    // ── Preset size buttons ───────────────────────────────────────────────────
+    document.querySelectorAll('.vid-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.vid-preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            outputW = parseInt(btn.dataset.w);
+            outputH = parseInt(btn.dataset.h);
+            document.getElementById('vid-resize-row').hidden = (outputW === 0);
+        });
+    });
 
     // ── Range labels ──────────────────────────────────────────────────────────
     fontSizeEl.addEventListener('input', () => { fontSizeVal.textContent  = fontSizeEl.value;    applySubStyle(); });
@@ -64,7 +78,7 @@ export async function init() {
         async onChange(file) {
             if (!file) {
                 uploadedVideoName = null;
-                vidPreview.style.display = 'none';
+                vidInner.style.display = 'none';
                 vidEmpty.style.display = 'block';
                 overlay.textContent = '';
                 return;
@@ -146,7 +160,10 @@ export async function init() {
         fd.append('outline_color', outlineColorEl.value.replace('#', ''));
         fd.append('shadow_size',   shadowSizeEl.value);
         fd.append('shadow_color',  shadowColorEl.value.replace('#', ''));
-        fd.append('output_format', formatEl.value);
+        fd.append('output_format',  formatEl.value);
+        fd.append('output_width',   String(outputW));
+        fd.append('output_height',  String(outputH));
+        fd.append('resize_mode',    document.getElementById('vid-resize-mode').value);
 
         await synthesizeStream(
             '/api/video/burn',
@@ -205,12 +222,21 @@ export async function init() {
     // Apply styles immediately on load
     applySubStyle();
 
+    // ── Aspect-ratio sizing ───────────────────────────────────────────────────
+
+    vidPreview.addEventListener('loadedmetadata', () => {
+        const { videoWidth: vw, videoHeight: vh } = vidPreview;
+        if (!vw || !vh) return;
+        vidInner.style.aspectRatio = `${vw} / ${vh}`;
+        vidInner.style.display = 'block';
+    });
+
     // ── Preview ───────────────────────────────────────────────────────────────
 
     function showPreview(videoUrl) {
         vidPreview.src = videoUrl;
-        vidPreview.style.display = 'block';
-        vidEmpty.style.display   = 'none';
+        vidEmpty.style.display = 'none';
+        // vidInner shown by loadedmetadata listener above
     }
 
     // ── Style functions ───────────────────────────────────────────────────────

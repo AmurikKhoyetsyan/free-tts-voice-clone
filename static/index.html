@@ -241,6 +241,26 @@
                     <div id="vid-srt-mount"></div>
                     <div id="vid-srt-upload-mount"></div>
                 </div>
+                <!-- Размер вывода -->
+                <div class="vid-style-panel">
+                    <div class="result-label" style="margin-bottom:8px">Размер вывода</div>
+                    <div class="vid-preset-grid">
+                        <button class="vid-preset-btn active" data-w="0" data-h="0">Оригинал</button>
+                        <button class="vid-preset-btn" data-w="1920" data-h="1080">16:9<br><small>1920×1080</small></button>
+                        <button class="vid-preset-btn" data-w="1080" data-h="1920">9:16<br><small>1080×1920</small></button>
+                        <button class="vid-preset-btn" data-w="1080" data-h="1080">1:1<br><small>1080×1080</small></button>
+                        <button class="vid-preset-btn" data-w="1280" data-h="960">4:3<br><small>1280×960</small></button>
+                    </div>
+                    <div id="vid-resize-row" hidden>
+                        <label class="label" style="margin:0">Режим масштабирования
+                            <select id="vid-resize-mode">
+                                <option value="pad">Вписать (чёрные полосы)</option>
+                                <option value="crop">Обрезать</option>
+                                <option value="stretch">Растянуть</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
                 <!-- Стиль субтитров -->
                 <div class="vid-style-panel">
                     <div class="result-label" style="margin-bottom:10px">Стиль субтитров</div>
@@ -307,8 +327,10 @@
                 <div class="result-block" style="position:static;top:auto">
                     <div class="result-label">Предпросмотр</div>
                     <div class="vid-preview-wrap">
-                        <video id="vid-preview" controls></video>
-                        <div id="vid-sub-overlay" class="vid-sub-overlay"></div>
+                        <div class="vid-inner" id="vid-inner">
+                            <video id="vid-preview" controls></video>
+                            <div id="vid-sub-overlay" class="vid-sub-overlay"></div>
+                        </div>
                         <div class="vid-empty" id="vid-empty">Загрузите видео для предпросмотра</div>
                     </div>
                     <div class="status" id="vid-status"></div>
