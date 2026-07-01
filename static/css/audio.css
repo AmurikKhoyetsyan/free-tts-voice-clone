@@ -87,6 +87,12 @@
     height: 14px;
 }
 
+.audio-player.loading {
+    user-focus: none;
+    user-select: none;
+    pointer-events: none;
+}
+
 /* loader overlay */
 .audio-player.loading::after {
     content: "";
