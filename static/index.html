@@ -454,6 +454,24 @@
                         <div class="vid-empty" id="vid-empty">Загрузите видео для предпросмотра</div>
                     </div>
                     <div class="status" id="vid-status"></div>
+                    <div class="vid-timestamp" id="vid-timestamp">00:00:00,000 / 00:00:00,000</div>
+                    <div id="vid-waveform-wrap" class="vid-waveform-wrap" hidden>
+                        <canvas id="vid-waveform" class="vid-waveform-canvas"></canvas>
+                    </div>
+                    <div id="vid-sub-sel" class="vid-sub-sel" hidden>
+                        <span class="vid-sub-sel-label">Субтитр <b id="vid-sub-sel-idx">—</b></span>
+                        <div class="vid-sub-sel-row">
+                            <label class="vsp-field">
+                                <span>Начало</span>
+                                <input type="text" id="vid-sub-sel-start" class="sub-time-in" placeholder="00:00:00,000">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Конец</span>
+                                <input type="text" id="vid-sub-sel-end" class="sub-time-in" placeholder="00:00:00,000">
+                            </label>
+                            <div class="vid-sub-sel-text" id="vid-sub-sel-text"></div>
+                        </div>
+                    </div>
                 </div>
                 <div class="result-block" id="vid-export-block" hidden style="position:static;top:auto;margin-top:12px">
                     <div class="result-label">Экспорт</div>

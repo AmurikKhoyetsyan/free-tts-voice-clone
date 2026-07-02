@@ -4,6 +4,7 @@ import { CustomSelect } from '../custom-select.js';
 import { log, logLocal } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
+import { ICONS } from '../icons.js';
 
 export async function init() {
     // ── Core elements ─────────────────────────────────────────────────────────
@@ -59,6 +60,14 @@ export async function init() {
     const progressFill   = document.getElementById('vid-progress-fill');
     const progressPct    = document.getElementById('vid-progress-pct');
     const ffmpegLog      = document.getElementById('vid-ffmpeg-log');
+    const timestampEl    = document.getElementById('vid-timestamp');
+    const waveformWrap   = document.getElementById('vid-waveform-wrap');
+    const waveformCanvas = document.getElementById('vid-waveform');
+    const subSelEl       = document.getElementById('vid-sub-sel');
+    const subSelIdxEl    = document.getElementById('vid-sub-sel-idx');
+    const subSelStartEl  = document.getElementById('vid-sub-sel-start');
+    const subSelEndEl    = document.getElementById('vid-sub-sel-end');
+    const subSelTextEl   = document.getElementById('vid-sub-sel-text');
 
     const subEditorBlock   = document.getElementById('vid-sub-editor-block');
     const subEditorEl      = document.getElementById('vid-sub-editor');
@@ -75,6 +84,12 @@ export async function init() {
     let posYpx            = null;
     let outputW           = 0;
     let outputH           = 0;
+    let waveAudioData     = null;
+    let waveDuration      = 0;
+    let waveRafId         = null;
+    let selectedSubIdx    = -1;
+    let currentSrtName    = null;
+    let vidDuration        = 0;
 
     // ── FFmpeg check ──────────────────────────────────────────────────────────
     try {
@@ -244,9 +259,31 @@ export async function init() {
         vidInner.style.aspectRatio = `${vw} / ${vh}`;
         vidInner.style.display     = 'block';
         if (frameSizeEl) frameSizeEl.textContent = `(${vw}×${vh})`;
+        vidDuration = vidPreview.duration || 0;
+        updateTimestamp();
         // Auto-set bottom-center if no position yet
         if (posXpx === null) applyPositionPreset('bottom');
     });
+
+    // ── Waveform animation ─────────────────────────────────────────────────────
+    vidPreview.addEventListener('play', () => {
+        cancelAnimationFrame(waveRafId);
+        function rafTick() {
+            drawWaveform(vidPreview.currentTime);
+            if (!vidPreview.paused && !vidPreview.ended) waveRafId = requestAnimationFrame(rafTick);
+        }
+        waveRafId = requestAnimationFrame(rafTick);
+    });
+    vidPreview.addEventListener('pause',  () => { cancelAnimationFrame(waveRafId); drawWaveform(vidPreview.currentTime); });
+    vidPreview.addEventListener('seeked', () => drawWaveform(vidPreview.currentTime));
+    vidPreview.addEventListener('ended',  () => { cancelAnimationFrame(waveRafId); drawWaveform(vidPreview.currentTime); });
+    if (waveformCanvas) {
+        waveformCanvas.addEventListener('click', e => {
+            if (!waveDuration) return;
+            const rect = waveformCanvas.getBoundingClientRect();
+            vidPreview.currentTime = (e.clientX - rect.left) / rect.width * waveDuration;
+        });
+    }
 
     // ── SRT selector ──────────────────────────────────────────────────────────
     const srtSel = new CustomSelect(document.getElementById('vid-srt-mount'), {
@@ -262,9 +299,6 @@ export async function init() {
             const data = await getJSON('/api/subtitles');
             const opts = data.files.map(f => ({ value: f, label: f }));
             srtSel.setOptions(opts);
-            if (opts.length > 0 && !srtSel.value) {
-                srtSel.setValue(opts[0].value, true);
-            }
         } catch (_) {}
     }
     await refreshSRTList();
@@ -414,7 +448,7 @@ export async function init() {
         if (!srtName) {
             currentSubs = null;
             overlay.innerHTML = '';
-            if (subEditorBlock) subEditorBlock.hidden = true;
+            renderVidSubEditor([], null);
             return;
         }
         try {
@@ -426,14 +460,27 @@ export async function init() {
     }
 
     function renderVidSubEditor(subs, srtName) {
+        if (srtName) currentSrtName = srtName;
         if (!subEditorBlock) return;
-        if (!subs || !subs.length) { subEditorBlock.hidden = true; return; }
 
         subEditorBlock.hidden = false;
         subEditorStatus.textContent = '';
 
-        subEditorEl.innerHTML = subs.map((s, i) => `
-            <div class="sub-row" data-index="${i}">
+        const mkAdd = (after) =>
+            `<button class="sub-add-btn" data-after="${after}" title="Добавить субтитр"><span></span>+<span></span></button>`;
+
+        if (!subs || !subs.length) {
+            subEditorEl.innerHTML =
+                '<div class="sub-empty">Нет субтитров. Нажмите «+», чтобы добавить.</div>' +
+                mkAdd(-1);
+            subEditorSaveRow.style.display = 'none';
+            updateSubInfoPanel();
+            drawWaveform(vidPreview.currentTime);
+            return;
+        }
+
+        subEditorEl.innerHTML = mkAdd(-1) + subs.map((s, i) => `
+            <div class="sub-row${selectedSubIdx === i ? ' sub-row-selected' : ''}" data-index="${i}">
                 <div>
                     <div class="sub-row-num">${i + 1}</div>
                     <div class="sub-row-times">
@@ -444,9 +491,11 @@ export async function init() {
                         <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
                         <span style="font-size:10px;color:var(--text-dim)">с</span>
                     </div>
+                    <button class="sub-del-btn" title="Удалить">${ICONS.trash}</button>
                 </div>
                 <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
             </div>
+            ${mkAdd(i)}
         `).join('');
 
         subEditorSaveRow.style.display = 'flex';
@@ -457,16 +506,18 @@ export async function init() {
             const tDur = row.querySelector('.sub-dur-in');
             const tTxt = row.querySelector('.sub-row-text');
 
-            const syncFromTimes = () => {
+            const syncTimes = () => {
                 const ns = parseSrtTime(tIn.value);
                 const ne = parseSrtTime(tOut.value);
                 if (isFinite(ns) && isFinite(ne) && ne > ns) {
                     tDur.value = (ne - ns).toFixed(2);
                     if (currentSubs[i]) { currentSubs[i].start = ns; currentSubs[i].end = ne; }
                     updateOverlay();
+                    if (selectedSubIdx === i) updateSubInfoPanel();
+                    drawWaveform(vidPreview.currentTime);
                 }
             };
-            const syncFromDur = () => {
+            const syncDur = () => {
                 const ns  = parseSrtTime(tIn.value);
                 const dur = parseFloat(tDur.value);
                 if (isFinite(ns) && isFinite(dur) && dur > 0) {
@@ -474,28 +525,35 @@ export async function init() {
                     tOut.value = srtTimeV(ne);
                     if (currentSubs[i]) currentSubs[i].end = ne;
                     updateOverlay();
+                    if (selectedSubIdx === i) updateSubInfoPanel();
+                    drawWaveform(vidPreview.currentTime);
                 }
             };
 
-            tIn.addEventListener('change',  syncFromTimes);
-            tOut.addEventListener('change', syncFromTimes);
-            tDur.addEventListener('change', syncFromDur);
+            tIn.addEventListener('change',  syncTimes);
+            tOut.addEventListener('change', syncTimes);
+            tDur.addEventListener('change', syncDur);
             tTxt.addEventListener('input',  () => {
                 if (currentSubs[i]) currentSubs[i].text = tTxt.value;
                 updateOverlay();
+                if (selectedSubIdx === i) updateSubInfoPanel();
             });
         });
 
         subSaveBtn.onclick = async () => {
-            const collected = Array.from(subEditorEl.querySelectorAll('.sub-row')).map((row, i) => ({
-                index: i + 1,
-                start: parseSrtTime(row.querySelector('.sub-time-in').value),
-                end:   parseSrtTime(row.querySelector('.sub-time-out').value),
-                text:  row.querySelector('.sub-row-text').value.trim(),
-            })).filter(s => s.text);
-
-            const content = subsToSRTV(collected);
+            subEditorEl.querySelectorAll('.sub-row').forEach((row, i) => {
+                if (currentSubs[i]) currentSubs[i].text = row.querySelector('.sub-row-text').value.trim();
+            });
+            const toSave = currentSubs.filter(s => s.text).map((s, i) => ({ ...s, index: i + 1 }));
+            const content = subsToSRTV(toSave);
             subEditorStatus.textContent = '';
+            let srtName = currentSrtName;
+            if (!srtName) {
+                const now = new Date();
+                const p   = n => String(n).padStart(2, '0');
+                srtName = `subtitle-${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}_${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`;
+                currentSrtName = srtName;
+            }
             try {
                 const r = await postJSON('/api/subtitles', { name: srtName, content });
                 toast(r.status || 'Сохранено', 'ok');
@@ -503,13 +561,64 @@ export async function init() {
                 subEditorStatus.className   = 'status ok';
                 events.dispatchEvent(new CustomEvent('subtitles-changed'));
                 await refreshSRTList();
+                srtSel.setValue(srtName, true);
             } catch (e) {
                 toast(e.message, 'err');
                 subEditorStatus.textContent = '❌ ' + e.message;
                 subEditorStatus.className   = 'status err';
             }
         };
+
+        updateSubInfoPanel();
+        drawWaveform(vidPreview.currentTime);
     }
+
+    // ── Video sub editor delegation (set up once) ─────────────────────────────
+    subEditorEl.addEventListener('click', e => {
+        const delBtn = e.target.closest('.sub-del-btn');
+        if (delBtn) {
+            const row = delBtn.closest('.sub-row');
+            const idx = parseInt(row.dataset.index);
+            if (!currentSubs) return;
+            currentSubs.splice(idx, 1);
+            currentSubs.forEach((s, j) => { s.index = j + 1; });
+            if (selectedSubIdx >= currentSubs.length) selectedSubIdx = currentSubs.length - 1;
+            renderVidSubEditor(currentSubs, null);
+            updateOverlay();
+            return;
+        }
+        const addBtn = e.target.closest('.sub-add-btn');
+        if (addBtn) {
+            if (!currentSubs) currentSubs = [];
+            const afterIdx = parseInt(addBtn.dataset.after);
+            const prev = afterIdx >= 0 ? currentSubs[afterIdx] : null;
+            const next = afterIdx + 1 < currentSubs.length ? currentSubs[afterIdx + 1] : null;
+            const newStart = prev ? prev.end + 0.05 : 0;
+            const newEnd   = next
+                ? Math.max(newStart + 0.1, Math.min(newStart + 2, next.start - 0.05))
+                : newStart + 2;
+            currentSubs.splice(afterIdx + 1, 0, {
+                index: 0, start: newStart, end: Math.max(newStart + 0.1, newEnd), text: '',
+            });
+            currentSubs.forEach((s, j) => { s.index = j + 1; });
+            selectedSubIdx = afterIdx + 1;
+            renderVidSubEditor(currentSubs, null);
+            updateOverlay();
+            const newRow = subEditorEl.querySelectorAll('.sub-row')[afterIdx + 1];
+            if (newRow) {
+                newRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                newRow.querySelector('.sub-row-text')?.focus();
+            }
+            return;
+        }
+        const row = e.target.closest('.sub-row');
+        if (row && !e.target.closest('input, textarea, button')) {
+            selectedSubIdx = parseInt(row.dataset.index);
+            subEditorEl.querySelectorAll('.sub-row').forEach(r =>
+                r.classList.toggle('sub-row-selected', r === row));
+            updateSubInfoPanel();
+        }
+    });
 
     function updateOverlay() {
         if (!currentSubs) { overlay.innerHTML = ''; return; }
@@ -542,13 +651,28 @@ export async function init() {
         applySubStyle();
     }
 
-    vidPreview.addEventListener('timeupdate', updateOverlay);
+    function formatTimestamp(t) {
+        const h  = Math.floor(t / 3600);
+        const m  = Math.floor((t % 3600) / 60);
+        const s  = Math.floor(t % 60);
+        const ms = Math.round((t % 1) * 1000);
+        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+    }
+    function updateTimestamp() {
+        if (timestampEl) timestampEl.textContent = `${formatTimestamp(vidPreview.currentTime)} / ${formatTimestamp(vidDuration)}`;
+    }
+    vidPreview.addEventListener('timeupdate', () => {
+        updateOverlay();
+        if (selectedSubIdx === -1) updateSubInfoPanel();
+        updateTimestamp();
+    });
     applySubStyle();
 
     // ── Preview ───────────────────────────────────────────────────────────────
     function showPreview(videoUrl) {
         vidPreview.src         = videoUrl;
         vidEmpty.style.display = 'none';
+        loadWaveform(videoUrl);
     }
 
     // ── Style application ─────────────────────────────────────────────────────
@@ -643,12 +767,164 @@ export async function init() {
 
     function fitOverlayLine() {
         if (!overlay.textContent.trim()) return;
-        // Measure text width in no-wrap mode
         overlay.style.whiteSpace = 'nowrap';
         const overflows = overlay.scrollWidth > overlay.offsetWidth;
-        // If text genuinely overflows the available box width → allow wrap
         overlay.style.whiteSpace = overflows ? 'pre-wrap' : 'nowrap';
     }
+
+    // ── Waveform ──────────────────────────────────────────────────────────────
+    async function loadWaveform(videoUrl) {
+        if (!waveformCanvas || !waveformWrap) return;
+        waveformWrap.hidden = false;
+        waveAudioData = null;
+        waveDuration  = 0;
+        const W = waveformCanvas.clientWidth || 700;
+        const H = 80;
+        waveformCanvas.width  = W;
+        waveformCanvas.height = H;
+        const ctx = waveformCanvas.getContext('2d');
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#555';
+        ctx.font = '11px system-ui,sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Загрузка аудио…', W / 2, H / 2 + 4);
+        try {
+            const resp  = await fetch(videoUrl);
+            const buf   = await resp.arrayBuffer();
+            const audio = new (window.AudioContext || window.webkitAudioContext)();
+            const ab    = await audio.decodeAudioData(buf);
+            waveAudioData = ab.getChannelData(0);
+            waveDuration  = ab.duration;
+            waveformCanvas.width = waveformCanvas.clientWidth || 700;
+            drawWaveform(vidPreview.currentTime);
+        } catch (err) {
+            console.warn('Waveform:', err);
+            const ctx2 = waveformCanvas.getContext('2d');
+            ctx2.fillStyle = '#0d1117';
+            ctx2.fillRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+            ctx2.fillStyle = '#444';
+            ctx2.font = '11px system-ui,sans-serif';
+            ctx2.textAlign = 'center';
+            ctx2.fillText('Аудиоволна недоступна', waveformCanvas.width / 2, waveformCanvas.height / 2 + 4);
+        }
+    }
+
+    function drawWaveform(currentTime) {
+        if (!waveformCanvas || !waveAudioData) return;
+        const W     = waveformCanvas.width;
+        const H     = waveformCanvas.height;
+        const mid   = H / 2;
+        const playX = waveDuration > 0 ? Math.round(W * currentTime / waveDuration) : 0;
+        const ctx   = waveformCanvas.getContext('2d');
+
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, W, H);
+
+        // Subtitle span highlights
+        if (currentSubs && waveDuration > 0) {
+            for (let si = 0; si < currentSubs.length; si++) {
+                const s  = currentSubs[si];
+                const x1 = Math.round(s.start / waveDuration * W);
+                const x2 = Math.round(s.end   / waveDuration * W);
+                ctx.fillStyle = si === selectedSubIdx
+                    ? 'rgba(74,158,255,0.22)' : 'rgba(74,158,255,0.08)';
+                ctx.fillRect(x1, 0, Math.max(2, x2 - x1), H);
+            }
+        }
+
+        // Bars: 2px wide + 1px gap for a cleaner look
+        const totalSamples = waveAudioData.length;
+        const barW = 2, gap = 1;
+        for (let x = 0; x < W; x += barW + gap) {
+            const i0 = Math.floor(x / W * totalSamples);
+            const i1 = Math.min(totalSamples, Math.floor((x + barW + gap) / W * totalSamples));
+            let mn = 0, mx = 0, sumSq = 0;
+            const count = Math.max(1, i1 - i0);
+            for (let j = i0; j < i1; j++) {
+                const v = waveAudioData[j];
+                if (v < mn) mn = v;
+                if (v > mx) mx = v;
+                sumSq += v * v;
+            }
+            const rms   = Math.sqrt(sumSq / count);
+            const peakH = Math.max(1, Math.round((mx - mn) / 2 * mid * 0.92));
+            const rmsH  = Math.max(1, Math.round(rms * mid * 0.92));
+            const played = x < playX;
+            // Soft RMS glow layer
+            ctx.fillStyle = played ? 'rgba(74,158,255,0.28)' : 'rgba(42,56,80,0.5)';
+            ctx.fillRect(x, mid - rmsH, barW, rmsH * 2);
+            // Sharp peak bar on top
+            ctx.fillStyle = played ? '#4a9eff' : '#2a3a58';
+            ctx.fillRect(x, mid - peakH, barW, peakH * 2);
+        }
+
+        // Center guide line
+        ctx.fillStyle = 'rgba(255,255,255,0.07)';
+        ctx.fillRect(0, mid, W, 1);
+
+        // Playhead with triangle indicator at top
+        if (playX > 0 && playX < W) {
+            ctx.fillStyle = 'rgba(255,255,255,0.88)';
+            ctx.fillRect(playX - 1, 0, 2, H);
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.moveTo(playX - 5, 0);
+            ctx.lineTo(playX + 5, 0);
+            ctx.lineTo(playX, 8);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    // ── Selected subtitle info panel ──────────────────────────────────────────
+    function updateSubInfoPanel() {
+        if (!currentSubs || !currentSubs.length || !subSelEl) return;
+        let sub, idx;
+        if (selectedSubIdx >= 0 && selectedSubIdx < currentSubs.length) {
+            idx = selectedSubIdx;
+            sub = currentSubs[idx];
+        } else {
+            const t = vidPreview.currentTime;
+            idx = currentSubs.findIndex(s => t >= s.start && t <= s.end);
+            sub = idx >= 0 ? currentSubs[idx] : null;
+        }
+        if (!sub) { subSelEl.hidden = true; return; }
+        subSelEl.hidden = false;
+        if (subSelIdxEl) subSelIdxEl.textContent = idx + 1;
+        if (subSelStartEl && document.activeElement !== subSelStartEl)
+            subSelStartEl.value = srtTimeV(sub.start);
+        if (subSelEndEl && document.activeElement !== subSelEndEl)
+            subSelEndEl.value = srtTimeV(sub.end);
+        if (subSelTextEl) subSelTextEl.textContent = sub.text;
+    }
+
+    if (subSelStartEl) {
+        subSelStartEl.addEventListener('change', () => {
+            const idx = selectedSubIdx >= 0 ? selectedSubIdx : -1;
+            if (idx < 0 || !currentSubs || !currentSubs[idx]) return;
+            const ns = parseSrtTime(subSelStartEl.value);
+            if (!isFinite(ns)) return;
+            currentSubs[idx].start = ns;
+            renderVidSubEditor(currentSubs, null);
+            updateOverlay();
+            drawWaveform(vidPreview.currentTime);
+        });
+    }
+    if (subSelEndEl) {
+        subSelEndEl.addEventListener('change', () => {
+            const idx = selectedSubIdx >= 0 ? selectedSubIdx : -1;
+            if (idx < 0 || !currentSubs || !currentSubs[idx]) return;
+            const ne = parseSrtTime(subSelEndEl.value);
+            if (!isFinite(ne)) return;
+            currentSubs[idx].end = ne;
+            renderVidSubEditor(currentSubs, null);
+            updateOverlay();
+            drawWaveform(vidPreview.currentTime);
+        });
+    }
+
+    renderVidSubEditor([], null);
 }
 
 // ── Module-level helpers ──────────────────────────────────────────────────────

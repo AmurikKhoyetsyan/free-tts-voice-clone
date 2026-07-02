@@ -67,7 +67,7 @@ function escHtml(s) {
 class SubTimeline {
     constructor(container, onUpdate) {
         this.el       = container;
-        this.onUpdate = onUpdate; // (idx, newStart, newEnd)
+        this.onUpdate = onUpdate;
         this.subs     = [];
         this.dur      = 0;
         this._drag    = null;
@@ -109,7 +109,6 @@ class SubTimeline {
     }
 
     _redraw() {
-        // ─ ruler ─
         this.ruler.innerHTML = '';
         const step = this.dur <= 30 ? 5 : this.dur <= 120 ? 15 : this.dur <= 600 ? 60 : 120;
         for (let t = 0; t <= this.dur + 0.001; t += step) {
@@ -126,7 +125,6 @@ class SubTimeline {
             this.ruler.append(m, l);
         }
 
-        // ─ blocks ─
         this.track.innerHTML = '';
         this.subs.forEach((s, i) => {
             const lp  = s.start / this.dur * 100;
@@ -225,31 +223,146 @@ export async function init() {
     wpmEl.addEventListener('input',   () => { wpmVal.textContent  = wpmEl.value; });
     charsEl.addEventListener('input', () => { charsVal.textContent = charsEl.value; });
 
-    // Timeline instance — created once, reused
+    let subs = [];
+
     const timeline = new SubTimeline(timelineEl, (idx, ns, ne) => {
-        // Push new values back into the editor inputs
+        if (subs[idx]) { subs[idx].start = ns; subs[idx].end = ne; }
         const rows = editorEl.querySelectorAll('.sub-row');
         if (rows[idx]) {
             rows[idx].querySelector('.sub-time-in').value  = srtTime(ns);
             rows[idx].querySelector('.sub-time-out').value = srtTime(ne);
+            rows[idx].querySelector('.sub-dur-in').value   = (ne - ns).toFixed(2);
+        }
+    });
+
+    function renderEditor() {
+        if (!subs.length) {
+            editorEl.innerHTML =
+                '<div class="sub-empty">Нет субтитров. Нажмите «+», чтобы добавить.</div>' +
+                '<button class="sub-add-btn sub-add-first" data-after="-1" title="Добавить субтитр"><span></span>+<span></span></button>';
+            saveRow.style.display = 'none';
+            timeline.el.hidden = true;
+            return;
+        }
+
+        const mkAdd = (after) =>
+            `<button class="sub-add-btn" data-after="${after}" title="Добавить субтитр"><span></span>+<span></span></button>`;
+
+        editorEl.innerHTML = mkAdd(-1) + subs.map((s, i) => `
+            <div class="sub-row" data-index="${i}">
+                <div>
+                    <div class="sub-row-num">${s.index}</div>
+                    <div class="sub-row-times">
+                        <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}" title="Начало">
+                        <span class="sub-arrow">→</span>
+                        <input class="sub-time-out" value="${escHtml(srtTime(s.end))}" title="Конец">
+                        <span class="sub-arrow" style="opacity:.5;font-size:10px">⏱</span>
+                        <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
+                        <span style="font-size:10px;color:var(--text-dim)">с</span>
+                    </div>
+                    <button class="sub-del-btn" data-action="del" title="Удалить строку">${ICONS.trash}</button>
+                </div>
+                <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
+            </div>
+            ${mkAdd(i)}
+        `).join('');
+
+        saveRow.style.display = 'flex';
+
+        editorEl.querySelectorAll('.sub-row').forEach((row, i) => {
+            const tIn  = row.querySelector('.sub-time-in');
+            const tOut = row.querySelector('.sub-time-out');
+            const tDur = row.querySelector('.sub-dur-in');
+
+            const syncFromTimes = () => {
+                const ns = parseSrtTime(tIn.value);
+                const ne = parseSrtTime(tOut.value);
+                if (isFinite(ns) && isFinite(ne) && ne > ns) {
+                    tDur.value = (ne - ns).toFixed(2);
+                    if (subs[i]) { subs[i].start = ns; subs[i].end = ne; }
+                    timeline.updateBlock(i, ns, ne);
+                }
+            };
+            const syncFromDur = () => {
+                const ns  = parseSrtTime(tIn.value);
+                const dur = parseFloat(tDur.value);
+                if (isFinite(ns) && isFinite(dur) && dur > 0) {
+                    const ne = ns + dur;
+                    tOut.value = srtTime(ne);
+                    if (subs[i]) subs[i].end = ne;
+                    timeline.updateBlock(i, ns, ne);
+                }
+            };
+
+            tIn.addEventListener('change',  syncFromTimes);
+            tOut.addEventListener('change', syncFromTimes);
+            tDur.addEventListener('change', syncFromDur);
+        });
+
+        timeline.render(subs);
+    }
+
+    function syncTextFromDOM() {
+        editorEl.querySelectorAll('.sub-row').forEach((row, i) => {
+            if (subs[i]) subs[i].text = row.querySelector('.sub-row-text').value;
+        });
+    }
+
+    // Single delegation handler — set up once
+    editorEl.addEventListener('click', (e) => {
+        const delBtn = e.target.closest('.sub-del-btn');
+        if (delBtn) {
+            syncTextFromDOM();
+            const row = delBtn.closest('.sub-row');
+            const idx = parseInt(row.dataset.index);
+            subs.splice(idx, 1);
+            subs.forEach((s, i) => { s.index = i + 1; });
+            renderEditor();
+            return;
+        }
+
+        const addBtn = e.target.closest('.sub-add-btn');
+        if (addBtn) {
+            syncTextFromDOM();
+            const afterIdx = parseInt(addBtn.dataset.after);
+            const prev = afterIdx >= 0 ? subs[afterIdx] : null;
+            const next = afterIdx + 1 < subs.length ? subs[afterIdx + 1] : null;
+            const newStart = prev ? prev.end + 0.05 : 0;
+            const newEnd   = next
+                ? Math.max(newStart + 0.1, Math.min(newStart + 2, next.start - 0.05))
+                : newStart + 2;
+            subs.splice(afterIdx + 1, 0, {
+                index: 0,
+                start: newStart,
+                end:   Math.max(newStart + 0.1, newEnd),
+                text:  '',
+            });
+            subs.forEach((s, i) => { s.index = i + 1; });
+            renderEditor();
+            const newRow = editorEl.querySelectorAll('.sub-row')[afterIdx + 1];
+            if (newRow) {
+                newRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                newRow.querySelector('.sub-row-text').focus();
+            }
         }
     });
 
     genBtn.addEventListener('click', () => {
         const text = textEl.value.trim();
         if (!text) { toast('Введите текст', 'warn'); return; }
-        const subs = generateSubs(
+        subs = generateSubs(
             text,
             parseInt(wpmEl.value, 10),
             parseInt(charsEl.value, 10),
             document.querySelector('input[name="sub-split"]:checked').value
         );
-        renderEditor(subs, editorEl, saveRow, timeline);
+        renderEditor();
     });
 
     saveBtn.addEventListener('click', async () => {
-        const subs = collectSubs(editorEl);
-        if (!subs.length) { toast('Нет субтитров для сохранения', 'warn'); return; }
+        syncTextFromDOM();
+        const toSave = subs.filter(s => s.text);
+        if (!toSave.length) { toast('Нет субтитров для сохранения', 'warn'); return; }
         let name = saveNameEl.value.trim();
         if (!name) {
             const now = new Date();
@@ -257,7 +370,7 @@ export async function init() {
             name = `subtitle-${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}_${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`;
             saveNameEl.value = name;
         }
-        const content = subsToSRT(subs);
+        const content = subsToSRT(toSave);
         statusEl.textContent = '';
         try {
             const r = await postJSON('/api/subtitles', { name, content });
@@ -277,98 +390,6 @@ export async function init() {
             statusEl.className   = 'status err';
         }
     });
-}
 
-// ── Editor helpers ────────────────────────────────────────────────────────────
-
-function renderEditor(subs, editorEl, saveRow, timeline) {
-    if (!subs.length) {
-        editorEl.innerHTML = '<div class="sub-empty">Нет субтитров</div>';
-        saveRow.style.display = 'none';
-        timeline.el.hidden = true;
-        return;
-    }
-
-    editorEl.innerHTML = subs.map((s, i) => `
-        <div class="sub-row" data-index="${i}">
-            <div>
-                <div class="sub-row-num">${s.index}</div>
-                <div class="sub-row-times">
-                    <input class="sub-time-in"  value="${escHtml(srtTime(s.start))}" title="Начало">
-                    <span class="sub-arrow">→</span>
-                    <input class="sub-time-out" value="${escHtml(srtTime(s.end))}" title="Конец">
-                    <span class="sub-arrow" style="opacity:.5;font-size:10px">⏱</span>
-                    <input class="sub-dur-in" type="number" value="${(s.end - s.start).toFixed(2)}" min="0.1" step="0.1" title="Длительность (с)">
-                    <span style="font-size:10px;color:var(--text-dim)">с</span>
-                </div>
-                <button class="sub-del-btn" data-action="del" title="Удалить строку">${ICONS.trash}</button>
-            </div>
-            <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
-        </div>
-    `).join('');
-
-    saveRow.style.display = 'flex';
-
-    // Attach time-input / duration sync → timeline
-    editorEl.querySelectorAll('.sub-row').forEach((row, i) => {
-        const tIn  = row.querySelector('.sub-time-in');
-        const tOut = row.querySelector('.sub-time-out');
-        const tDur = row.querySelector('.sub-dur-in');
-
-        const syncFromTimes = () => {
-            const ns = parseSrtTime(tIn.value);
-            const ne = parseSrtTime(tOut.value);
-            if (isFinite(ns) && isFinite(ne) && ne > ns) {
-                tDur.value = (ne - ns).toFixed(2);
-                timeline.updateBlock(i, ns, ne);
-            }
-        };
-        const syncFromDur = () => {
-            const ns  = parseSrtTime(tIn.value);
-            const dur = parseFloat(tDur.value);
-            if (isFinite(ns) && isFinite(dur) && dur > 0) {
-                const ne = ns + dur;
-                tOut.value = srtTime(ne);
-                timeline.updateBlock(i, ns, ne);
-            }
-        };
-
-        tIn.addEventListener('change',  syncFromTimes);
-        tOut.addEventListener('change', syncFromTimes);
-        tDur.addEventListener('change', syncFromDur);
-    });
-
-    // Delete handler
-    editorEl.addEventListener('click', (e) => {
-        const btn = e.target.closest('.sub-del-btn');
-        if (!btn) return;
-        const row = btn.closest('.sub-row');
-        const idx = parseInt(row.dataset.index);
-        row.remove();
-        reIndex(editorEl);
-        timeline.removeBlock(idx);
-        if (!editorEl.querySelector('.sub-row')) {
-            editorEl.innerHTML = '<div class="sub-empty">Нет субтитров</div>';
-            saveRow.style.display = 'none';
-        }
-    });
-
-    // Render timeline
-    timeline.render(subs);
-}
-
-function reIndex(editorEl) {
-    editorEl.querySelectorAll('.sub-row').forEach((row, i) => {
-        row.querySelector('.sub-row-num').textContent = i + 1;
-        row.dataset.index = i;
-    });
-}
-
-function collectSubs(editorEl) {
-    return Array.from(editorEl.querySelectorAll('.sub-row')).map((row, i) => ({
-        index: i + 1,
-        start: parseSrtTime(row.querySelector('.sub-time-in').value),
-        end:   parseSrtTime(row.querySelector('.sub-time-out').value),
-        text:  row.querySelector('.sub-row-text').value.trim(),
-    })).filter(s => s.text);
+    renderEditor();
 }
