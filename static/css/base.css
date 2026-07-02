@@ -31,11 +31,18 @@
 html, body {
     margin: 0;
     padding: 0;
+    height: 100%;
     background: var(--bg);
     color: var(--text);
     font-family: var(--font);
     font-size: 14px;
     line-height: 1.5;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 h1, h2, h3, h4 {
@@ -48,15 +55,24 @@ h1 { font-size: 22px; }
 h3 { font-size: 16px; }
 
 .app-header {
-    padding: 24px 32px 12px;
+    flex-shrink: 0;
+    padding: 18px 28px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
+    z-index: 10;
+}
+
+.app-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
 }
 
 .app-main {
-    padding: 24px 32px 80px;
-    max-width: 1400px;
-    margin: 0 auto;
+    flex: 1;
+    min-width: 0;
+    padding: 28px 32px 80px;
+    overflow-y: auto;
 }
 
 .grid-2 {

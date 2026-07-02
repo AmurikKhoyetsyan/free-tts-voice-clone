@@ -35,5 +35,9 @@ app/build
 /.idea
 /.claude
 /.tmp
-/.output_audio
 CLAUDE.md
+__pycache__/
+*.pyc
+*.pyo
+.output/
+.logs/

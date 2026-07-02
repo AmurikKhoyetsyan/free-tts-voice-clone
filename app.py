@@ -1,4 +1,5 @@
 import sys
+import asyncio
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -11,17 +12,51 @@ import threading
 import time
 import webbrowser
 
+# Add bundled ffmpeg to PATH so Whisper (and ffmpeg subprocess calls) find it
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_FFMPEG_DIR = os.path.join(_BASE, "ffmpeg")
+if os.path.isdir(_FFMPEG_DIR):
+    os.environ["PATH"] = _FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from middleware.no_cache import NoCacheStaticMiddleware
 from routers import voices, xtts, synthesis, history
+from routers import subtitles as subtitles_router
+from routers import video as video_router
+from routers import log_router
+from routers import templates as templates_router
+from routers import transcribe as transcribe_router
+from core.log import server_log
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
-app = FastAPI(title="TTS")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Suppress the harmless "Exception in callback _ProactorBasePipeTransport._call_connection_lost"
+    # noise that occurs on Windows when the browser video player aborts range-request connections.
+    # This is a known Python 3.10 / asyncio / ProactorEventLoop bug — the connection reset is
+    # expected behaviour for HTTP range streaming; the error is purely cosmetic.
+    if sys.platform.startswith("win"):
+        loop = asyncio.get_event_loop()
+
+        def _exception_handler(loop, context):
+            exc = context.get("exception")
+            msg = context.get("message", "")
+            if isinstance(exc, (ConnectionResetError, OSError)) and "_ProactorBasePipeTransport" in msg:
+                return  # known Windows asyncio noise — safe to ignore
+            loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_exception_handler)
+    yield
+
+
+app = FastAPI(title="TTS", lifespan=lifespan)
 
 app.add_middleware(NoCacheStaticMiddleware)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -30,6 +65,11 @@ app.include_router(voices.router)
 app.include_router(xtts.router)
 app.include_router(synthesis.router)
 app.include_router(history.router)
+app.include_router(subtitles_router.router)
+app.include_router(video_router.router)
+app.include_router(log_router.router)
+app.include_router(templates_router.router)
+app.include_router(transcribe_router.router)
 
 
 @app.get("/")
@@ -48,4 +88,8 @@ if __name__ == "__main__":
             pass
 
     threading.Thread(target=_open_browser, daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=7860, log_level="info")
+    server_log("Server started")
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=7860, log_level="info", access_log=False)
+    except KeyboardInterrupt:
+        pass

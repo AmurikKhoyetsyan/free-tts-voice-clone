@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="/static/css/custom-select.css">
     <link rel="stylesheet" href="/static/css/file-upload.css">
     <link rel="stylesheet" href="/static/css/loader.css">
+    <link rel="stylesheet" href="/static/css/subtitles.css">
 </head>
 <body>
 
@@ -22,11 +23,15 @@
     <h1>Синтез речи и клонирование голоса</h1>
 </header>
 
+<div class="app-body">
+
 <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="windows">Windows голоса</button>
     <button class="tab" data-tab="cloning">Клонирование (XTTS v2)</button>
     <button class="tab" data-tab="saved">Мои голоса</button>
     <button class="tab" data-tab="history">История</button>
+    <button class="tab" data-tab="subtitles">Субтитры</button>
+    <button class="tab" data-tab="video">Видео</button>
 </nav>
 
 <main class="app-main">
@@ -128,24 +133,462 @@
 
     <!-- ============== История ============== -->
     <section class="tab-panel" data-panel="history">
-        <div class="grid-2">
-            <div class="col">
-                <div class="hist-toolbar">
-                    <div class="hist-title">Записи</div>
-                    <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
-                </div>
-                <div id="hist-list" class="hist-list"></div>
+        <div class="hist-toolbar">
+            <div class="hist-type-tabs">
+                <button class="hist-type-btn active" data-htype="audio">Аудио</button>
+                <button class="hist-type-btn"        data-htype="subtitles">Субтитры</button>
+                <button class="hist-type-btn"        data-htype="video">Видео</button>
+                <button class="hist-type-btn"        data-htype="templates">Шаблоны</button>
             </div>
-            <div class="col">
-                <div class="result-block">
-                    <div class="result-label">Воспроизведение</div>
-                    <div class="audio-player" data-player="hist"></div>
+            <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
+        </div>
+
+        <!-- Audio -->
+        <div class="hist-section" id="hist-section-audio">
+            <div class="grid-2">
+                <div class="col">
+                    <div id="hist-list" class="hist-list"></div>
+                </div>
+                <div class="col">
+                    <div class="result-block">
+                        <div class="result-label">Воспроизведение</div>
+                        <div class="audio-player" data-player="hist"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Subtitles -->
+        <div class="hist-section" id="hist-section-subtitles" hidden>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="hist-srt-list" class="hist-list"></div>
+                </div>
+                <div class="col">
+                    <div class="result-block" id="hist-srt-preview-block" hidden style="position:static">
+                        <div class="result-label" id="hist-srt-preview-label">Предпросмотр</div>
+                        <pre id="hist-srt-preview-content" class="srt-preview-content"></pre>
+                        <div class="row gap" style="margin-top:8px">
+                            <a id="hist-srt-preview-dl" class="btn" download>Скачать</a>
+                            <button id="hist-srt-restore-btn" class="btn btn-primary">Восстановить в редактор</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Video -->
+        <div class="hist-section" id="hist-section-video" hidden>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="hist-vid-list" class="hist-list"></div>
+                </div>
+                <div class="col">
+                    <div class="result-block" style="position:static">
+                        <div class="result-label">Предпросмотр</div>
+                        <div class="vid-preview-wrap">
+                            <video id="hist-vid-preview" controls style="width:100%;max-height:280px;display:none"></video>
+                            <div class="vid-empty" id="hist-vid-empty">Выберите видео из списка</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Templates -->
+        <div class="hist-section" id="hist-section-templates" hidden>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="hist-tmpl-list" class="hist-list"></div>
+                </div>
+                <div class="col">
+                    <div class="result-block" id="hist-tmpl-preview-block" hidden style="position:static">
+                        <div class="result-label" id="hist-tmpl-preview-label">JSON</div>
+                        <div id="hist-tmpl-preview-visual" style="text-align:center;padding:24px 16px;background:#1a1a2e;border-radius:6px;margin-bottom:8px;min-height:60px;display:flex;align-items:center;justify-content:center">Образец текста</div>
+                        <pre id="hist-tmpl-preview-content" class="srt-preview-content"></pre>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
+    <!-- ============== Субтитры ============== -->
+    <section class="tab-panel" data-panel="subtitles">
+        <div class="grid-2">
+            <div class="col">
+                <label class="label">Текст для субтитров
+                    <textarea id="sub-text" rows="12" placeholder="Введите текст…"></textarea>
+                </label>
+                <div class="grid-2">
+                    <label class="label">Скорость чтения <span class="hint" id="sub-wpm-val">150</span> сл/мин
+                        <input type="range" id="sub-wpm" min="80" max="300" step="10" value="150">
+                    </label>
+                    <label class="label">Макс. символов <span class="hint" id="sub-chars-val">60</span>
+                        <input type="range" id="sub-chars" min="1" max="120" step="1" value="60">
+                    </label>
+                </div>
+                <div class="label">Разбивка
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                            <input type="radio" name="sub-split" value="sentence" checked> По предложениям
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                            <input type="radio" name="sub-split" value="line"> По строкам
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
+                            <input type="radio" name="sub-split" value="auto"> Авто
+                        </label>
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="sub-generate">Создать субтитры</button>
+
+                <!-- Распознавание речи (Whisper) -->
+                <div class="sub-panel" id="sub-transcribe-panel" style="margin-top:12px">
+                    <div class="result-label">Распознавание речи (Whisper)</div>
+                    <div id="sub-audio-upload-mount"></div>
+                    <div class="row gap" style="margin-top:4px">
+                        <select id="sub-lang" class="fill">
+                            <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                            <option value="uk">Українська</option>
+                            <option value="de">Deutsch</option>
+                            <option value="fr">Français</option>
+                            <option value="es">Español</option>
+                            <option value="zh">中文</option>
+                            <option value="ja">日本語</option>
+                        </select>
+                        <button id="sub-transcribe-btn" class="btn btn-primary">Распознать речь</button>
+                    </div>
+                    <div class="status" id="sub-transcribe-status"></div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="sub-panel">
+                    <div class="result-label">Редактор субтитров</div>
+                    <div id="sub-editor" class="sub-editor">
+                        <div class="sub-empty">Создайте субтитры из текста слева</div>
+                    </div>
+                    <div id="sub-timeline" class="sub-timeline" hidden></div>
+                    <div class="row gap" id="sub-save-row" style="display:none">
+                        <input type="text" id="sub-save-name" class="fill" placeholder="Имя файла (без .srt)…">
+                        <button class="btn btn-primary" id="sub-save-btn">Сохранить .srt</button>
+                    </div>
+                    <div class="status" id="sub-status"></div>
+                </div>
+
+                <!-- Сохранённые субтитры -->
+                <div class="sub-panel" id="sub-saved-panel" style="margin-top:12px">
+                    <div class="row gap" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+                        <div class="result-label" style="margin:0">Сохранённые субтитры</div>
+                        <button class="btn" id="sub-saved-refresh" title="Обновить">↻</button>
+                    </div>
+                    <div class="srt-saved-list" id="sub-saved-list">
+                        <div class="sub-empty">Загрузка…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Видео + Субтитры ============== -->
+    <section class="tab-panel" data-panel="video">
+        <div class="panel-info" id="vid-ffmpeg-warn" style="display:none">
+            ⚠️ FFmpeg не найден. Скачайте с <b>ffmpeg.org</b> и добавьте в PATH, либо поместите ffmpeg.exe в папку <code>ffmpeg/</code> проекта.
+        </div>
+        <div class="grid-2">
+            <div class="col">
+                <div class="label">Видео файл
+                    <div id="vid-upload-mount"></div>
+                </div>
+                <div class="label">Субтитры (SRT)
+                    <div id="vid-srt-mount"></div>
+                    <div id="vid-srt-upload-mount"></div>
+                </div>
+
+                <!-- Subtitle editor -->
+                <div class="sub-panel" id="vid-sub-editor-block" hidden>
+                    <div class="result-label" style="margin-bottom:6px">Редактор субтитров</div>
+                    <div id="vid-sub-editor" class="sub-editor"></div>
+                    <div class="row gap" id="vid-sub-editor-save-row" style="margin-top:8px;display:none">
+                        <input type="text" id="vid-sub-project-name" class="fill" placeholder="Имя проекта (без расширения)…">
+                        <button class="btn btn-primary" id="vid-sub-save-btn">Сохранить версию</button>
+                    </div>
+                    <div class="status" id="vid-sub-editor-status"></div>
+                </div>
+
+                <!-- Размер вывода -->
+                <div class="vid-style-panel">
+                    <div class="result-label" style="margin-bottom:8px">Размер вывода</div>
+                    <div class="vid-preset-grid">
+                        <button class="vid-preset-btn active" data-w="0" data-h="0">Оригинал</button>
+                        <button class="vid-preset-btn" data-w="1920" data-h="1080">16:9<br><small>1920×1080</small></button>
+                        <button class="vid-preset-btn" data-w="1080" data-h="1920">9:16<br><small>1080×1920</small></button>
+                        <button class="vid-preset-btn" data-w="1080" data-h="1080">1:1<br><small>1080×1080</small></button>
+                        <button class="vid-preset-btn" data-w="1280" data-h="960">4:3<br><small>1280×960</small></button>
+                    </div>
+                    <div id="vid-resize-row" hidden>
+                        <label class="label" style="margin:0">Режим масштабирования
+                            <select id="vid-resize-mode">
+                                <option value="pad">Вписать (чёрные полосы)</option>
+                                <option value="crop">Обрезать</option>
+                                <option value="stretch">Растянуть</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+                <!-- Стиль субтитров -->
+                <div class="vid-style-panel">
+                    <div class="result-label" style="margin-bottom:8px">Стиль субтитров</div>
+
+                    <div class="vsp-section">
+                        <div class="vsp-title">Шрифт</div>
+                        <div class="vsp-row">
+                            <label class="vsp-field">
+                                <span>Семейство</span>
+                                <select id="vid-font-family">
+                                    <option value="Arial" selected>Arial</option>
+                                    <option value="Arial Black">Arial Black</option>
+                                    <option value="Impact">Impact</option>
+                                    <option value="Verdana">Verdana</option>
+                                    <option value="Times New Roman">Times New Roman</option>
+                                    <option value="Courier New">Courier New</option>
+                                </select>
+                            </label>
+                            <label class="vsp-field">
+                                <span>Размер, px</span>
+                                <div class="rn-combo">
+                                    <input type="range" id="vid-font-size" min="8" max="96" step="1" value="24">
+                                    <input type="number" id="vid-font-size-n" value="24" min="1" class="vsp-num">
+                                </div>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="color" id="vid-font-color" value="#ffffff">
+                                <span>Цвет</span>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="checkbox" id="vid-bold">
+                                <span>Жирный</span>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="checkbox" id="vid-italic">
+                                <span>Курсив</span>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="checkbox" id="vid-underline">
+                                <span>Подчёрк</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="vsp-section">
+                        <div class="vsp-title">Позиция <small id="vid-frame-size"></small></div>
+                        <div class="vsp-row">
+                            <label class="vsp-field">
+                                <span>X, px</span>
+                                <input type="number" id="vid-pos-x" placeholder="—" class="vsp-num">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Y, px</span>
+                                <input type="number" id="vid-pos-y" placeholder="—" class="vsp-num">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Пресет</span>
+                                <select id="vid-position">
+                                    <option value="bottom">Снизу</option>
+                                    <option value="top">Сверху</option>
+                                    <option value="middle">По центру</option>
+                                </select>
+                            </label>
+                            <button class="btn btn-sm" id="vid-apply-preset">Применить</button>
+                            <button class="btn btn-sm" id="vid-reset-pos" hidden>↺</button>
+                        </div>
+                    </div>
+
+                    <div class="vsp-section">
+                        <div class="vsp-title">Фон</div>
+                        <div class="vsp-row">
+                            <label class="vsp-field">
+                                <span>Прозрачность, %</span>
+                                <div class="rn-combo">
+                                    <input type="range" id="vid-bg-opacity" min="0" max="100" step="5" value="50">
+                                    <input type="number" id="vid-bg-opacity-n" value="50" min="0" max="100" class="vsp-num">
+                                </div>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="color" id="vid-bg-color" value="#000000">
+                                <span>Цвет</span>
+                            </label>
+                            <label class="vsp-field">
+                                <span>Отступ гориз., px</span>
+                                <input type="number" id="vid-bg-pad-x" value="12" min="0" class="vsp-num">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Отступ верт., px</span>
+                                <input type="number" id="vid-bg-pad-y" value="6" min="0" class="vsp-num">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Радиус, px</span>
+                                <input type="number" id="vid-bg-radius" value="4" min="0" class="vsp-num">
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="vsp-section">
+                        <div class="vsp-title">Обводка и тень</div>
+                        <div class="vsp-row">
+                            <label class="vsp-field">
+                                <span>Обводка, px</span>
+                                <div class="rn-combo">
+                                    <input type="range" id="vid-outline-size" min="0" max="10" step="0.5" value="1">
+                                    <input type="number" id="vid-outline-size-n" value="1" min="0" step="0.5" class="vsp-num">
+                                </div>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="color" id="vid-outline-color" value="#000000">
+                                <span>Цвет</span>
+                            </label>
+                            <label class="vsp-field">
+                                <span>Тень, px</span>
+                                <div class="rn-combo">
+                                    <input type="range" id="vid-shadow-size" min="0" max="15" step="0.5" value="0">
+                                    <input type="number" id="vid-shadow-size-n" value="0" min="0" step="0.5" class="vsp-num">
+                                </div>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="color" id="vid-shadow-color" value="#000000">
+                                <span>Цвет</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="vsp-section">
+                        <div class="vsp-title">Размер блока субтитров</div>
+                        <div class="vsp-row">
+                            <label class="vsp-field">
+                                <span>Ширина, px</span>
+                                <input type="number" id="vid-sub-width" value="0" min="0" class="vsp-num" title="0 = авто (по ширина %)">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Высота, px</span>
+                                <input type="number" id="vid-sub-height" value="0" min="0" class="vsp-num" title="0 = авто (по тексту)">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Ширина авто, %</span>
+                                <input type="number" id="vid-max-width" value="90" min="10" max="100" class="vsp-num" title="Используется когда Ширина px = 0">
+                            </label>
+                        </div>
+                    </div>
+                    <div class="vsp-section">
+                        <div class="vsp-title">Дополнительно</div>
+                        <div class="vsp-row">
+                            <label class="vsp-field vsp-inline">
+                                <input type="color" id="vid-karaoke-color" value="#ffdd00">
+                                <span>Слова</span>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="checkbox" id="vid-karaoke-enable" checked>
+                                <span>Подсветка</span>
+                            </label>
+                            <label class="vsp-field">
+                                <span>Межстрочный</span>
+                                <input type="number" id="vid-line-height" value="1.35" min="0.5" step="0.05" class="vsp-num">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Отступ от края, px</span>
+                                <input type="number" id="vid-margin-v" value="10" min="0" class="vsp-num">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Субтитры из видео (Whisper) -->
+                <div class="vid-style-panel" id="vid-transcribe-panel" style="margin-top:8px">
+                    <div class="result-label" style="margin-bottom:6px">Субтитры из видео (Whisper)</div>
+                    <div class="row gap">
+                        <select id="vid-transcribe-lang" class="fill">
+                            <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                            <option value="uk">Українська</option>
+                            <option value="de">Deutsch</option>
+                            <option value="fr">Français</option>
+                        </select>
+                        <button id="vid-transcribe-btn" class="btn btn-primary" disabled title="Загрузите видео">Распознать речь</button>
+                    </div>
+                    <div class="status" id="vid-transcribe-status"></div>
+                </div>
+
+                <!-- Прогресс FFmpeg -->
+                <div id="vid-progress-wrap" hidden>
+                    <div class="vid-progress-bar">
+                        <div class="vid-progress-fill" id="vid-progress-fill"></div>
+                        <span class="vid-progress-pct" id="vid-progress-pct">0%</span>
+                    </div>
+                    <details>
+                        <summary class="vid-log-toggle">Лог FFmpeg</summary>
+                        <div id="vid-ffmpeg-log" class="vid-ffmpeg-log"></div>
+                    </details>
+                </div>
+                <div class="row gap" style="margin-top:8px;align-items:center">
+                    <div id="vid-tmpl-mount" style="flex:1"></div>
+                    <button class="btn" id="vid-tmpl-apply-btn">Применить</button>
+                    <button class="btn" id="vid-save-style-btn" title="Сохранить текущий стиль как шаблон">+ Шаблон</button>
+                </div>
+                <button class="btn btn-primary" id="vid-go" style="margin-top:8px;width:100%">Добавить субтитры (FFmpeg)</button>
+            </div>
+            <div class="col">
+                <div class="result-block" style="position:static;top:auto">
+                    <div class="result-label">Предпросмотр</div>
+                    <div class="vid-preview-wrap">
+                        <div class="vid-inner" id="vid-inner">
+                            <video id="vid-preview" controls></video>
+                            <div id="vid-sub-overlay" class="vid-sub-overlay"></div>
+                        </div>
+                        <div class="vid-empty" id="vid-empty">Загрузите видео для предпросмотра</div>
+                    </div>
+                    <div class="status" id="vid-status"></div>
+                    <div class="vid-timestamp" id="vid-timestamp">00:00:00,000 / 00:00:00,000</div>
+                    <div id="vid-waveform-wrap" class="vid-waveform-wrap" hidden>
+                        <canvas id="vid-waveform" class="vid-waveform-canvas"></canvas>
+                        <div id="vid-wave-tooltip" class="vid-wave-tooltip" hidden></div>
+                    </div>
+                    <div id="vid-sub-sel" class="vid-sub-sel" hidden>
+                        <span class="vid-sub-sel-label">Субтитр <b id="vid-sub-sel-idx">—</b></span>
+                        <div class="vid-sub-sel-row">
+                            <label class="vsp-field">
+                                <span>Начало</span>
+                                <input type="text" id="vid-sub-sel-start" class="sub-time-in" placeholder="00:00:00,000">
+                            </label>
+                            <label class="vsp-field">
+                                <span>Конец</span>
+                                <input type="text" id="vid-sub-sel-end" class="sub-time-in" placeholder="00:00:00,000">
+                            </label>
+                            <div class="vid-sub-sel-text" id="vid-sub-sel-text"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="result-block" id="vid-export-block" hidden style="position:static;top:auto;margin-top:12px">
+                    <div class="result-label">Экспорт</div>
+                    <div class="row gap">
+                        <select id="vid-format" class="fill">
+                            <option value="">Оригинальный формат</option>
+                            <option value="mp4">MP4</option>
+                            <option value="mkv">MKV</option>
+                            <option value="avi">AVI</option>
+                            <option value="webm">WebM</option>
+                            <option value="mov">MOV</option>
+                        </select>
+                        <a id="vid-download-btn" class="btn btn-primary" download>Скачать</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+
 </main>
+
+</div><!-- /.app-body -->
 
 <!-- ============== modals ============== -->
 <div class="modal" id="modal-delete" hidden>

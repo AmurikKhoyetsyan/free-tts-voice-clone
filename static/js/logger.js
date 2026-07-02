@@ -115,7 +115,7 @@ window.addEventListener('resize', () => {
 });
 
 // public log API
-export function log(msg, level = '') {
+function _logUI(msg, level) {
     if (msg == null) return;
     const t = new Date().toLocaleTimeString();
     const row = document.createElement('div');
@@ -124,6 +124,23 @@ export function log(msg, level = '') {
     body.insertBefore(row, body.firstChild);
     while (body.children.length > 300) body.removeChild(body.lastChild);
     body.scrollTop = 0;
+}
+
+// log() → UI panel + terminal + log file via /api/log
+export function log(msg, level = '') {
+    _logUI(msg, level);
+    try {
+        fetch('/api/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ msg: String(msg), level: level || '' }),
+        }).catch(() => {});
+    } catch (_) {}
+}
+
+// logLocal() → UI panel only (no remote POST; use for high-frequency FFmpeg lines)
+export function logLocal(msg, level = '') {
+    _logUI(msg, level);
 }
 
 // progress API
