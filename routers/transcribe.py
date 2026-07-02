@@ -1,4 +1,5 @@
-import os, json, threading, queue, tempfile, subprocess, shutil
+import os, json, threading, queue, tempfile, subprocess, shutil, warnings
+warnings.filterwarnings("ignore", message=".*flash attention.*", category=UserWarning)
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from core.log import write_log
@@ -11,6 +12,15 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 FFMPEG = shutil.which("ffmpeg") or os.path.join(BASE_DIR, "ffmpeg", "ffmpeg.exe")
 
+try:
+    import whisper as _whisper_module
+    _WHISPER_AVAILABLE = True
+    _WHISPER_ERR = ""
+except ImportError as _e:
+    _whisper_module = None
+    _WHISPER_AVAILABLE = False
+    _WHISPER_ERR = str(_e)
+
 _whisper_model = None
 _whisper_lock  = threading.Lock()
 
@@ -18,8 +28,7 @@ def _get_model(model_name="base"):
     global _whisper_model
     with _whisper_lock:
         if _whisper_model is None:
-            import whisper
-            _whisper_model = whisper.load_model(model_name)
+            _whisper_model = _whisper_module.load_model(model_name)
     return _whisper_model
 
 def _segments_to_srt(segments):
@@ -36,6 +45,9 @@ def _stream_transcribe(audio_path, language, cleanup=True):
     q = queue.Queue()
     def worker():
         try:
+            if not _WHISPER_AVAILABLE:
+                q.put(("error", f"Whisper недоступен: {_WHISPER_ERR}"))
+                return
             q.put(("progress", 0.15, "Загрузка модели Whisper…"))
             model = _get_model()
             q.put(("progress", 0.35, "Распознавание речи…"))
@@ -44,8 +56,6 @@ def _stream_transcribe(audio_path, language, cleanup=True):
             srt = _segments_to_srt(result["segments"])
             if cleanup and os.path.exists(audio_path): os.remove(audio_path)
             q.put(("done", srt))
-        except ImportError:
-            q.put(("error", "Whisper не установлен. Выполните: pip install openai-whisper"))
         except Exception as e:
             q.put(("error", str(e)))
     threading.Thread(target=worker, daemon=True).start()

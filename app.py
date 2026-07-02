@@ -11,6 +11,12 @@ import os
 import threading
 import time
 import webbrowser
+
+# Add bundled ffmpeg to PATH so Whisper (and ffmpeg subprocess calls) find it
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_FFMPEG_DIR = os.path.join(_BASE, "ffmpeg")
+if os.path.isdir(_FFMPEG_DIR):
+    os.environ["PATH"] = _FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

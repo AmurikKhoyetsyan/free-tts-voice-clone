@@ -73,6 +73,8 @@ echo [1/2] Installing requirements...
 echo ============================================================
 echo.
 
+set "TMPOUT=%TEMP%\tts_pip_out.txt"
+
 for /f "usebackq delims=" %%L in ("!REQ_FILE!") do (
 
     set "LINE=%%L"
@@ -88,22 +90,18 @@ for /f "usebackq delims=" %%L in ("!REQ_FILE!") do (
             echo --------------------------------------------
             echo Package: !PKG!
 
-            "%PYTHON%" -m pip show "!PKG!" >nul 2>&1
+            "%PYTHON%" -m pip install !LINE! > "!TMPOUT!" 2>&1
 
+            findstr /C:"Requirement already satisfied" "!TMPOUT!" >nul 2>&1
             if not errorlevel 1 (
-
                 echo Already installed.
-
             ) else (
-
-                echo Installing...
-
-                "%PYTHON%" -m pip install !LINE!
-
-                if errorlevel 1 (
-                    echo FAILED
+                findstr /C:"Successfully installed" "!TMPOUT!" >nul 2>&1
+                if not errorlevel 1 (
+                    echo Installed successfully.
                 ) else (
-                    echo DONE
+                    type "!TMPOUT!"
+                    echo FAILED
                 )
             )
 
@@ -113,11 +111,41 @@ for /f "usebackq delims=" %%L in ("!REQ_FILE!") do (
 )
 
 :: -----------------------------------------------------------------
+:: Verify whisper actually imports (pip can show "installed" but files broken)
+:: -----------------------------------------------------------------
+
+"%PYTHON%" -c "import whisper" >nul 2>&1
+if errorlevel 1 (
+    echo --------------------------------------------
+    echo Package: openai-whisper ^(repair^)
+    echo Import failed - force reinstalling...
+    "%PYTHON%" -m pip install --force-reinstall openai-whisper
+    echo.
+)
+
+:: -----------------------------------------------------------------
+:: Pre-download Whisper base model
+:: -----------------------------------------------------------------
+
+echo ============================================================
+echo [2/3] Downloading Whisper base model...
+echo ============================================================
+echo.
+
+"%PYTHON%" -c "import whisper; print('Downloading...'); whisper.load_model('base'); print('Done.')" 2>&1
+if errorlevel 1 (
+    echo FAILED to download Whisper model.
+) else (
+    echo Whisper model ready.
+)
+echo.
+
+:: -----------------------------------------------------------------
 :: Install XTTS
 :: -----------------------------------------------------------------
 
 echo ============================================================
-echo [2/2] Checking XTTS v2 (Coqui TTS)
+echo [3/3] Checking XTTS v2 (Coqui TTS)
 echo ============================================================
 echo.
 
