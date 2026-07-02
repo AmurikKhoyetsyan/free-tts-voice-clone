@@ -215,8 +215,10 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         secondary_c,
         outline_c,
         back_c,
-        str(sd.get("Bold",          "0")),
-        "0", "0", "0",          # Italic, Underline, StrikeOut
+        str(sd.get("Bold",      "0")),
+        str(sd.get("Italic",    "0")),
+        str(sd.get("Underline", "0")),
+        "0",                    # StrikeOut
         "100", "100", "0", "0", # ScaleX, ScaleY, Spacing, Angle
         str(border_style),
         str(int(round(final_outline))),
@@ -242,8 +244,10 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
             "&HFF000000",          # SecondaryColour = transparent
             text_outline_colour,   # OutlineColour = user's border color
             "&HFF000000",          # BackColour = transparent
-            str(sd.get("Bold", "0")),
-            "0", "0", "0",
+            str(sd.get("Bold",      "0")),
+            str(sd.get("Italic",    "0")),
+            str(sd.get("Underline", "0")),
+            "0",                   # StrikeOut
             "100", "100", "0", "0",
             "1",                   # BorderStyle=1 (text stroke mode)
             str(int(round(text_outline_size))),
@@ -315,6 +319,8 @@ def burn_subtitles(
     font_size:     int   = Form(24),
     font_color:    str   = Form("ffffff"),
     bold:          bool  = Form(False),
+    italic:        bool  = Form(False),
+    underline:     bool  = Form(False),
     position:      str   = Form("bottom"),
     bg_opacity:    int   = Form(50),
     bg_color:      str   = Form("000000"),
@@ -357,7 +363,9 @@ def burn_subtitles(
         "FontName":       font_family,
         "FontSize":       font_size,
         "PrimaryColour":  _hex_to_ass(font_color),
-        "Bold":           -1 if bold else 0,
+        "Bold":           -1 if bold      else 0,
+        "Italic":         -1 if italic    else 0,
+        "Underline":      -1 if underline else 0,
         "Alignment":      align,
         "MaxWidth":       max_width_pct,
         "MarginV":        margin_v,

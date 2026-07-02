@@ -32,7 +32,6 @@
     <button class="tab" data-tab="history">История</button>
     <button class="tab" data-tab="subtitles">Субтитры</button>
     <button class="tab" data-tab="video">Видео</button>
-    <button class="tab" data-tab="templates">Шаблоны</button>
 </nav>
 
 <main class="app-main">
@@ -139,6 +138,7 @@
                 <button class="hist-type-btn active" data-htype="audio">Аудио</button>
                 <button class="hist-type-btn"        data-htype="subtitles">Субтитры</button>
                 <button class="hist-type-btn"        data-htype="video">Видео</button>
+                <button class="hist-type-btn"        data-htype="templates">Шаблоны</button>
             </div>
             <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
         </div>
@@ -190,6 +190,22 @@
                             <video id="hist-vid-preview" controls style="width:100%;max-height:280px;display:none"></video>
                             <div class="vid-empty" id="hist-vid-empty">Выберите видео из списка</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Templates -->
+        <div class="hist-section" id="hist-section-templates" hidden>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="hist-tmpl-list" class="hist-list"></div>
+                </div>
+                <div class="col">
+                    <div class="result-block" id="hist-tmpl-preview-block" hidden style="position:static">
+                        <div class="result-label" id="hist-tmpl-preview-label">JSON</div>
+                        <div id="hist-tmpl-preview-visual" style="text-align:center;padding:24px 16px;background:#1a1a2e;border-radius:6px;margin-bottom:8px;min-height:60px;display:flex;align-items:center;justify-content:center">Образец текста</div>
+                        <pre id="hist-tmpl-preview-content" class="srt-preview-content"></pre>
                     </div>
                 </div>
             </div>
@@ -352,6 +368,14 @@
                             <label class="vsp-field vsp-inline">
                                 <input type="checkbox" id="vid-bold">
                                 <span>Жирный</span>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="checkbox" id="vid-italic">
+                                <span>Курсив</span>
+                            </label>
+                            <label class="vsp-field vsp-inline">
+                                <input type="checkbox" id="vid-underline">
+                                <span>Подчёрк</span>
                             </label>
                         </div>
                     </div>
@@ -561,35 +585,6 @@
     </section>
 
 
-    <!-- ============== Шаблоны ============== -->
-    <section class="tab-panel" data-panel="templates">
-        <div class="grid-2">
-            <div class="col">
-                <div class="sub-panel">
-                    <div class="result-label">Сохранить стиль как шаблон</div>
-                    <div class="row gap">
-                        <input type="text" id="tmpl-save-name" class="fill" placeholder="Название шаблона…">
-                        <button class="btn btn-primary" id="tmpl-save-btn">Сохранить</button>
-                    </div>
-                    <div class="status" id="tmpl-save-status"></div>
-                </div>
-                <div class="sub-panel" style="margin-top:12px">
-                    <div class="row gap" style="justify-content:space-between;align-items:center">
-                        <div class="result-label" style="margin:0">Шаблоны</div>
-                        <button class="btn" id="tmpl-refresh-btn" title="Обновить">↻</button>
-                    </div>
-                    <div id="tmpl-list"></div>
-                    <div class="status" id="tmpl-status"></div>
-                </div>
-            </div>
-            <div class="col">
-                <div class="sub-panel" id="tmpl-preview-panel" hidden>
-                    <div class="result-label">Предпросмотр шаблона</div>
-                    <div id="tmpl-preview-settings" class="tmpl-settings-grid"></div>
-                </div>
-            </div>
-        </div>
-    </section>
 
 </main>
 

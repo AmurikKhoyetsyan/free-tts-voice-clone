@@ -8,12 +8,20 @@ import { openPrompt } from '../modal.js';
 
 function collectStyle() {
     const g = id => document.getElementById(id);
+    const posX = (g('vid-pos-x') || {}).value || '';
+    const posY = (g('vid-pos-y') || {}).value || '';
     return {
         fontFamily:      (g('vid-font-family')    || {}).value       || 'Arial',
         fontSize:        (g('vid-font-size-n')     || {}).value       || '24',
         fontColor:       (g('vid-font-color')      || {}).value       || '#ffffff',
         bold:            (g('vid-bold')            || {}).checked     || false,
+        italic:          (g('vid-italic')          || {}).checked     || false,
+        underline:       (g('vid-underline')       || {}).checked     || false,
         position:        (g('vid-position')        || {}).value       || 'bottom',
+        posX:            posX,
+        posY:            posY,
+        subWidth:        (g('vid-sub-width')       || {}).value       || '',
+        subHeight:       (g('vid-sub-height')      || {}).value       || '',
         bgOpacity:       (g('vid-bg-opacity-n')    || {}).value       || '50',
         bgColor:         (g('vid-bg-color')        || {}).value       || '#000000',
         bgPadX:          (g('vid-bg-pad-x')        || {}).value       || '12',
@@ -52,7 +60,13 @@ function applyStyle(settings) {
     setVal('vid-font-size-n',   settings.fontSize     ?? '24');
     setVal('vid-font-color',    settings.fontColor    ?? '#ffffff');
     setCheck('vid-bold',        settings.bold         ?? false);
+    setCheck('vid-italic',      settings.italic       ?? false);
+    setCheck('vid-underline',   settings.underline    ?? false);
     setVal('vid-position',      settings.position     ?? 'bottom');
+    if (settings.posX)      setVal('vid-pos-x',      settings.posX);
+    if (settings.posY)      setVal('vid-pos-y',      settings.posY);
+    if (settings.subWidth)  setVal('vid-sub-width',  settings.subWidth);
+    if (settings.subHeight) setVal('vid-sub-height', settings.subHeight);
     setVal('vid-bg-opacity',    settings.bgOpacity    ?? '50');
     setVal('vid-bg-opacity-n',  settings.bgOpacity    ?? '50');
     setVal('vid-bg-color',      settings.bgColor      ?? '#000000');
@@ -75,7 +89,8 @@ function applyStyle(settings) {
 function settingsHtml(settings) {
     const labels = {
         fontFamily: 'Шрифт', fontSize: 'Размер', fontColor: 'Цвет текста',
-        bold: 'Жирный', position: 'Позиция', bgOpacity: 'Фон %',
+        bold: 'Жирный', italic: 'Курсив', underline: 'Подчёрк', position: 'Позиция', posX: 'Поз. X px', posY: 'Поз. Y px',
+        subWidth: 'Ширина px', subHeight: 'Высота px', bgOpacity: 'Фон %',
         bgColor: 'Цвет фона', bgPadX: 'Отступ X', bgPadY: 'Отступ Y',
         bgRadius: 'Радиус', outlineSize: 'Обводка', outlineColor: 'Цвет обв.',
         shadowSize: 'Тень', shadowColor: 'Цвет тени', lineHeight: 'Межстрочный',
@@ -83,6 +98,7 @@ function settingsHtml(settings) {
         karaokeEnabled: 'Karaoke',
     };
     return Object.entries(settings).map(([k, v]) => {
+        if (v === '' || v === null || v === undefined) return '';
         const lbl = labels[k] || k;
         const val = typeof v === 'boolean' ? (v ? 'да' : 'нет') : v;
         return `<span>${lbl}:</span><b>${escHtml(String(val))}</b>`;
@@ -97,9 +113,6 @@ function escHtml(s) {
 // ── Tab init ──────────────────────────────────────────────────────────────────
 
 export async function init() {
-    const saveNameEl  = document.getElementById('tmpl-save-name');
-    const saveBtnEl   = document.getElementById('tmpl-save-btn');
-    const saveStatusEl= document.getElementById('tmpl-save-status');
     const refreshBtnEl= document.getElementById('tmpl-refresh-btn');
     const listEl      = document.getElementById('tmpl-list');
     const statusEl    = document.getElementById('tmpl-status');
@@ -196,23 +209,6 @@ export async function init() {
             } catch (err) {
                 toast('Ошибка: ' + err.message, 'err');
             }
-        }
-    });
-
-    saveBtnEl && saveBtnEl.addEventListener('click', async () => {
-        const name = saveNameEl.value.trim();
-        if (!name) { toast('Введите название шаблона', 'warn'); return; }
-        const settings = collectStyle();
-        try {
-            const r = await postJSON('/api/templates', { name, settings });
-            toast(r.status || 'Сохранено', 'ok');
-            if (saveStatusEl) { saveStatusEl.textContent = r.status; saveStatusEl.className = 'status ok'; }
-            log('Шаблон сохранён: ' + name, 'done');
-            events.dispatchEvent(new CustomEvent('template-changed'));
-            await loadList();
-        } catch (e) {
-            toast(e.message, 'err');
-            if (saveStatusEl) { saveStatusEl.textContent = '❌ ' + e.message; saveStatusEl.className = 'status err'; }
         }
     });
 

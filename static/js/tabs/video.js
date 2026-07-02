@@ -26,6 +26,8 @@ export async function init() {
     const fontSizeN      = document.getElementById('vid-font-size-n');
     const colorEl        = document.getElementById('vid-font-color');
     const boldEl         = document.getElementById('vid-bold');
+    const italicEl       = document.getElementById('vid-italic');
+    const underlineEl    = document.getElementById('vid-underline');
 
     const posXEl         = document.getElementById('vid-pos-x');
     const posYEl         = document.getElementById('vid-pos-y');
@@ -122,7 +124,7 @@ export async function init() {
     bindRN(shadowSizeR, shadowSizeN, () => applySubStyle());
 
     // Other controls → live preview
-    [fontFamilyEl, colorEl, boldEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
+    [fontFamilyEl, colorEl, boldEl, italicEl, underlineEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
      outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl,
      lineHeightEl, maxWidthEl, marginVEl, subWidthEl, subHeightEl]
         .forEach(el => el && el.addEventListener('change', applySubStyle));
@@ -420,6 +422,8 @@ export async function init() {
         fd.append('font_size',     fontSizeN.value);
         fd.append('font_color',    colorEl.value.replace('#', ''));
         fd.append('bold',          String(boldEl.checked));
+        fd.append('italic',        String(italicEl    ? italicEl.checked    : false));
+        fd.append('underline',     String(underlineEl ? underlineEl.checked : false));
         fd.append('position',      posPresetEl.value);
         fd.append('bg_opacity',    bgOpacityN.value);
         fd.append('bg_color',      bgColorEl.value.replace('#', ''));
@@ -766,6 +770,8 @@ export async function init() {
         const fontFamily   = fontFamilyEl.value;
         const textColor    = colorEl.value;
         const bold         = boldEl.checked;
+        const italic       = italicEl    && italicEl.checked;
+        const underline    = underlineEl && underlineEl.checked;
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
         const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
@@ -784,7 +790,9 @@ export async function init() {
         overlay.style.fontSize        = fontSize + 'px';
         overlay.style.fontFamily      = `"${fontFamily}", sans-serif`;
         overlay.style.color           = textColor;
-        overlay.style.fontWeight      = bold ? '700' : '400';
+        overlay.style.fontWeight      = bold      ? '700'       : '400';
+        overlay.style.fontStyle       = italic    ? 'italic'    : 'normal';
+        overlay.style.textDecoration  = underline ? 'underline' : 'none';
         overlay.style.lineHeight      = lineH;
         overlay.style.wordSpacing     = '0.4em';
         overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
@@ -1105,6 +1113,8 @@ export async function init() {
             setVal('vid-font-size-n',    s.fontSize);
             setVal('vid-font-color',     s.fontColor);
             setCheck('vid-bold',         s.bold);
+            setCheck('vid-italic',       s.italic);
+            setCheck('vid-underline',    s.underline);
             setVal('vid-position',       s.position);
             setVal('vid-bg-opacity',     s.bgOpacity);
             setVal('vid-bg-opacity-n',   s.bgOpacity);
@@ -1123,6 +1133,10 @@ export async function init() {
             setVal('vid-margin-v',       s.marginV);
             setVal('vid-karaoke-color',  s.karaokeColor);
             setCheck('vid-karaoke-enable', s.karaokeEnabled);
+            if (s.posX)      setVal('vid-pos-x',      s.posX);
+            if (s.posY)      setVal('vid-pos-y',      s.posY);
+            if (s.subWidth)  setVal('vid-sub-width',  s.subWidth);
+            if (s.subHeight) setVal('vid-sub-height', s.subHeight);
             applySubStyle();
             toast('Шаблон применён: ' + name, 'ok');
         } catch (e) {
@@ -1135,13 +1149,30 @@ export async function init() {
     saveStyleBtn && saveStyleBtn.addEventListener('click', async () => {
         const name = await openPrompt({ title: 'Сохранить стиль как шаблон', placeholder: 'Название шаблона…' });
         if (!name || !name.trim()) return;
+        // Auto-version if name already taken
+        let finalName = name.trim();
+        try {
+            const existing = await getJSON('/api/templates');
+            const taken = new Set(existing.templates || []);
+            if (taken.has(finalName)) {
+                let v = 2;
+                while (taken.has(`${name.trim()}_v${v}`)) v++;
+                finalName = `${name.trim()}_v${v}`;
+            }
+        } catch (_) {}
         const g = id => document.getElementById(id);
         const settings = {
             fontFamily:     (g('vid-font-family')    || {}).value   || 'Arial',
             fontSize:       (g('vid-font-size-n')    || {}).value   || '24',
             fontColor:      (g('vid-font-color')     || {}).value   || '#ffffff',
             bold:           (g('vid-bold')           || {}).checked || false,
+            italic:         (g('vid-italic')         || {}).checked || false,
+            underline:      (g('vid-underline')      || {}).checked || false,
             position:       (g('vid-position')       || {}).value   || 'bottom',
+            posX:           (g('vid-pos-x')          || {}).value   || '',
+            posY:           (g('vid-pos-y')          || {}).value   || '',
+            subWidth:       (g('vid-sub-width')      || {}).value   || '',
+            subHeight:      (g('vid-sub-height')     || {}).value   || '',
             bgOpacity:      (g('vid-bg-opacity-n')   || {}).value   || '50',
             bgColor:        (g('vid-bg-color')       || {}).value   || '#000000',
             bgPadX:         (g('vid-bg-pad-x')       || {}).value   || '12',
@@ -1158,8 +1189,8 @@ export async function init() {
             karaokeEnabled: (g('vid-karaoke-enable') || {}).checked || false,
         };
         try {
-            await postJSON('/api/templates', { name: name.trim(), settings });
-            toast('Шаблон сохранён: ' + name.trim(), 'ok');
+            await postJSON('/api/templates', { name: finalName, settings });
+            toast('Шаблон сохранён: ' + finalName, 'ok');
             events.dispatchEvent(new CustomEvent('template-changed'));
             await refreshTemplateList();
         } catch (err) {
