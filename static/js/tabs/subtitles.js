@@ -1,4 +1,6 @@
-import { postJSON } from '../api.js';
+import { postJSON, getJSON, del } from '../api.js';
+import { synthesizeStream } from '../api.js';
+import { FileUpload } from '../file-upload.js';
 import { ICONS } from '../icons.js';
 import { toast } from '../toast.js';
 import { log } from '../logger.js';
@@ -392,4 +394,140 @@ export async function init() {
     });
 
     renderEditor();
+
+    // ── Saved subtitles viewer ────────────────────────────────────────────────
+    const savedListEl     = document.getElementById('sub-saved-list');
+    const savedRefreshBtn = document.getElementById('sub-saved-refresh');
+
+    async function loadSavedList() {
+        if (!savedListEl) return;
+        try {
+            const data = await getJSON('/api/subtitles');
+            renderSavedList(data.files || []);
+        } catch (e) {
+            savedListEl.innerHTML = `<div class="sub-empty">Ошибка: ${escHtml(e.message)}</div>`;
+        }
+    }
+
+    function renderSavedList(files) {
+        if (!savedListEl) return;
+        if (!files.length) {
+            savedListEl.innerHTML = '<div class="sub-empty">Нет сохранённых файлов</div>';
+            return;
+        }
+        savedListEl.innerHTML = files.map(f => `
+            <div class="srt-saved-item" data-name="${escHtml(f)}">
+                <span class="srt-saved-name" title="${escHtml(f)}">${escHtml(f)}</span>
+                <button class="btn btn-sm srt-load-btn"  data-name="${escHtml(f)}" title="Загрузить в редактор">Загрузить</button>
+                <a class="btn btn-sm" href="/api/subtitles/${encodeURIComponent(f)}/download" download="${escHtml(f)}" title="Скачать">Скачать</a>
+                <button class="btn btn-sm btn-danger srt-del-btn" data-name="${escHtml(f)}" title="Удалить">Удалить</button>
+            </div>
+        `).join('');
+    }
+
+    savedListEl && savedListEl.addEventListener('click', async e => {
+        const loadBtn = e.target.closest('.srt-load-btn');
+        const delBtn  = e.target.closest('.srt-del-btn');
+
+        if (loadBtn) {
+            const name = loadBtn.dataset.name;
+            try {
+                const r = await getJSON(`/api/subtitles/${encodeURIComponent(name)}`);
+                subs = parseSavedSRT(r.content);
+                saveNameEl.value = name.endsWith('.srt') ? name.slice(0, -4) : name;
+                renderEditor();
+                toast('Загружено: ' + name, 'ok');
+            } catch (err) {
+                toast('Ошибка загрузки: ' + err.message, 'err');
+            }
+            return;
+        }
+
+        if (delBtn) {
+            const name = delBtn.dataset.name;
+            if (!confirm(`Удалить «${name}»?`)) return;
+            try {
+                await del(`/api/subtitles/${encodeURIComponent(name)}`);
+                toast('Удалено: ' + name, 'ok');
+                events.dispatchEvent(new CustomEvent('subtitles-changed'));
+                await loadSavedList();
+            } catch (err) {
+                toast('Ошибка удаления: ' + err.message, 'err');
+            }
+        }
+    });
+
+    savedRefreshBtn && savedRefreshBtn.addEventListener('click', loadSavedList);
+    events.addEventListener('subtitles-changed', loadSavedList);
+
+    await loadSavedList();
+
+    // ── Transcribe (Whisper) ──────────────────────────────────────────────────
+    const transcribeBtn    = document.getElementById('sub-transcribe-btn');
+    const transcribeStatus = document.getElementById('sub-transcribe-status');
+    const langEl           = document.getElementById('sub-lang');
+    const uploadMountEl    = document.getElementById('sub-audio-upload-mount');
+
+    let _transcribeFile = null;
+
+    if (uploadMountEl) {
+        new FileUpload(uploadMountEl, {
+            accept: 'audio/*,video/*',
+            label: 'Перетащи аудио/видео или нажми',
+            hint: 'MP3, WAV, OGG, MP4…',
+            onChange(file) {
+                _transcribeFile = file || null;
+            },
+        });
+    }
+
+    transcribeBtn && transcribeBtn.addEventListener('click', async () => {
+        if (!_transcribeFile) { toast('Выберите аудио или видео файл', 'warn'); return; }
+        transcribeBtn.disabled = true;
+        if (transcribeStatus) { transcribeStatus.textContent = 'Подготовка…'; transcribeStatus.className = 'status busy'; }
+
+        const fd = new FormData();
+        fd.append('file', _transcribeFile);
+        fd.append('language', langEl ? langEl.value : 'ru');
+
+        await synthesizeStream(
+            '/api/transcribe/audio',
+            { method: 'POST', body: fd },
+            {
+                progress(val, desc) {
+                    if (transcribeStatus) {
+                        transcribeStatus.textContent = desc || 'Обработка…';
+                        transcribeStatus.className = 'status busy';
+                    }
+                },
+                done(payload) {
+                    transcribeBtn.disabled = false;
+                    if (transcribeStatus) { transcribeStatus.textContent = '✓ Распознано'; transcribeStatus.className = 'status ok'; }
+                    if (payload.srt) {
+                        subs = parseSavedSRT(payload.srt);
+                        renderEditor();
+                        toast('Субтитры распознаны!', 'ok');
+                        log('Whisper: субтитры распознаны', 'done');
+                    }
+                },
+                error(msg) {
+                    transcribeBtn.disabled = false;
+                    if (transcribeStatus) { transcribeStatus.textContent = msg; transcribeStatus.className = 'status err'; }
+                    toast(msg, 'err');
+                },
+            }
+        );
+    });
+}
+
+// ── SRT parser for loading saved files ────────────────────────────────────────
+
+function parseSavedSRT(content) {
+    return content.trim().split(/\n\s*\n/).map((block, i) => {
+        const lines = block.trim().split('\n');
+        if (lines.length < 3) return null;
+        const [startStr, endStr] = lines[1].split('-->').map(s => s.trim());
+        const text = lines.slice(2).join('\n');
+        return { index: i + 1, start: parseSrtTime(startStr), end: parseSrtTime(endStr), text };
+    }).filter(Boolean);
 }

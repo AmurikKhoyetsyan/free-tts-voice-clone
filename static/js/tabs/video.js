@@ -5,6 +5,7 @@ import { log, logLocal } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
 import { ICONS } from '../icons.js';
+import { openPrompt } from '../modal.js';
 
 export async function init() {
     // ── Core elements ─────────────────────────────────────────────────────────
@@ -25,6 +26,8 @@ export async function init() {
     const fontSizeN      = document.getElementById('vid-font-size-n');
     const colorEl        = document.getElementById('vid-font-color');
     const boldEl         = document.getElementById('vid-bold');
+    const italicEl       = document.getElementById('vid-italic');
+    const underlineEl    = document.getElementById('vid-underline');
 
     const posXEl         = document.getElementById('vid-pos-x');
     const posYEl         = document.getElementById('vid-pos-y');
@@ -74,6 +77,7 @@ export async function init() {
     const subEditorSaveRow = document.getElementById('vid-sub-editor-save-row');
     const subEditorStatus  = document.getElementById('vid-sub-editor-status');
     const subSaveBtn       = document.getElementById('vid-sub-save-btn');
+    const subProjectNameEl = document.getElementById('vid-sub-project-name');
 
     // ── State ─────────────────────────────────────────────────────────────────
     let uploadedVideoName = null;
@@ -120,7 +124,7 @@ export async function init() {
     bindRN(shadowSizeR, shadowSizeN, () => applySubStyle());
 
     // Other controls → live preview
-    [fontFamilyEl, colorEl, boldEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
+    [fontFamilyEl, colorEl, boldEl, italicEl, underlineEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
      outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl,
      lineHeightEl, maxWidthEl, marginVEl, subWidthEl, subHeightEl]
         .forEach(el => el && el.addEventListener('change', applySubStyle));
@@ -223,6 +227,10 @@ export async function init() {
     });
 
     // ── Video upload ──────────────────────────────────────────────────────────
+    const vidTranscribeBtn    = document.getElementById('vid-transcribe-btn');
+    const vidTranscribeStatus = document.getElementById('vid-transcribe-status');
+    const vidTranscribeLang   = document.getElementById('vid-transcribe-lang');
+
     new FileUpload(document.getElementById('vid-upload-mount'), {
         accept: 'video/*',
         label: 'Перетащи видео или нажми',
@@ -235,6 +243,7 @@ export async function init() {
                 overlay.innerHTML = '';
                 videoNatW = videoNatH = 0;
                 if (frameSizeEl) frameSizeEl.textContent = '';
+                if (vidTranscribeBtn) vidTranscribeBtn.disabled = true;
                 return;
             }
             const fd = new FormData();
@@ -244,6 +253,7 @@ export async function init() {
                 const data = await r.json();
                 uploadedVideoName = data.name;
                 showPreview(data.url);
+                if (vidTranscribeBtn) vidTranscribeBtn.disabled = false;
             } catch (e) {
                 toast('Ошибка загрузки видео: ' + e.message, 'err');
             }
@@ -277,11 +287,78 @@ export async function init() {
     vidPreview.addEventListener('pause',  () => { cancelAnimationFrame(waveRafId); drawWaveform(vidPreview.currentTime); });
     vidPreview.addEventListener('seeked', () => drawWaveform(vidPreview.currentTime));
     vidPreview.addEventListener('ended',  () => { cancelAnimationFrame(waveRafId); drawWaveform(vidPreview.currentTime); });
+
+    // ── Waveform hover tooltip + drag-to-seek ─────────────────────────────────
+    const waveTooltip = document.getElementById('vid-wave-tooltip');
+    let _waveDragging = false;
+
+    function _waveXtoTime(clientX) {
+        if (!waveformCanvas || !waveDuration) return 0;
+        const rect = waveformCanvas.getBoundingClientRect();
+        return Math.max(0, Math.min(waveDuration, (clientX - rect.left) / rect.width * waveDuration));
+    }
+
+    function _fmtMmss(t) {
+        const m = Math.floor(t / 60);
+        const s = Math.floor(t % 60);
+        return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    function _drawHoverCursor(clientX) {
+        if (!waveformCanvas || !waveDuration) return;
+        const rect = waveformCanvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const W = waveformCanvas.width;
+        const H = waveformCanvas.height;
+        const cx = Math.round(x / rect.width * W);
+        const ctx = waveformCanvas.getContext('2d');
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillRect(cx - 1, 0, 2, H);
+    }
+
     if (waveformCanvas) {
-        waveformCanvas.addEventListener('click', e => {
+        waveformCanvas.addEventListener('mousemove', e => {
             if (!waveDuration) return;
-            const rect = waveformCanvas.getBoundingClientRect();
-            vidPreview.currentTime = (e.clientX - rect.left) / rect.width * waveDuration;
+            const t = _waveXtoTime(e.clientX);
+            // Tooltip
+            if (waveTooltip) {
+                const rect = waveformCanvas.getBoundingClientRect();
+                const wrapRect = waveformWrap.getBoundingClientRect();
+                waveTooltip.textContent = _fmtMmss(t);
+                waveTooltip.hidden = false;
+                waveTooltip.style.left = (e.clientX - wrapRect.left) + 'px';
+                waveTooltip.style.top  = (rect.top - wrapRect.top - 22) + 'px';
+            }
+            // Drag-to-seek
+            if (_waveDragging) {
+                vidPreview.currentTime = t;
+                drawWaveform(t);
+            } else {
+                drawWaveform(vidPreview.currentTime);
+            }
+            _drawHoverCursor(e.clientX);
+        });
+
+        waveformCanvas.addEventListener('mouseleave', () => {
+            if (waveTooltip) waveTooltip.hidden = true;
+            if (!_waveDragging) drawWaveform(vidPreview.currentTime);
+        });
+
+        waveformCanvas.addEventListener('mousedown', e => {
+            if (!waveDuration) return;
+            _waveDragging = true;
+            const t = _waveXtoTime(e.clientX);
+            vidPreview.currentTime = t;
+            drawWaveform(t);
+            _drawHoverCursor(e.clientX);
+            e.preventDefault();
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (_waveDragging) {
+                _waveDragging = false;
+                drawWaveform(vidPreview.currentTime);
+            }
         });
     }
 
@@ -345,6 +422,8 @@ export async function init() {
         fd.append('font_size',     fontSizeN.value);
         fd.append('font_color',    colorEl.value.replace('#', ''));
         fd.append('bold',          String(boldEl.checked));
+        fd.append('italic',        String(italicEl    ? italicEl.checked    : false));
+        fd.append('underline',     String(underlineEl ? underlineEl.checked : false));
         fd.append('position',      posPresetEl.value);
         fd.append('bg_opacity',    bgOpacityN.value);
         fd.append('bg_color',      bgColorEl.value.replace('#', ''));
@@ -461,6 +540,10 @@ export async function init() {
 
     function renderVidSubEditor(subs, srtName) {
         if (srtName) currentSrtName = srtName;
+        if (srtName && subProjectNameEl) {
+            const stem = srtName.replace(/\.srt$/i, '').replace(/_v\d{8}_\d{6}$/, '');
+            subProjectNameEl.value = stem;
+        }
         if (!subEditorBlock) return;
 
         subEditorBlock.hidden = false;
@@ -547,21 +630,27 @@ export async function init() {
             const toSave = currentSubs.filter(s => s.text).map((s, i) => ({ ...s, index: i + 1 }));
             const content = subsToSRTV(toSave);
             subEditorStatus.textContent = '';
-            let srtName = currentSrtName;
-            if (!srtName) {
-                const now = new Date();
-                const p   = n => String(n).padStart(2, '0');
-                srtName = `subtitle-${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}_${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`;
-                currentSrtName = srtName;
+
+            // Determine base name (strip .srt and version suffix)
+            let baseName = subProjectNameEl ? subProjectNameEl.value.trim() : '';
+            if (!baseName && currentSrtName) {
+                baseName = currentSrtName.replace(/\.srt$/i, '').replace(/_v\d{8}_\d{6}$/, '');
             }
+            if (!baseName) baseName = 'subtitle';
+
+            // Always create a new versioned file
+            const now = new Date();
+            const p   = n => String(n).padStart(2, '0');
+            const vSuffix = `_v${now.getFullYear()}${p(now.getMonth()+1)}${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+            const versionedName = baseName + vSuffix;
+
             try {
-                const r = await postJSON('/api/subtitles', { name: srtName, content });
+                const r = await postJSON('/api/subtitles', { name: versionedName, content });
                 toast(r.status || 'Сохранено', 'ok');
-                subEditorStatus.textContent = '✓ Сохранено';
+                subEditorStatus.textContent = '✓ Версия: ' + versionedName;
                 subEditorStatus.className   = 'status ok';
                 events.dispatchEvent(new CustomEvent('subtitles-changed'));
                 await refreshSRTList();
-                srtSel.setValue(srtName, true);
             } catch (e) {
                 toast(e.message, 'err');
                 subEditorStatus.textContent = '❌ ' + e.message;
@@ -681,6 +770,8 @@ export async function init() {
         const fontFamily   = fontFamilyEl.value;
         const textColor    = colorEl.value;
         const bold         = boldEl.checked;
+        const italic       = italicEl    && italicEl.checked;
+        const underline    = underlineEl && underlineEl.checked;
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
         const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
@@ -699,7 +790,9 @@ export async function init() {
         overlay.style.fontSize        = fontSize + 'px';
         overlay.style.fontFamily      = `"${fontFamily}", sans-serif`;
         overlay.style.color           = textColor;
-        overlay.style.fontWeight      = bold ? '700' : '400';
+        overlay.style.fontWeight      = bold      ? '700'       : '400';
+        overlay.style.fontStyle       = italic    ? 'italic'    : 'normal';
+        overlay.style.textDecoration  = underline ? 'underline' : 'none';
         overlay.style.lineHeight      = lineH;
         overlay.style.wordSpacing     = '0.4em';
         overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
@@ -925,6 +1018,196 @@ export async function init() {
     }
 
     renderVidSubEditor([], null);
+
+    // ── Transcribe from video (Whisper) ───────────────────────────────────────
+    vidTranscribeBtn && vidTranscribeBtn.addEventListener('click', async () => {
+        if (!uploadedVideoName) { toast('Загрузите видео', 'warn'); return; }
+        vidTranscribeBtn.disabled = true;
+        if (vidTranscribeStatus) { vidTranscribeStatus.textContent = 'Подготовка…'; vidTranscribeStatus.className = 'status busy'; }
+
+        const fd = new FormData();
+        fd.append('video_name', uploadedVideoName);
+        fd.append('language', vidTranscribeLang ? vidTranscribeLang.value : 'ru');
+
+        await synthesizeStream(
+            '/api/transcribe/video',
+            { method: 'POST', body: fd },
+            {
+                progress(val, desc) {
+                    if (vidTranscribeStatus) {
+                        vidTranscribeStatus.textContent = desc || 'Обработка…';
+                        vidTranscribeStatus.className = 'status busy';
+                    }
+                },
+                async done(payload) {
+                    vidTranscribeBtn.disabled = false;
+                    if (vidTranscribeStatus) { vidTranscribeStatus.textContent = '✓ Распознано'; vidTranscribeStatus.className = 'status ok'; }
+                    if (payload.srt) {
+                        const parsed = parseSRTContent(payload.srt);
+                        // Auto-generate name
+                        const now = new Date();
+                        const p   = n => String(n).padStart(2,'0');
+                        const autoName = `transcribe-${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}_${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`;
+                        // Save to backend
+                        try {
+                            await postJSON('/api/subtitles', { name: autoName, content: payload.srt });
+                            events.dispatchEvent(new CustomEvent('subtitles-changed'));
+                            await refreshSRTList();
+                            srtSel.setValue(autoName + '.srt', true);
+                        } catch (_) {}
+                        renderVidSubEditor(parsed, autoName + '.srt');
+                        currentSubs = parsed;
+                        updateOverlay();
+                        toast('Субтитры распознаны: ' + autoName, 'ok');
+                        log('Whisper (видео): субтитры распознаны', 'done');
+                    }
+                },
+                error(msg) {
+                    vidTranscribeBtn.disabled = false;
+                    if (vidTranscribeStatus) { vidTranscribeStatus.textContent = msg; vidTranscribeStatus.className = 'status err'; }
+                    toast(msg, 'err');
+                },
+            }
+        );
+    });
+
+    // ── Template selector ─────────────────────────────────────────────────────
+    const tmplApplyBtn = document.getElementById('vid-tmpl-apply-btn');
+    const tmplMount    = document.getElementById('vid-tmpl-mount');
+
+    const tmplSel = new CustomSelect(tmplMount, {
+        placeholder: 'Шаблон стиля…',
+    });
+
+    async function refreshTemplateList() {
+        try {
+            const data = await getJSON('/api/templates');
+            const opts = (data.templates || []).map(n => ({ value: n, label: n }));
+            tmplSel.setOptions(opts);
+        } catch (_) {}
+    }
+    await refreshTemplateList();
+    events.addEventListener('template-changed', refreshTemplateList);
+
+    tmplApplyBtn && tmplApplyBtn.addEventListener('click', async () => {
+        const name = tmplSel.value;
+        if (!name) { toast('Выберите шаблон', 'warn'); return; }
+        try {
+            const data = await getJSON(`/api/templates/${encodeURIComponent(name)}`);
+            const s = data.settings || {};
+            function setVal(id, val) {
+                const el = document.getElementById(id);
+                if (!el || val === undefined) return;
+                el.value = val;
+                el.dispatchEvent(new Event('input',  { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            function setCheck(id, val) {
+                const el = document.getElementById(id);
+                if (!el || val === undefined) return;
+                el.checked = val;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            setVal('vid-font-family',    s.fontFamily);
+            setVal('vid-font-size',      s.fontSize);
+            setVal('vid-font-size-n',    s.fontSize);
+            setVal('vid-font-color',     s.fontColor);
+            setCheck('vid-bold',         s.bold);
+            setCheck('vid-italic',       s.italic);
+            setCheck('vid-underline',    s.underline);
+            setVal('vid-position',       s.position);
+            setVal('vid-bg-opacity',     s.bgOpacity);
+            setVal('vid-bg-opacity-n',   s.bgOpacity);
+            setVal('vid-bg-color',       s.bgColor);
+            setVal('vid-bg-pad-x',       s.bgPadX);
+            setVal('vid-bg-pad-y',       s.bgPadY);
+            setVal('vid-bg-radius',      s.bgRadius);
+            setVal('vid-outline-size',   s.outlineSize);
+            setVal('vid-outline-size-n', s.outlineSize);
+            setVal('vid-outline-color',  s.outlineColor);
+            setVal('vid-shadow-size',    s.shadowSize);
+            setVal('vid-shadow-size-n',  s.shadowSize);
+            setVal('vid-shadow-color',   s.shadowColor);
+            setVal('vid-line-height',    s.lineHeight);
+            setVal('vid-max-width',      s.maxWidth);
+            setVal('vid-margin-v',       s.marginV);
+            setVal('vid-karaoke-color',  s.karaokeColor);
+            setCheck('vid-karaoke-enable', s.karaokeEnabled);
+            if (s.posX)      setVal('vid-pos-x',      s.posX);
+            if (s.posY)      setVal('vid-pos-y',      s.posY);
+            if (s.subWidth)  setVal('vid-sub-width',  s.subWidth);
+            if (s.subHeight) setVal('vid-sub-height', s.subHeight);
+            applySubStyle();
+            toast('Шаблон применён: ' + name, 'ok');
+        } catch (e) {
+            toast('Ошибка применения шаблона: ' + e.message, 'err');
+        }
+    });
+
+    // ── Save current style as template ────────────────────────────────────────
+    const saveStyleBtn = document.getElementById('vid-save-style-btn');
+    saveStyleBtn && saveStyleBtn.addEventListener('click', async () => {
+        const name = await openPrompt({ title: 'Сохранить стиль как шаблон', placeholder: 'Название шаблона…' });
+        if (!name || !name.trim()) return;
+        // Auto-version if name already taken
+        let finalName = name.trim();
+        try {
+            const existing = await getJSON('/api/templates');
+            const taken = new Set(existing.templates || []);
+            if (taken.has(finalName)) {
+                let v = 2;
+                while (taken.has(`${name.trim()}_v${v}`)) v++;
+                finalName = `${name.trim()}_v${v}`;
+            }
+        } catch (_) {}
+        const g = id => document.getElementById(id);
+        const settings = {
+            fontFamily:     (g('vid-font-family')    || {}).value   || 'Arial',
+            fontSize:       (g('vid-font-size-n')    || {}).value   || '24',
+            fontColor:      (g('vid-font-color')     || {}).value   || '#ffffff',
+            bold:           (g('vid-bold')           || {}).checked || false,
+            italic:         (g('vid-italic')         || {}).checked || false,
+            underline:      (g('vid-underline')      || {}).checked || false,
+            position:       (g('vid-position')       || {}).value   || 'bottom',
+            posX:           (g('vid-pos-x')          || {}).value   || '',
+            posY:           (g('vid-pos-y')          || {}).value   || '',
+            subWidth:       (g('vid-sub-width')      || {}).value   || '',
+            subHeight:      (g('vid-sub-height')     || {}).value   || '',
+            bgOpacity:      (g('vid-bg-opacity-n')   || {}).value   || '50',
+            bgColor:        (g('vid-bg-color')       || {}).value   || '#000000',
+            bgPadX:         (g('vid-bg-pad-x')       || {}).value   || '12',
+            bgPadY:         (g('vid-bg-pad-y')       || {}).value   || '6',
+            bgRadius:       (g('vid-bg-radius')      || {}).value   || '4',
+            outlineSize:    (g('vid-outline-size-n') || {}).value   || '1',
+            outlineColor:   (g('vid-outline-color')  || {}).value   || '#000000',
+            shadowSize:     (g('vid-shadow-size-n')  || {}).value   || '0',
+            shadowColor:    (g('vid-shadow-color')   || {}).value   || '#000000',
+            lineHeight:     (g('vid-line-height')    || {}).value   || '1.35',
+            maxWidth:       (g('vid-max-width')      || {}).value   || '90',
+            marginV:        (g('vid-margin-v')       || {}).value   || '10',
+            karaokeColor:   (g('vid-karaoke-color')  || {}).value   || '#ffdd00',
+            karaokeEnabled: (g('vid-karaoke-enable') || {}).checked || false,
+        };
+        try {
+            await postJSON('/api/templates', { name: finalName, settings });
+            toast('Шаблон сохранён: ' + finalName, 'ok');
+            events.dispatchEvent(new CustomEvent('template-changed'));
+            await refreshTemplateList();
+        } catch (err) {
+            toast('Ошибка: ' + err.message, 'err');
+        }
+    });
+
+    // ── Restore subtitles from history ────────────────────────────────────────
+    events.addEventListener('srt-restore', (e) => {
+        const { content, filename } = e.detail || {};
+        if (!content) return;
+        const parsed = parseSRTContent(content);
+        renderVidSubEditor(parsed, filename || null);
+        currentSubs = parsed;
+        updateOverlay();
+        toast('Субтитры загружены из истории', 'ok');
+    });
 }
 
 // ── Module-level helpers ──────────────────────────────────────────────────────
