@@ -1,27 +1,14 @@
-# ── Web server ─────────────────────────────────────────────────────────────────
+# ── Web server ──────────────────────────────────────────────────────────────
 fastapi>=0.110
 uvicorn[standard]>=0.27
-python-multipart>=0.0.9   # multipart/form-data uploads (voice samples)
+python-multipart>=0.0.9
 
-# ── Windows TTS ────────────────────────────────────────────────────────────────
-pyttsx3>=2.90             # SAPI5 / OneCore offline synthesis
+# ── Windows TTS ─────────────────────────────────────────────────────────────
+pyttsx3>=2.90
 
-# ── Audio I/O ──────────────────────────────────────────────────────────────────
-soundfile>=0.12.0         # WAV read/write
-numpy>=1.22.0             # audio array operations
+# ── Audio I/O ────────────────────────────────────────────────────────────────
+soundfile>=0.12.0
+numpy>=1.22.0
 
-# ── Optional: Speech-to-text (Whisper) ─────────────────────────────────────────
-# Requires PyTorch — see install_xtts.bat for GPU/CPU install instructions.
-# pip install torch torchaudio   (CPU) or use the CUDA variant from install_xtts.bat
+# ── Speech-to-text (Whisper) ─────────────────────────────────────────────────
 openai-whisper>=20230314
-
-# ── Optional: XTTS v2 voice cloning ────────────────────────────────────────────
-# Install via:  install_xtts.bat   or manually:
-#
-#   pip install TTS
-#
-#   GPU (CUDA 11.8):
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
-#
-#   CPU only:
-#   pip install torch torchaudio
