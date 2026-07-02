@@ -129,7 +129,14 @@ export async function init() {
     });
 
     // ── Subtitles ─────────────────────────────────────────────────────────────
-    const srtListEl = document.getElementById('hist-srt-list');
+    const srtListEl       = document.getElementById('hist-srt-list');
+    const srtPreviewBlock = document.getElementById('hist-srt-preview-block');
+    const srtPreviewLabel = document.getElementById('hist-srt-preview-label');
+    const srtPreviewPre   = document.getElementById('hist-srt-preview-content');
+    const srtPreviewDl    = document.getElementById('hist-srt-preview-dl');
+    const srtRestoreBtn   = document.getElementById('hist-srt-restore-btn');
+    let   srtPreviewName  = null;
+    let   srtPreviewText  = null;
 
     function renderSRT(files) {
         if (!files.length) {
@@ -140,6 +147,7 @@ export async function init() {
             <div class="hist-row" data-file="${ea(name)}">
                 <span class="hist-name" title="${ea(name)}">${eh(name)}</span>
                 <div class="hist-btns">
+                    <button class="hist-btn accent" data-action="open"     title="Предпросмотр">${ICONS.eye}</button>
                     <button class="hist-btn"        data-action="download" title="Скачать">${ICONS.download}</button>
                     <button class="hist-btn"        data-action="rename"   title="Переименовать">${ICONS.edit}</button>
                     <button class="hist-btn danger" data-action="delete"   title="Удалить">${ICONS.trash}</button>
@@ -164,6 +172,26 @@ export async function init() {
         const name   = row.dataset.file;
         const action = btn.dataset.action;
 
+        if (action === 'open') {
+            try {
+                const r = await getJSON(`/api/subtitles/${encodeURIComponent(name)}`);
+                srtPreviewName = name;
+                srtPreviewText = r.content;
+                if (srtPreviewLabel) srtPreviewLabel.textContent = name;
+                if (srtPreviewPre)   srtPreviewPre.textContent  = r.content;
+                if (srtPreviewDl) {
+                    const blob = new Blob([r.content], { type: 'text/plain' });
+                    if (srtPreviewDl._blobUrl) URL.revokeObjectURL(srtPreviewDl._blobUrl);
+                    srtPreviewDl._blobUrl = URL.createObjectURL(blob);
+                    srtPreviewDl.href     = srtPreviewDl._blobUrl;
+                    srtPreviewDl.download = name;
+                }
+                if (srtPreviewBlock) srtPreviewBlock.hidden = false;
+                srtListEl.querySelectorAll('.hist-row').forEach(r2 =>
+                    r2.classList.toggle('active', r2.dataset.file === name));
+            } catch (e2) { toast(e2.message, 'err'); }
+            return;
+        }
         if (action === 'download') {
             try {
                 const r = await getJSON(`/api/subtitles/${encodeURIComponent(name)}`);
@@ -196,6 +224,14 @@ export async function init() {
             } catch (e2) { toast(e2.message, 'err'); }
             return;
         }
+    });
+
+    srtRestoreBtn && srtRestoreBtn.addEventListener('click', () => {
+        if (!srtPreviewText) return;
+        events.dispatchEvent(new CustomEvent('srt-restore', {
+            detail: { content: srtPreviewText, filename: srtPreviewName },
+        }));
+        toast('Субтитры восстановлены в редактор', 'ok');
     });
 
     // ── Video ─────────────────────────────────────────────────────────────────

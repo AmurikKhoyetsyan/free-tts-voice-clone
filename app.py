@@ -22,6 +22,8 @@ from routers import voices, xtts, synthesis, history
 from routers import subtitles as subtitles_router
 from routers import video as video_router
 from routers import log_router
+from routers import templates as templates_router
+from routers import transcribe as transcribe_router
 from core.log import server_log
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +62,8 @@ app.include_router(history.router)
 app.include_router(subtitles_router.router)
 app.include_router(video_router.router)
 app.include_router(log_router.router)
+app.include_router(templates_router.router)
+app.include_router(transcribe_router.router)
 
 
 @app.get("/")

@@ -7,6 +7,7 @@ import { init as initSaved } from './tabs/saved.js';
 import { init as initHistory } from './tabs/history.js';
 import { init as initSubtitles } from './tabs/subtitles.js';
 import { init as initVideo } from './tabs/video.js';
+import { init as initTemplates } from './tabs/templates.js';
 
 import { log } from './logger.js';
 
@@ -21,6 +22,7 @@ const inits = {
     history:   initHistory,
     subtitles: initSubtitles,
     video:     initVideo,
+    templates: initTemplates,
 };
 
 const ready = new Set();

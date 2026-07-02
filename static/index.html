@@ -32,6 +32,7 @@
     <button class="tab" data-tab="history">История</button>
     <button class="tab" data-tab="subtitles">Субтитры</button>
     <button class="tab" data-tab="video">Видео</button>
+    <button class="tab" data-tab="templates">Шаблоны</button>
 </nav>
 
 <main class="app-main">
@@ -159,7 +160,21 @@
 
         <!-- Subtitles -->
         <div class="hist-section" id="hist-section-subtitles" hidden>
-            <div id="hist-srt-list" class="hist-list"></div>
+            <div class="grid-2">
+                <div class="col">
+                    <div id="hist-srt-list" class="hist-list"></div>
+                </div>
+                <div class="col">
+                    <div class="result-block" id="hist-srt-preview-block" hidden style="position:static">
+                        <div class="result-label" id="hist-srt-preview-label">Предпросмотр</div>
+                        <pre id="hist-srt-preview-content" class="srt-preview-content"></pre>
+                        <div class="row gap" style="margin-top:8px">
+                            <a id="hist-srt-preview-dl" class="btn" download>Скачать</a>
+                            <button id="hist-srt-restore-btn" class="btn btn-primary">Восстановить в редактор</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Video -->
@@ -210,6 +225,26 @@
                     </div>
                 </div>
                 <button class="btn btn-primary" id="sub-generate">Создать субтитры</button>
+
+                <!-- Распознавание речи (Whisper) -->
+                <div class="sub-panel" id="sub-transcribe-panel" style="margin-top:12px">
+                    <div class="result-label">Распознавание речи (Whisper)</div>
+                    <div id="sub-audio-upload-mount"></div>
+                    <div class="row gap" style="margin-top:4px">
+                        <select id="sub-lang" class="fill">
+                            <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                            <option value="uk">Українська</option>
+                            <option value="de">Deutsch</option>
+                            <option value="fr">Français</option>
+                            <option value="es">Español</option>
+                            <option value="zh">中文</option>
+                            <option value="ja">日本語</option>
+                        </select>
+                        <button id="sub-transcribe-btn" class="btn btn-primary">Распознать речь</button>
+                    </div>
+                    <div class="status" id="sub-transcribe-status"></div>
+                </div>
             </div>
             <div class="col">
                 <div class="sub-panel">
@@ -223,6 +258,17 @@
                         <button class="btn btn-primary" id="sub-save-btn">Сохранить .srt</button>
                     </div>
                     <div class="status" id="sub-status"></div>
+                </div>
+
+                <!-- Сохранённые субтитры -->
+                <div class="sub-panel" id="sub-saved-panel" style="margin-top:12px">
+                    <div class="row gap" style="justify-content:space-between;align-items:center;margin-bottom:4px">
+                        <div class="result-label" style="margin:0">Сохранённые субтитры</div>
+                        <button class="btn" id="sub-saved-refresh" title="Обновить">↻</button>
+                    </div>
+                    <div class="srt-saved-list" id="sub-saved-list">
+                        <div class="sub-empty">Загрузка…</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -248,7 +294,8 @@
                     <div class="result-label" style="margin-bottom:6px">Редактор субтитров</div>
                     <div id="vid-sub-editor" class="sub-editor"></div>
                     <div class="row gap" id="vid-sub-editor-save-row" style="margin-top:8px;display:none">
-                        <button class="btn btn-primary" id="vid-sub-save-btn" style="flex:1">Сохранить SRT</button>
+                        <input type="text" id="vid-sub-project-name" class="fill" placeholder="Имя проекта (без расширения)…">
+                        <button class="btn btn-primary" id="vid-sub-save-btn">Сохранить версию</button>
                     </div>
                     <div class="status" id="vid-sub-editor-status"></div>
                 </div>
@@ -430,6 +477,22 @@
                     </div>
                 </div>
 
+                <!-- Субтитры из видео (Whisper) -->
+                <div class="vid-style-panel" id="vid-transcribe-panel" style="margin-top:8px">
+                    <div class="result-label" style="margin-bottom:6px">Субтитры из видео (Whisper)</div>
+                    <div class="row gap">
+                        <select id="vid-transcribe-lang" class="fill">
+                            <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                            <option value="uk">Українська</option>
+                            <option value="de">Deutsch</option>
+                            <option value="fr">Français</option>
+                        </select>
+                        <button id="vid-transcribe-btn" class="btn btn-primary" disabled title="Загрузите видео">Распознать речь</button>
+                    </div>
+                    <div class="status" id="vid-transcribe-status"></div>
+                </div>
+
                 <!-- Прогресс FFmpeg -->
                 <div id="vid-progress-wrap" hidden>
                     <div class="vid-progress-bar">
@@ -440,6 +503,11 @@
                         <summary class="vid-log-toggle">Лог FFmpeg</summary>
                         <div id="vid-ffmpeg-log" class="vid-ffmpeg-log"></div>
                     </details>
+                </div>
+                <div class="row gap" style="margin-top:8px;align-items:center">
+                    <div id="vid-tmpl-mount" style="flex:1"></div>
+                    <button class="btn" id="vid-tmpl-apply-btn">Применить</button>
+                    <button class="btn" id="vid-save-style-btn" title="Сохранить текущий стиль как шаблон">+ Шаблон</button>
                 </div>
                 <button class="btn btn-primary" id="vid-go" style="margin-top:8px;width:100%">Добавить субтитры (FFmpeg)</button>
             </div>
@@ -457,6 +525,7 @@
                     <div class="vid-timestamp" id="vid-timestamp">00:00:00,000 / 00:00:00,000</div>
                     <div id="vid-waveform-wrap" class="vid-waveform-wrap" hidden>
                         <canvas id="vid-waveform" class="vid-waveform-canvas"></canvas>
+                        <div id="vid-wave-tooltip" class="vid-wave-tooltip" hidden></div>
                     </div>
                     <div id="vid-sub-sel" class="vid-sub-sel" hidden>
                         <span class="vid-sub-sel-label">Субтитр <b id="vid-sub-sel-idx">—</b></span>
@@ -491,6 +560,36 @@
         </div>
     </section>
 
+
+    <!-- ============== Шаблоны ============== -->
+    <section class="tab-panel" data-panel="templates">
+        <div class="grid-2">
+            <div class="col">
+                <div class="sub-panel">
+                    <div class="result-label">Сохранить стиль как шаблон</div>
+                    <div class="row gap">
+                        <input type="text" id="tmpl-save-name" class="fill" placeholder="Название шаблона…">
+                        <button class="btn btn-primary" id="tmpl-save-btn">Сохранить</button>
+                    </div>
+                    <div class="status" id="tmpl-save-status"></div>
+                </div>
+                <div class="sub-panel" style="margin-top:12px">
+                    <div class="row gap" style="justify-content:space-between;align-items:center">
+                        <div class="result-label" style="margin:0">Шаблоны</div>
+                        <button class="btn" id="tmpl-refresh-btn" title="Обновить">↻</button>
+                    </div>
+                    <div id="tmpl-list"></div>
+                    <div class="status" id="tmpl-status"></div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="sub-panel" id="tmpl-preview-panel" hidden>
+                    <div class="result-label">Предпросмотр шаблона</div>
+                    <div id="tmpl-preview-settings" class="tmpl-settings-grid"></div>
+                </div>
+            </div>
+        </div>
+    </section>
 
 </main>
 
