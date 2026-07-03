@@ -343,6 +343,7 @@ def burn_subtitles(
     preview_width:   int   = Form(0),
     karaoke_enabled: str   = Form("false"),
     karaoke_color:   str   = Form("ffdd00"),
+    text_align:      str   = Form("center"),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -356,7 +357,9 @@ def burn_subtitles(
     out_name = os.path.splitext(os.path.basename(video_name))[0] + "_sub." + ext
     out_path = os.path.join(VIDEO_OUT, out_name)
 
-    align = {"bottom": 2, "top": 8, "middle": 5}.get(position, 2)
+    _pos_row = {"bottom": 0, "middle": 1, "top": 2}.get(position, 0)
+    _h_col   = {"left": 0, "center": 1, "right": 2}.get(text_align, 1)
+    align    = [[1, 2, 3], [4, 5, 6], [7, 8, 9]][_pos_row][_h_col]
 
     # Build style dict
     style_dict: dict = {

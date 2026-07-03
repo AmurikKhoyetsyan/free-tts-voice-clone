@@ -124,10 +124,28 @@ export async function init() {
     bindRN(shadowSizeR, shadowSizeN, () => applySubStyle());
 
     // Other controls → live preview
-    [fontFamilyEl, colorEl, boldEl, italicEl, underlineEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
+    [fontFamilyEl, colorEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
      outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl,
      lineHeightEl, maxWidthEl, marginVEl, subWidthEl, subHeightEl]
         .forEach(el => el && el.addEventListener('change', applySubStyle));
+
+    // Bold / Italic / Underline toggle buttons
+    [boldEl, italicEl, underlineEl].forEach(btn => {
+        btn && btn.addEventListener('click', () => {
+            btn.classList.toggle('active');
+            applySubStyle();
+        });
+    });
+
+    // Text-align radio buttons
+    const alignBtns = document.querySelectorAll('.fmt-align-btn');
+    alignBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            alignBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            applySubStyle();
+        });
+    });
 
     // ── Position inputs ───────────────────────────────────────────────────────
     posXEl.addEventListener('input', () => {
@@ -421,9 +439,10 @@ export async function init() {
         fd.append('font_family',   fontFamilyEl.value);
         fd.append('font_size',     fontSizeN.value);
         fd.append('font_color',    colorEl.value.replace('#', ''));
-        fd.append('bold',          String(boldEl.checked));
-        fd.append('italic',        String(italicEl    ? italicEl.checked    : false));
-        fd.append('underline',     String(underlineEl ? underlineEl.checked : false));
+        fd.append('bold',          String(boldEl.classList.contains('active')));
+        fd.append('italic',        String(italicEl?.classList.contains('active')    ?? false));
+        fd.append('underline',     String(underlineEl?.classList.contains('active') ?? false));
+        fd.append('text_align',    [...alignBtns].find(b => b.classList.contains('active'))?.dataset.align || 'center');
         fd.append('position',      posPresetEl.value);
         fd.append('bg_opacity',    bgOpacityN.value);
         fd.append('bg_color',      bgColorEl.value.replace('#', ''));
@@ -527,6 +546,7 @@ export async function init() {
         if (!srtName) {
             currentSubs = null;
             overlay.innerHTML = '';
+            applySubStyle();
             renderVidSubEditor([], null);
             return;
         }
@@ -769,9 +789,11 @@ export async function init() {
         const fontSize     = parseFloat(fontSizeN ? fontSizeN.value : fontSizeR.value) || 24;
         const fontFamily   = fontFamilyEl.value;
         const textColor    = colorEl.value;
-        const bold         = boldEl.checked;
-        const italic       = italicEl    && italicEl.checked;
-        const underline    = underlineEl && underlineEl.checked;
+        const bold         = boldEl.classList.contains('active');
+        const italic       = italicEl?.classList.contains('active')    ?? false;
+        const underline    = underlineEl?.classList.contains('active') ?? false;
+        const activeAlign  = [...alignBtns].find(b => b.classList.contains('active'));
+        const textAlign    = activeAlign?.dataset.align || 'center';
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
         const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
@@ -793,10 +815,13 @@ export async function init() {
         overlay.style.fontWeight      = bold      ? '700'       : '400';
         overlay.style.fontStyle       = italic    ? 'italic'    : 'normal';
         overlay.style.textDecoration  = underline ? 'underline' : 'none';
+        overlay.style.textAlign       = textAlign;
         overlay.style.lineHeight      = lineH;
         overlay.style.wordSpacing     = '0.4em';
         overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
-        overlay.style.cursor          = overlay.innerHTML ? 'move' : 'default';
+        const hasText = overlay.textContent.trim() !== '';
+        overlay.style.cursor          = hasText ? 'move' : 'default';
+        overlay.style.pointerEvents   = hasText ? 'auto' : 'none';
 
         // Width: convert video-space px → % of vid-inner (which matches video aspect via CSS)
         if (subW > 0) {
@@ -1112,9 +1137,19 @@ export async function init() {
             setVal('vid-font-size',      s.fontSize);
             setVal('vid-font-size-n',    s.fontSize);
             setVal('vid-font-color',     s.fontColor);
-            setCheck('vid-bold',         s.bold);
-            setCheck('vid-italic',       s.italic);
-            setCheck('vid-underline',    s.underline);
+            function setFmt(id, val) {
+                const el = document.getElementById(id);
+                if (!el || val === undefined) return;
+                el.classList.toggle('active', Boolean(val));
+            }
+            setFmt('vid-bold',      s.bold);
+            setFmt('vid-italic',    s.italic);
+            setFmt('vid-underline', s.underline);
+            if (s.textAlign) {
+                alignBtns.forEach(b => b.classList.remove('active'));
+                const al = document.getElementById(`vid-align-${s.textAlign}`);
+                if (al) al.classList.add('active');
+            }
             setVal('vid-position',       s.position);
             setVal('vid-bg-opacity',     s.bgOpacity);
             setVal('vid-bg-opacity-n',   s.bgOpacity);
@@ -1165,9 +1200,10 @@ export async function init() {
             fontFamily:     (g('vid-font-family')    || {}).value   || 'Arial',
             fontSize:       (g('vid-font-size-n')    || {}).value   || '24',
             fontColor:      (g('vid-font-color')     || {}).value   || '#ffffff',
-            bold:           (g('vid-bold')           || {}).checked || false,
-            italic:         (g('vid-italic')         || {}).checked || false,
-            underline:      (g('vid-underline')      || {}).checked || false,
+            bold:           g('vid-bold')?.classList.contains('active')       || false,
+            italic:         g('vid-italic')?.classList.contains('active')     || false,
+            underline:      g('vid-underline')?.classList.contains('active')  || false,
+            textAlign:      [...alignBtns].find(b => b.classList.contains('active'))?.dataset.align || 'center',
             position:       (g('vid-position')       || {}).value   || 'bottom',
             posX:           (g('vid-pos-x')          || {}).value   || '',
             posY:           (g('vid-pos-y')          || {}).value   || '',
