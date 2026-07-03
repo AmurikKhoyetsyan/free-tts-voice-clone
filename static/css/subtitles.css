@@ -701,3 +701,62 @@ input[type="number"].vsp-num {
     border: 1px solid var(--border);
 }
 .tmpl-settings-grid b { color: var(--text); }
+
+/* ── Format / align toggle buttons ────────────────────────────────────────── */
+.fmt-btns {
+    display: flex;
+    gap: 2px;
+}
+
+.fmt-btn {
+    width: 30px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color .12s, color .12s, background .12s;
+    padding: 0;
+    flex-shrink: 0;
+    line-height: 1;
+    font-style: normal;
+    text-decoration: none;
+}
+
+.fmt-btn b, .fmt-btn i, .fmt-btn u {
+    pointer-events: none;
+    font-size: 13px;
+    line-height: 1;
+}
+
+.fmt-btn:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+    background: var(--surface);
+}
+
+.fmt-btn.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.fmt-btn svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.drag-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    align-self: flex-end;
+    padding-bottom: 3px;
+}

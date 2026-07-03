@@ -365,18 +365,14 @@
                                 <input type="color" id="vid-font-color" value="#ffffff">
                                 <span>Цвет</span>
                             </label>
-                            <label class="vsp-field vsp-inline">
-                                <input type="checkbox" id="vid-bold">
-                                <span>Жирный</span>
-                            </label>
-                            <label class="vsp-field vsp-inline">
-                                <input type="checkbox" id="vid-italic">
-                                <span>Курсив</span>
-                            </label>
-                            <label class="vsp-field vsp-inline">
-                                <input type="checkbox" id="vid-underline">
-                                <span>Подчёрк</span>
-                            </label>
+                            <div class="vsp-field">
+                                <span>Стиль</span>
+                                <div class="fmt-btns">
+                                    <button class="fmt-btn" id="vid-bold" title="Жирный"><b>B</b></button>
+                                    <button class="fmt-btn" id="vid-italic" title="Курсив"><i>I</i></button>
+                                    <button class="fmt-btn" id="vid-underline" title="Подчёркнутый"><u>U</u></button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -401,6 +397,17 @@
                             </label>
                             <button class="btn btn-sm" id="vid-apply-preset">Применить</button>
                             <button class="btn btn-sm" id="vid-reset-pos" hidden>↺</button>
+                        </div>
+                        <div class="vsp-row" style="margin-top:8px;align-items:center;gap:16px">
+                            <div class="vsp-field">
+                                <span>Выравнивание</span>
+                                <div class="fmt-btns">
+                                    <button class="fmt-btn fmt-align-btn" id="vid-align-left" data-align="left" title="По левому краю"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg></button>
+                                    <button class="fmt-btn fmt-align-btn active" id="vid-align-center" data-align="center" title="По центру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
+                                    <button class="fmt-btn fmt-align-btn" id="vid-align-right" data-align="right" title="По правому краю"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg></button>
+                                </div>
+                            </div>
+                            <span class="drag-hint">↖ Перетащи текст в превью</span>
                         </div>
                     </div>
 
