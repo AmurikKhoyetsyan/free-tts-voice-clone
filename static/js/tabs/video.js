@@ -1,7 +1,7 @@
 import { getJSON, postJSON, synthesizeStream } from '../api.js';
 import { FileUpload } from '../file-upload.js';
 import { CustomSelect } from '../custom-select.js';
-import { log, logLocal } from '../logger.js';
+import { log } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
 import { ICONS } from '../icons.js';
@@ -60,7 +60,7 @@ export async function init() {
     const progressWrap   = document.getElementById('vid-progress-wrap');
     const progressFill   = document.getElementById('vid-progress-fill');
     const progressPct    = document.getElementById('vid-progress-pct');
-    const ffmpegLog      = document.getElementById('vid-ffmpeg-log');
+    const reprocessBtn   = document.getElementById('vid-reprocess-btn');
     const timestampEl    = document.getElementById('vid-timestamp');
     const waveformWrap   = document.getElementById('vid-waveform-wrap');
     const waveformCanvas = document.getElementById('vid-waveform');
@@ -482,8 +482,7 @@ export async function init() {
         statusEl.textContent = 'Обработка…';
         progressWrap.hidden  = false;
         progressFill.style.width = '3%';
-        progressPct.textContent  = '0%';
-        ffmpegLog.textContent    = '';
+        if (progressPct) progressPct.textContent = '0%';
 
         const fd = new FormData();
         fd.append('video_name',    uploadedVideoName);
@@ -526,21 +525,18 @@ export async function init() {
                     if (val !== null && isFinite(val)) {
                         const pct = Math.round(val * 100);
                         progressFill.style.width = pct + '%';
-                        progressPct.textContent  = pct + '%';
+                        if (progressPct) progressPct.textContent = pct + '%';
                     }
                     if (desc) {
                         statusEl.textContent = parseFfmpegDesc(desc) || 'Обработка…';
-                        appendLog(desc);
-                        logLocal('[FFmpeg] ' + desc, 'info');
                     }
                 },
                 done(payload) {
                     _processing = false;
                     progressFill.style.width = '100%';
-                    progressPct.textContent  = '100%';
+                    if (progressPct) progressPct.textContent = '100%';
                     statusEl.textContent     = '✓ Готово';
                     statusEl.className       = 'status ok';
-                    showPreview(payload.video_url);
 
                     let finalName = payload.filename;
                     const selFmt  = formatEl.value;
@@ -549,6 +545,7 @@ export async function init() {
                     processedVideoUrl  = payload.video_url;
                     processedVideoName = finalName;
                     updateDownloadBtn();
+                    if (reprocessBtn) reprocessBtn.hidden = false;
                     log('Видео готово: ' + payload.filename, 'done');
                     toast('Видео обработано!', 'ok');
                     events.dispatchEvent(new CustomEvent('video-changed'));
@@ -561,9 +558,8 @@ export async function init() {
                     statusEl.className   = 'status err';
                     toast(msg, 'err');
                     log(msg, 'err');
-                    appendLog('ERROR: ' + msg);
                     progressFill.style.width = '0%';
-                    progressPct.textContent  = '0%';
+                    if (progressPct) progressPct.textContent = '0%';
                 },
             }
         );
@@ -591,18 +587,19 @@ export async function init() {
         dlBtn.disabled    = false;
     }
 
+    reprocessBtn && reprocessBtn.addEventListener('click', () => {
+        processedVideoUrl  = null;
+        processedVideoName = null;
+        reprocessBtn.hidden = true;
+        updateDownloadBtn();
+        dlBtn.click();
+    });
+
     function _triggerDownload(url, name) {
         const a = Object.assign(document.createElement('a'), { href: url, download: name });
         document.body.appendChild(a);
         a.click();
         a.remove();
-    }
-
-    function appendLog(line) {
-        const d = document.createElement('div');
-        d.textContent = line;
-        ffmpegLog.appendChild(d);
-        ffmpegLog.scrollTop = ffmpegLog.scrollHeight;
     }
 
     function parseFfmpegDesc(raw) {
@@ -1151,7 +1148,7 @@ export async function init() {
             {
                 progress(val, desc) {
                     if (vidTranscribeStatus) {
-                        vidTranscribeStatus.textContent = desc || 'Обработка…';
+                        vidTranscribeStatus.textContent = 'Обработка…';
                         vidTranscribeStatus.className = 'status busy';
                     }
                 },

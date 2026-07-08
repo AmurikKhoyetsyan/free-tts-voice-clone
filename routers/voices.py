@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core import voice_manager as vm
+from core.log import app_log
 from core.schemas import RenameBody
 from services.tts_windows import WIN_VOICE_NAMES, WIN_DEFAULT
 
@@ -17,14 +18,10 @@ class SaveVoiceBody(BaseModel):
     name: str
 
 
-# ── Windows voices ────────────────────────────────────────────────────────────
-
 @router.get("/windows")
 async def list_windows_voices():
     return {"voices": WIN_VOICE_NAMES, "default": WIN_DEFAULT}
 
-
-# ── Saved voices ──────────────────────────────────────────────────────────────
 
 @router.get("/saved")
 async def list_saved_voices():
@@ -52,7 +49,9 @@ async def save_saved_voice(audio: UploadFile = File(...), name: str = Form(...))
         except OSError:
             pass
     if not ok:
+        app_log(f"Voice save failed: {name} — {msg}", "ERROR", "VoiceManager")
         raise HTTPException(400, msg)
+    app_log(f"Voice saved: {name}", "INFO", "VoiceManager")
     return {"status": msg, "voices": vm.get_saved_voices(), "urls": json.loads(vm.voices_urls_json())}
 
 
@@ -60,7 +59,9 @@ async def save_saved_voice(audio: UploadFile = File(...), name: str = Form(...))
 async def rename_saved_voice(name: str, body: RenameBody):
     ok, result = vm.rename_voice(name, body.new_name)
     if not ok:
+        app_log(f"Voice rename failed: {name} → {body.new_name} — {result}", "ERROR", "VoiceManager")
         raise HTTPException(400, result)
+    app_log(f"Voice renamed: {name} → {result}", "INFO", "VoiceManager")
     return {"new_name": result, "voices": vm.get_saved_voices(), "urls": json.loads(vm.voices_urls_json())}
 
 
@@ -69,4 +70,5 @@ async def delete_saved_voice(name: str):
     ok, msg = vm.delete_voice(name)
     if not ok:
         raise HTTPException(404, msg)
+    app_log(f"Voice deleted: {name}", "INFO", "VoiceManager")
     return {"status": msg, "voices": vm.get_saved_voices(), "urls": json.loads(vm.voices_urls_json())}
