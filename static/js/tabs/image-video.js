@@ -786,6 +786,8 @@ export async function init() {
     }
 
     // ── Preview ───────────────────────────────────────────────────────────────
+    let _lastSubStart = null;
+
     function renderPreview() {
         const info = clipAtTime(S.currentTime);
         if (!info) {
@@ -832,6 +834,7 @@ export async function init() {
             _renderSubOverlay(activeSub);
         } else {
             subOverlay.style.display = 'none';
+            _lastSubStart = null;
         }
     }
 
@@ -865,6 +868,16 @@ export async function init() {
         } else {
             subOverlay.style.background = 'none';
             subOverlay.style.padding    = '0';
+        }
+
+        // Animation — retrigger when subtitle changes
+        const animType = sub.animation || 'none';
+        const subKey = (sub.id || '') + ':' + (sub.start ?? 0);
+        if (subKey !== _lastSubStart) {
+            _lastSubStart = subKey;
+            subOverlay.style.animation = 'none';
+            void subOverlay.offsetWidth; // force reflow to restart animation
+            subOverlay.style.animation = animType !== 'none' ? `sub-${animType} 0.4s ease forwards` : '';
         }
     }
 

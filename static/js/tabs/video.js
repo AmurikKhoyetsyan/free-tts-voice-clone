@@ -95,6 +95,7 @@ export async function init() {
     let processedVideoUrl  = null;
     let processedVideoName = null;
     let _processing        = false;
+    let _lastSubStart      = -1;
 
     // ── FFmpeg check ──────────────────────────────────────────────────────────
     try {
@@ -987,6 +988,18 @@ export async function init() {
                     overlay.style.bottom    = marginVPct + '%';
                     overlay.style.transform = 'translateX(-50%)';
             }
+        }
+
+        // Subtitle animation — retrigger when subtitle changes
+        const animType = sub?.animation || 'none';
+        if (!sub) {
+            _lastSubStart = -1;
+            overlay.style.animation = '';
+        } else if (sub.start !== _lastSubStart) {
+            _lastSubStart = sub.start;
+            overlay.style.animation = 'none';
+            void overlay.offsetWidth; // force reflow to restart animation
+            overlay.style.animation = animType !== 'none' ? `sub-${animType} 0.4s ease forwards` : '';
         }
 
         // Single-line preference: keep on one line if text fits, wrap only if it doesn't
