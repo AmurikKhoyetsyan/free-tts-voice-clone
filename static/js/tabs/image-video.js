@@ -144,8 +144,11 @@ function _syncAudio(t, force = false) {
         } else {
             el.volume = Math.max(0, Math.min(1, track.volume ?? 1));
         }
+        const speed = track.speed ?? 1;
+        if (el.playbackRate !== speed) el.playbackRate = speed;
         const trackT = t - (track.startOffset || 0);
         if (trackT < 0) { if (!el.paused) el.pause(); continue; }
+        if (track.duration !== undefined && trackT >= track.duration) { if (!el.paused) el.pause(); continue; }
         if (force || Math.abs(el.currentTime - trackT) > 0.3) {
             el.currentTime = Math.max(0, trackT);
         }
@@ -580,16 +583,16 @@ export async function init() {
 
             div.innerHTML = `${thumbHtml}
                 <div class="ive-tl-clip-label">${eh(clip.original || clip.file)}</div>
-                ${clip.type === 'video' ? '<div class="ive-tl-clip-badge">▶</div>' : ''}
+                ${clip.type === 'video' ? '<div class="ive-tl-clip-badge">▶</div><div class="ive-tl-clip-resize-left"></div>' : ''}
                 <div class="ive-tl-clip-resize" data-ridx="${i}"></div>`;
 
             div.addEventListener('click', e => {
-                if (e.target.closest('.ive-tl-clip-resize')) return;
+                if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
                 _selectClip(i);
             });
             div.setAttribute('draggable', 'true');
             div.addEventListener('dragstart', e => {
-                if (e.target.closest('.ive-tl-clip-resize')) { e.preventDefault(); return; }
+                if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) { e.preventDefault(); return; }
                 e.dataTransfer.setData('cidx', i);
                 setTimeout(() => div.classList.add('dragging'), 0);
             });
@@ -615,6 +618,23 @@ export async function init() {
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
+            // Left trim handle — video only (shifts in-point, preserves out-point)
+            if (clip.type === 'video') {
+                div.querySelector('.ive-tl-clip-resize-left')?.addEventListener('mousedown', e => {
+                    e.stopPropagation(); e.preventDefault();
+                    const sx = e.clientX, sTrimIn = clip.trimIn || 0, sDur = clip.duration;
+                    const outPt = sTrimIn + sDur;
+                    const onMove = ev => {
+                        const newIn = Math.max(0, Math.round((sTrimIn + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
+                        clip.trimIn   = newIn;
+                        clip.duration = Math.max(0.5, Math.round((outPt - newIn) * 10) / 10);
+                        S.dirty = true; renderTimeline(); renderMediaList(); if (i === S.selIdx) renderProps();
+                    };
+                    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                });
+            }
             videoTrackEl.appendChild(div);
             cursor += dur;
         });
@@ -639,7 +659,8 @@ export async function init() {
             row.className = 'ive-audio-row-inner';
             row.style.width = contentW + 'px';
             const offsetPx = (track.startOffset || 0) * S.pxPerSec;
-            const itemW    = Math.max(40, contentW - offsetPx);
+            const trackDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+            const itemW    = Math.max(40, trackDur * S.pxPerSec);
             const item     = document.createElement('div');
             item.className = `ive-tl-audio-item${i === S.selAudioIdx ? ' sel' : ''}`;
             item.dataset.aidx = i;
@@ -649,7 +670,46 @@ export async function init() {
             canvas.className = 'ive-waveform-canvas';
             canvas.width  = Math.max(40, itemW); canvas.height = rowH - 4;
             item.appendChild(canvas);
-            item.addEventListener('click', () => { S.selAudioIdx = i; S.activeTab = 'slide'; renderTimeline(); renderProps(); });
+            // Left handle: moves startOffset (keeps out-point)
+            const lh = document.createElement('div');
+            lh.className = 'ive-tl-audio-resize ive-tl-audio-resize-left';
+            item.appendChild(lh);
+            // Right handle: changes duration
+            const rh = document.createElement('div');
+            rh.className = 'ive-tl-audio-resize ive-tl-audio-resize-right';
+            item.appendChild(rh);
+
+            item.addEventListener('click', e => {
+                if (e.target.closest('.ive-tl-audio-resize')) return;
+                S.selAudioIdx = i; S.activeTab = 'slide'; renderTimeline(); renderProps();
+            });
+            lh.addEventListener('mousedown', e => {
+                e.stopPropagation(); e.preventDefault();
+                const sx = e.clientX, sOff = track.startOffset || 0;
+                const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - sOff);
+                const outPt = sOff + sDur;
+                const onMove = ev => {
+                    const dx = (ev.clientX - sx) / S.pxPerSec;
+                    track.startOffset = Math.max(0, Math.round((sOff + dx) * 10) / 10);
+                    track.duration    = Math.max(0.5, Math.round((outPt - track.startOffset) * 10) / 10);
+                    S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
+                };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+            rh.addEventListener('mousedown', e => {
+                e.stopPropagation(); e.preventDefault();
+                const sx = e.clientX;
+                const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+                const onMove = ev => {
+                    track.duration = Math.max(0.5, Math.round((sDur + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
+                    S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
+                };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
             row.appendChild(item);
             audioTrackEl.appendChild(row);
             drawWaveform(canvas, track.fileUrl);
@@ -726,13 +786,16 @@ export async function init() {
                 previewVideo.load();
             }
             previewVideo.style.display = 'block';
+            const videoTime = local + (clip.trimIn || 0);
+            const vSpeed    = clip.speed ?? 1;
+            if (previewVideo.playbackRate !== vSpeed) previewVideo.playbackRate = vSpeed;
             if (!S.isPlaying) {
-                if (Math.abs(previewVideo.currentTime - local) > 0.15) previewVideo.currentTime = local;
+                if (Math.abs(previewVideo.currentTime - videoTime) > 0.15) previewVideo.currentTime = videoTime;
                 if (!previewVideo.paused) previewVideo.pause();
             } else {
                 if (previewVideo.paused) previewVideo.play().catch(() => {});
                 // Keep video in sync with project time
-                if (Math.abs(previewVideo.currentTime - local) > 0.3) previewVideo.currentTime = local;
+                if (Math.abs(previewVideo.currentTime - videoTime) > 0.3) previewVideo.currentTime = videoTime;
             }
         }
 
@@ -805,6 +868,17 @@ export async function init() {
                 <label class="ive-label">Fade Out (с)<input class="ive-input" id="acp-fo" type="number" min="0" max="30" step="0.5" value="${track.fadeOut || 0}"></label>
             </div>
             <label class="ive-label">Начало (с)<input class="ive-input" id="acp-offset" type="number" min="0" step="0.5" value="${track.startOffset || 0}"></label>
+            <label class="ive-label">Длит. (с)<input class="ive-input" id="acp-dur" type="number" min="0" step="0.5" placeholder="авто" value="${track.duration !== undefined ? track.duration : ''}"></label>
+            <label class="ive-label">Скорость
+                <select class="ive-select" id="acp-speed">
+                    <option value="0.5"${(track.speed??1)===0.5?' selected':''}>0.5×</option>
+                    <option value="0.75"${(track.speed??1)===0.75?' selected':''}>0.75×</option>
+                    <option value="1"${(!track.speed||track.speed===1)?' selected':''}>1× (норма)</option>
+                    <option value="1.25"${(track.speed??1)===1.25?' selected':''}>1.25×</option>
+                    <option value="1.5"${(track.speed??1)===1.5?' selected':''}>1.5×</option>
+                    <option value="2"${(track.speed??1)===2?' selected':''}>2×</option>
+                </select>
+            </label>
             <button class="btn btn-sm danger" id="acp-del" style="margin-top:6px">Удалить дорожку</button>
         </div>`;
 
@@ -820,6 +894,17 @@ export async function init() {
         $('acp-fi').addEventListener('change', e => { track.fadeIn = parseFloat(e.target.value) || 0; S.dirty = true; });
         $('acp-fo').addEventListener('change', e => { track.fadeOut = parseFloat(e.target.value) || 0; S.dirty = true; });
         $('acp-offset').addEventListener('change', e => { track.startOffset = parseFloat(e.target.value) || 0; S.dirty = true; renderTimeline(); });
+        $('acp-dur').addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            track.duration = isFinite(v) && v > 0 ? v : undefined;
+            S.dirty = true; renderTimeline();
+        });
+        $('acp-speed').addEventListener('change', e => {
+            track.speed = parseFloat(e.target.value) || 1;
+            S.dirty = true;
+            const el = _audioEls.get(track.id);
+            if (el) el.playbackRate = track.speed;
+        });
         $('acp-del').addEventListener('click', () => { S.audioTracks.splice(idx, 1); S.selAudioIdx = -1; S.dirty = true; renderAll(); });
     }
 
@@ -839,6 +924,21 @@ export async function init() {
             <label class="ive-label" id="pv-tdur-row" ${(!clip.transition?.type || clip.transition.type === 'none') ? 'hidden' : ''}>Длит. перехода (с)
                 <input class="ive-input" id="pv-trans-dur" type="number" min="0.1" max="4" step="0.1" value="${clip.transition?.duration || 0.5}">
             </label>
+            <label class="ive-label">Скорость
+                <select class="ive-select" id="pv-speed">
+                    <option value="0.25"${(clip.speed??1)===0.25?' selected':''}>0.25×</option>
+                    <option value="0.5"${(clip.speed??1)===0.5?' selected':''}>0.5×</option>
+                    <option value="0.75"${(clip.speed??1)===0.75?' selected':''}>0.75×</option>
+                    <option value="1"${(!clip.speed||clip.speed===1)?' selected':''}>1× (норма)</option>
+                    <option value="1.25"${(clip.speed??1)===1.25?' selected':''}>1.25×</option>
+                    <option value="1.5"${(clip.speed??1)===1.5?' selected':''}>1.5×</option>
+                    <option value="2"${(clip.speed??1)===2?' selected':''}>2×</option>
+                    <option value="4"${(clip.speed??1)===4?' selected':''}>4×</option>
+                </select>
+            </label>
+            ${isVideo ? `<label class="ive-label">Вход (с)
+                <input class="ive-input" id="pv-trimin" type="number" min="0" step="0.1" value="${clip.trimIn || 0}" title="Начальная точка в файле">
+            </label>` : ''}
             ${!isVideo ? `<div class="ive-label ive-row-btns" style="margin-top:4px">
                 <span>Изображение</span>
                 <input type="file" id="pv-replace-file" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
@@ -874,6 +974,16 @@ export async function init() {
                     S.dirty = true; log('Изображение заменено: ' + d.original, 'done'); renderAll();
                 } catch (err) { toast(err.message, 'err'); }
                 $('pv-replace-file').value = '';
+            });
+        }
+        $('pv-speed').addEventListener('change', e => {
+            clip.speed = parseFloat(e.target.value) || 1;
+            S.dirty = true; renderPreview();
+        });
+        if (isVideo) {
+            $('pv-trimin')?.addEventListener('change', e => {
+                clip.trimIn = Math.max(0, parseFloat(e.target.value) || 0);
+                S.dirty = true; renderPreview();
             });
         }
         $('pv-remove-clip').addEventListener('click', () => { _deleteSelectedClip(); });
