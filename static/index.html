@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="/static/css/file-upload.css">
     <link rel="stylesheet" href="/static/css/loader.css">
     <link rel="stylesheet" href="/static/css/subtitles.css">
+    <link rel="stylesheet" href="/static/css/image-video.css">
     <style>
         .logs-layout {
             display: flex;
@@ -95,6 +96,7 @@
         <button class="tab" data-tab="subtitles">Субтитры</button>
         <button class="tab" data-tab="video">Видео</button>
         <button class="tab" data-tab="logs">Логи</button>
+        <button class="tab" data-tab="imgvid">Image Video</button>
     </nav>
 
     <main class="app-main">
@@ -752,6 +754,160 @@
                     <textarea id="logs-editor" class="logs-editor" hidden spellcheck="false"></textarea>
                     <div id="logs-empty" class="vid-empty">Выберите файл из списка</div>
                 </div>
+            </div>
+        </section>
+
+        <!-- ══════════════ Image Video Editor ══════════════ -->
+        <section class="tab-panel" data-panel="imgvid">
+            <div class="ive-layout">
+
+                <!-- Left sidebar -->
+                <aside class="ive-sidebar">
+                    <div class="ive-sidebar-inner">
+
+                        <!-- Projects -->
+                        <div class="ive-panel">
+                            <div class="ive-panel-hdr">
+                                <span>Проекты</span>
+                                <button class="btn btn-sm" id="ive-new-btn">+ Новый</button>
+                            </div>
+                            <div id="ive-projects-list" class="ive-projects-list"></div>
+                        </div>
+
+                        <!-- Media library -->
+                        <div class="ive-panel">
+                            <div class="ive-panel-hdr">
+                                <span>Медиа</span>
+                                <div style="display:flex;gap:3px">
+                                    <button class="btn btn-sm" id="ive-add-images-btn" title="Добавить фото">🖼</button>
+                                    <button class="btn btn-sm" id="ive-add-video-btn"  title="Добавить видео">🎬</button>
+                                    <button class="btn btn-sm" id="ive-add-audio-btn"  title="Добавить аудио">♪</button>
+                                </div>
+                            </div>
+                            <input type="file" id="ive-image-input" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple hidden>
+                            <input type="file" id="ive-video-input" accept=".mp4,.mov,.mkv,.webm,.avi" multiple hidden>
+                            <input type="file" id="ive-audio-input" accept=".mp3,.wav,.aac,.flac,.ogg" hidden>
+                            <div id="ive-media-list" class="ive-media-list"></div>
+                            <div class="ive-global-dur-row">
+                                <label style="flex:1;font-size:11px">Длит. (с)</label>
+                                <input class="ive-input" type="number" id="ive-global-dur" min="0.5" max="60" step="0.5" value="3" style="width:52px">
+                                <button class="btn btn-sm" id="ive-apply-dur-btn">↻</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </aside>
+
+                <!-- Center: preview + timeline + export -->
+                <div class="ive-main">
+
+                    <!-- Preview -->
+                    <div class="ive-preview-wrap">
+                        <div class="ive-preview-inner" id="ive-preview-inner">
+                            <img    id="ive-preview-img"   style="display:none;max-width:100%;max-height:100%" alt="">
+                            <video  id="ive-preview-video" style="display:none;max-width:100%;max-height:100%" muted playsinline></video>
+                            <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
+                            <div class="ive-preview-empty" id="ive-preview-empty">
+                                <div>Добавьте медиафайлы</div>
+                                <div style="font-size:11px;opacity:.45;margin-top:4px">или перетащите сюда</div>
+                            </div>
+                        </div>
+                        <!-- Playback controls -->
+                        <div class="ive-playback-bar">
+                            <button class="ive-ctrl-btn" id="ive-play-btn" title="Воспроизвести">▶</button>
+                            <button class="ive-ctrl-btn" id="ive-stop-btn" title="Стоп">■</button>
+                            <input  type="range" class="ive-seek-bar" id="ive-seek-bar" min="0" max="100" step="0.1" value="0">
+                            <span class="ive-time-display" id="ive-time-display">0:00 / 0:00</span>
+                        </div>
+                    </div>
+
+                    <!-- Multi-track Timeline -->
+                    <div class="ive-timeline-wrap">
+                        <div class="ive-timeline-hdr">
+                            <span style="font-size:11px;color:var(--text-dim)">Timeline</span>
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <span style="font-size:10px;color:var(--text-dim)">Ctrl+колесо = зум</span>
+                                <span id="ive-total-dur" style="color:var(--accent);font-size:11px">0.0с</span>
+                            </div>
+                        </div>
+                        <div class="ive-timeline-outer">
+                            <!-- Fixed labels column -->
+                            <div class="ive-track-labels-col" id="ive-track-labels-col">
+                                <div class="ive-ruler-lbl-space"></div>
+                                <div class="ive-track-lbl" id="ive-video-lbl">VIDEO</div>
+                                <div class="ive-track-lbl" id="ive-audio-lbl">AUDIO</div>
+                                <div class="ive-track-lbl" id="ive-subs-lbl">SUBS</div>
+                            </div>
+                            <!-- Scrollable track area -->
+                            <div class="ive-tracks-scroll" id="ive-tracks-scroll">
+                                <div class="ive-tracks-inner" id="ive-tracks-inner">
+                                    <div class="ive-time-ruler" id="ive-time-ruler"></div>
+                                    <div class="ive-track-row ive-video-row" id="ive-video-track"></div>
+                                    <div class="ive-audio-rows"  id="ive-audio-track"></div>
+                                    <div class="ive-track-row ive-subs-row"  id="ive-subtitle-track"></div>
+                                    <div class="ive-playhead" id="ive-playhead" style="display:none"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Export bar -->
+                    <div class="ive-export-bar">
+                        <div class="ive-project-name-wrap">
+                            <input class="ive-input" type="text" id="ive-project-name" placeholder="Название проекта" value="Новый проект">
+                            <button class="btn" id="ive-save-btn">Сохранить</button>
+                        </div>
+                        <div class="ive-export-settings">
+                            <select class="ive-select" id="ive-exp-format">
+                                <option value="mp4">MP4 (H.264)</option>
+                                <option value="mov">MOV</option>
+                                <option value="mkv">MKV</option>
+                                <option value="webm">WebM</option>
+                            </select>
+                            <select class="ive-select" id="ive-exp-res">
+                                <option value="1920x1080">1920×1080</option>
+                                <option value="1280x720">1280×720</option>
+                                <option value="3840x2160">4K</option>
+                                <option value="1080x1920">1080×1920 (вертик.)</option>
+                                <option value="1080x1080">1080×1080 (квадрат)</option>
+                            </select>
+                            <select class="ive-select" id="ive-exp-fps">
+                                <option value="24">24 fps</option>
+                                <option value="30" selected>30 fps</option>
+                                <option value="60">60 fps</option>
+                            </select>
+                            <select class="ive-select" id="ive-exp-quality">
+                                <option value="low">Низкое</option>
+                                <option value="medium" selected>Среднее</option>
+                                <option value="high">Высокое</option>
+                            </select>
+                            <button class="btn accent" id="ive-export-btn">▶ Экспорт</button>
+                        </div>
+                        <div id="ive-export-progress" hidden>
+                            <div class="ive-export-progress">
+                                <div class="vid-progress-bar" style="position:relative;flex:1">
+                                    <div class="vid-progress-fill" id="ive-prog-fill"></div>
+                                    <span id="ive-prog-pct" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-dim)">0%</span>
+                                </div>
+                                <span class="status" id="ive-export-status"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Right: properties -->
+                <aside class="ive-props" id="ive-props">
+                    <div class="ive-props-tabs">
+                        <button class="ive-ptab active" data-ptab="slide">Клип</button>
+                        <button class="ive-ptab" data-ptab="subs">Субтитры</button>
+                        <button class="ive-ptab" data-ptab="effects">Эффекты</button>
+                    </div>
+                    <div id="ive-props-body" class="ive-props-body">
+                        <div class="ive-props-placeholder">Выберите клип</div>
+                    </div>
+                </aside>
+
             </div>
         </section>
 
