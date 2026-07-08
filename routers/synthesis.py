@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core import voice_manager as vm
+from core.log import app_log
 from services.tts_windows import synthesize as win_synthesize
 from services import tts_xtts
 from services.sse import run_synth_stream
@@ -32,6 +33,7 @@ async def synthesize_windows(body: WinSynthBody):
         raise HTTPException(400, "Введите текст")
     if not body.voice:
         raise HTTPException(400, "Выберите голос")
+    app_log(f"Windows TTS synthesis started. Voice: {body.voice}, chars: {len(body.text)}", "INFO", "WindowsTTS")
     gen = run_synth_stream(win_synthesize, (body.text, body.voice, body.rate, body.volume))
     return StreamingResponse(gen, media_type="text/event-stream")
 
@@ -47,6 +49,8 @@ async def synthesize_xtts(
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.write(await audio.read())
     tmp.close()
+
+    app_log(f"XTTS synthesis started. Language: {language}, chars: {len(text)}", "INFO", "XTTS")
 
     def _wrapped(text, audio_path, lang, progress=None):
         try:
@@ -67,6 +71,8 @@ async def synthesize_saved(body: SavedSynthBody):
         raise HTTPException(400, "Введите текст")
     voice_path = vm.load_voice(body.voice)
     if not voice_path:
+        app_log(f"Saved voice not found: {body.voice}", "ERROR", "XTTS")
         raise HTTPException(404, f"Голос «{body.voice}» не найден")
+    app_log(f"Saved voice synthesis started. Voice: {body.voice}, language: {body.language}", "INFO", "XTTS")
     gen = run_synth_stream(tts_xtts.synthesize, (body.text, voice_path, body.language))
     return StreamingResponse(gen, media_type="text/event-stream")

@@ -212,13 +212,5 @@ export const progress = {
     },
 };
 
-// click logging
-document.addEventListener('click', (e) => {
-    const el = e.target.closest('button, [role="button"], a, label, .tab, .hist-btn');
-    if (!el) return;
-    if (el.closest('#log-panel') || el.id === 'log-toggle') return;
-    const txt = (el.getAttribute('aria-label') || el.textContent || el.title || el.id || '').trim();
-    if (txt) log('клик: ' + txt.slice(0, 70), 'click');
-}, true);
 
 log('логгер запущен');

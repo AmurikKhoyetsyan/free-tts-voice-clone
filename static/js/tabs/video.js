@@ -1,7 +1,7 @@
 import { getJSON, postJSON, synthesizeStream } from '../api.js';
 import { FileUpload } from '../file-upload.js';
 import { CustomSelect } from '../custom-select.js';
-import { log, logLocal } from '../logger.js';
+import { log } from '../logger.js';
 import { toast } from '../toast.js';
 import { events } from '../events.js';
 import { ICONS } from '../icons.js';
@@ -15,8 +15,6 @@ export async function init() {
     const vidEmpty       = document.getElementById('vid-empty');
     const overlay        = document.getElementById('vid-sub-overlay');
     const statusEl       = document.getElementById('vid-status');
-    const goBtn          = document.getElementById('vid-go');
-    const exportBlock    = document.getElementById('vid-export-block');
     const formatEl       = document.getElementById('vid-format');
     const dlBtn          = document.getElementById('vid-download-btn');
 
@@ -62,7 +60,7 @@ export async function init() {
     const progressWrap   = document.getElementById('vid-progress-wrap');
     const progressFill   = document.getElementById('vid-progress-fill');
     const progressPct    = document.getElementById('vid-progress-pct');
-    const ffmpegLog      = document.getElementById('vid-ffmpeg-log');
+    const reprocessBtn   = document.getElementById('vid-reprocess-btn');
     const timestampEl    = document.getElementById('vid-timestamp');
     const waveformWrap   = document.getElementById('vid-waveform-wrap');
     const waveformCanvas = document.getElementById('vid-waveform');
@@ -94,14 +92,17 @@ export async function init() {
     let selectedSubIdx    = -1;
     let currentSrtName    = null;
     let vidDuration        = 0;
+    let processedVideoUrl  = null;
+    let processedVideoName = null;
+    let _processing        = false;
 
     // ── FFmpeg check ──────────────────────────────────────────────────────────
     try {
         const s = await getJSON('/api/video/ffmpeg-status');
         if (!s.available) {
             ffwarnEl.style.display = 'block';
-            goBtn.disabled = true;
-            goBtn.title = 'FFmpeg не установлен';
+            dlBtn.disabled = true;
+            dlBtn.title = 'FFmpeg не установлен';
         }
     } catch (_) {}
 
@@ -256,12 +257,15 @@ export async function init() {
         async onChange(file) {
             if (!file) {
                 uploadedVideoName = null;
+                processedVideoUrl = null;
+                processedVideoName = null;
                 vidInner.style.display = 'none';
                 vidEmpty.style.display = 'block';
                 overlay.innerHTML = '';
                 videoNatW = videoNatH = 0;
                 if (frameSizeEl) frameSizeEl.textContent = '';
                 if (vidTranscribeBtn) vidTranscribeBtn.disabled = true;
+                updateDownloadBtn();
                 return;
             }
             const fd = new FormData();
@@ -270,7 +274,10 @@ export async function init() {
                 const r    = await fetch('/api/video/upload', { method: 'POST', body: fd });
                 const data = await r.json();
                 uploadedVideoName = data.name;
+                processedVideoUrl = null;
+                processedVideoName = null;
                 showPreview(data.url);
+                updateDownloadBtn();
                 if (vidTranscribeBtn) vidTranscribeBtn.disabled = false;
             } catch (e) {
                 toast('Ошибка загрузки видео: ' + e.message, 'err');
@@ -384,8 +391,11 @@ export async function init() {
     const srtSel = new CustomSelect(document.getElementById('vid-srt-mount'), {
         placeholder: 'Выберите SRT файл…',
         async onChange(val) {
+            processedVideoUrl = null;
+            processedVideoName = null;
             if (uploadedVideoName) showPreview(`/api/video/file/${encodeURIComponent(uploadedVideoName)}`);
             await loadSRTForOverlay(val || null);
+            updateDownloadBtn();
         },
     });
 
@@ -412,26 +422,68 @@ export async function init() {
                 await refreshSRTList();
                 srtSel.setValue(r.name, true);
                 toast('SRT загружен: ' + r.name, 'ok');
+                log('SRT загружен: ' + r.name, 'done');
             } catch (e) {
                 toast('Ошибка загрузки SRT: ' + e.message, 'err');
             }
         },
     });
 
-    // ── Burn subtitles ────────────────────────────────────────────────────────
-    goBtn.addEventListener('click', async () => {
-        const srtName = srtSel.value;   // srtSel has no getValue() — use .value directly
-        if (!uploadedVideoName) { toast('Загрузите видео', 'warn'); return; }
-        if (!srtName)           { toast('Выберите SRT файл', 'warn'); return; }
+    // ── Download / Auto-burn ──────────────────────────────────────────────────
+    dlBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        if (_processing) return;
 
-        goBtn.disabled       = true;
-        exportBlock.hidden   = true;
-        statusEl.className   = 'status busy';
-        statusEl.textContent = 'Обработка…';
+        if (processedVideoUrl) {
+            _triggerDownload(processedVideoUrl, processedVideoName || 'video.mp4');
+            return;
+        }
+
+        if (!uploadedVideoName) { toast('Загрузите видео', 'warn'); return; }
+
+        const editorHasSubs = currentSubs && currentSubs.length > 0 &&
+                              currentSubs.some(s => s.text && s.text.trim());
+        const selectedSrt   = srtSel.value;
+
+        if (!editorHasSubs && !selectedSrt) {
+            _triggerDownload(`/api/video/file/${encodeURIComponent(uploadedVideoName)}`, uploadedVideoName);
+            return;
+        }
+
+        let finalSrtName = selectedSrt;
+
+        if (editorHasSubs) {
+            const toSave = currentSubs.filter(s => s.text && s.text.trim())
+                                      .map((s, i) => ({ ...s, index: i + 1 }));
+            const content  = subsToSRTV(toSave);
+            const now = new Date();
+            const p   = n => String(n).padStart(2, '0');
+            const autoName = `_dl_${now.getFullYear()}${p(now.getMonth()+1)}${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+            try {
+                const r  = await postJSON('/api/subtitles', { name: autoName, content });
+                finalSrtName = r.name;
+            } catch (err) {
+                toast('Ошибка сохранения субтитров: ' + err.message, 'err');
+                return;
+            }
+        }
+
+        if (!finalSrtName) {
+            _triggerDownload(`/api/video/file/${encodeURIComponent(uploadedVideoName)}`, uploadedVideoName);
+            return;
+        }
+
+        await _runBurn(finalSrtName);
+    });
+
+    async function _runBurn(srtName) {
+        _processing = true;
+        updateDownloadBtn();
+        statusEl.textContent = '';
+        statusEl.className   = 'status';
         progressWrap.hidden  = false;
         progressFill.style.width = '3%';
-        progressPct.textContent  = '0%';
-        ffmpegLog.textContent    = '';
+        if (progressPct) progressPct.textContent = '0%';
 
         const fd = new FormData();
         fd.append('video_name',    uploadedVideoName);
@@ -457,13 +509,12 @@ export async function init() {
         fd.append('output_height', String(outputH));
         fd.append('resize_mode',   document.getElementById('vid-resize-mode').value);
         fd.append('max_width_pct', maxWidthEl.value);
-        fd.append('margin_v',     marginVEl  ? marginVEl.value  : '10');
-        fd.append('sub_width_px', subWidthEl  ? subWidthEl.value  : '0');
+        fd.append('margin_v',      marginVEl  ? marginVEl.value  : '10');
+        fd.append('sub_width_px',  subWidthEl  ? subWidthEl.value  : '0');
         fd.append('sub_height_px', subHeightEl ? subHeightEl.value : '0');
-        // Pixel position (empty string = use alignment preset)
-        fd.append('pos_x_px', posXpx !== null ? String(posXpx) : '');
-        fd.append('pos_y_px', posYpx !== null ? String(posYpx) : '');
-        fd.append('preview_width',   String(Math.round(vidInner.offsetWidth)));
+        fd.append('pos_x_px',      posXpx !== null ? String(posXpx) : '');
+        fd.append('pos_y_px',      posYpx !== null ? String(posYpx) : '');
+        fd.append('preview_width', String(Math.round(vidInner.offsetWidth)));
         fd.append('karaoke_enabled', String(karaokeEnEl ? karaokeEnEl.checked : false));
         fd.append('karaoke_color',   karaokeColorEl ? karaokeColorEl.value.replace('#', '') : 'ffdd00');
 
@@ -475,79 +526,87 @@ export async function init() {
                     if (val !== null && isFinite(val)) {
                         const pct = Math.round(val * 100);
                         progressFill.style.width = pct + '%';
-                        progressPct.textContent  = pct + '%';
-                    }
-                    if (desc) {
-                        statusEl.textContent = parseFfmpegDesc(desc) || 'Обработка…';
-                        appendLog(desc);
-                        logLocal('[FFmpeg] ' + desc, 'info');
+                        if (progressPct) progressPct.textContent = pct + '%';
                     }
                 },
                 done(payload) {
-                    goBtn.disabled = false;
-                    progressFill.style.width = '100%';
-                    progressPct.textContent  = '100%';
+                    _processing = false;
+                    progressWrap.hidden      = true;
                     statusEl.textContent     = '✓ Готово';
                     statusEl.className       = 'status ok';
-                    showPreview(payload.video_url);
 
                     let finalName = payload.filename;
                     const selFmt  = formatEl.value;
                     if (selFmt) finalName = finalName.replace(/\.[^.]+$/, '') + '.' + selFmt;
 
-                    dlBtn.href = payload.video_url;
-                    dlBtn.setAttribute('download', finalName);
-                    dlBtn.onclick = null;
-                    exportBlock.hidden = false;
+                    processedVideoUrl  = payload.video_url;
+                    processedVideoName = finalName;
+                    updateDownloadBtn();
+                    if (reprocessBtn) reprocessBtn.hidden = false;
                     log('Видео готово: ' + payload.filename, 'done');
                     toast('Видео обработано!', 'ok');
                     events.dispatchEvent(new CustomEvent('video-changed'));
+                    _triggerDownload(payload.video_url, finalName);
                 },
                 error(msg) {
-                    goBtn.disabled       = false;
+                    _processing = false;
+                    updateDownloadBtn();
                     statusEl.textContent = msg;
                     statusEl.className   = 'status err';
                     toast(msg, 'err');
                     log(msg, 'err');
-                    appendLog('ERROR: ' + msg);
-                    progressFill.style.width = '0%';
-                    progressPct.textContent  = '0%';
+                    progressWrap.hidden = true;
                 },
             }
         );
-    });
-
-    function appendLog(line) {
-        const d = document.createElement('div');
-        d.textContent = line;
-        ffmpegLog.appendChild(d);
-        ffmpegLog.scrollTop = ffmpegLog.scrollHeight;
     }
 
-    function parseFfmpegDesc(raw) {
-        if (!raw) return '';
-        const frame = raw.match(/frame=\s*(\d+)/);
-        const fps   = raw.match(/fps=\s*([\d.]+)/);
-        const time  = raw.match(/time=(\d+:\d+:\d+[.,]\d+)/);
-        const speed = raw.match(/speed=([\d.]+x)/);
-        if (frame || time) {
-            const parts = [];
-            if (frame) parts.push(`кадр ${frame[1]}`);
-            if (fps)   parts.push(`${parseFloat(fps[1])} fps`);
-            if (time)  parts.push(time[1]);
-            if (speed) parts.push(speed[1]);
-            return parts.join('  ·  ');
+    function updateDownloadBtn() {
+        if (_processing) {
+            dlBtn.textContent = 'Обработка…';
+            dlBtn.disabled    = true;
+            return;
         }
-        return raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
+        if (processedVideoUrl) {
+            dlBtn.textContent = 'Скачать ещё раз';
+            dlBtn.disabled    = false;
+            return;
+        }
+        if (!uploadedVideoName) {
+            dlBtn.textContent = 'Скачать';
+            dlBtn.disabled    = false;
+            return;
+        }
+        const hasEditorSubs = currentSubs && currentSubs.some(s => s.text && s.text.trim());
+        const hasSrtSel     = !!srtSel.value;
+        dlBtn.textContent = (hasEditorSubs || hasSrtSel) ? 'Обработать и скачать' : 'Скачать (оригинал)';
+        dlBtn.disabled    = false;
+    }
+
+    reprocessBtn && reprocessBtn.addEventListener('click', () => {
+        processedVideoUrl  = null;
+        processedVideoName = null;
+        reprocessBtn.hidden = true;
+        updateDownloadBtn();
+        dlBtn.click();
+    });
+
+    function _triggerDownload(url, name) {
+        const a = Object.assign(document.createElement('a'), { href: url, download: name });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     }
 
     // ── Subtitle overlay ──────────────────────────────────────────────────────
     async function loadSRTForOverlay(srtName) {
+        processedVideoUrl = null;
         if (!srtName) {
             currentSubs = null;
             overlay.innerHTML = '';
             applySubStyle();
             renderVidSubEditor([], null);
+            updateDownloadBtn();
             return;
         }
         try {
@@ -556,6 +615,7 @@ export async function init() {
             renderVidSubEditor(currentSubs, srtName);
         } catch (_) { currentSubs = null; }
         updateOverlay();
+        updateDownloadBtn();
     }
 
     function renderVidSubEditor(subs, srtName) {
@@ -618,6 +678,8 @@ export async function init() {
                     updateOverlay();
                     if (selectedSubIdx === i) updateSubInfoPanel();
                     drawWaveform(vidPreview.currentTime);
+                    processedVideoUrl = null;
+                    updateDownloadBtn();
                 }
             };
             const syncDur = () => {
@@ -630,6 +692,8 @@ export async function init() {
                     updateOverlay();
                     if (selectedSubIdx === i) updateSubInfoPanel();
                     drawWaveform(vidPreview.currentTime);
+                    processedVideoUrl = null;
+                    updateDownloadBtn();
                 }
             };
 
@@ -640,6 +704,8 @@ export async function init() {
                 if (currentSubs[i]) currentSubs[i].text = tTxt.value;
                 updateOverlay();
                 if (selectedSubIdx === i) updateSubInfoPanel();
+                processedVideoUrl = null;
+                updateDownloadBtn();
             });
         });
 
@@ -667,6 +733,7 @@ export async function init() {
             try {
                 const r = await postJSON('/api/subtitles', { name: versionedName, content });
                 toast(r.status || 'Сохранено', 'ok');
+                log('Субтитры сохранены: ' + versionedName, 'done');
                 subEditorStatus.textContent = '✓ Версия: ' + versionedName;
                 subEditorStatus.className   = 'status ok';
                 events.dispatchEvent(new CustomEvent('subtitles-changed'));
@@ -1043,6 +1110,7 @@ export async function init() {
     }
 
     renderVidSubEditor([], null);
+    updateDownloadBtn();
 
     // ── Transcribe from video (Whisper) ───────────────────────────────────────
     vidTranscribeBtn && vidTranscribeBtn.addEventListener('click', async () => {
@@ -1060,7 +1128,7 @@ export async function init() {
             {
                 progress(val, desc) {
                     if (vidTranscribeStatus) {
-                        vidTranscribeStatus.textContent = desc || 'Обработка…';
+                        vidTranscribeStatus.textContent = 'Обработка…';
                         vidTranscribeStatus.className = 'status busy';
                     }
                 },

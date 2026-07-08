@@ -1,9 +1,9 @@
-import os, re, json, shutil, subprocess, tempfile, threading, queue, datetime
+import os, re, json, shutil, subprocess, tempfile, threading, queue
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from core.schemas import RenameBody
-from core.log import write_log
+from core.log import app_log, print_progress
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
@@ -82,6 +82,7 @@ def delete_history(name: str):
     if not os.path.exists(path):
         raise HTTPException(404, "Файл не найден")
     os.remove(path)
+    app_log(f"Video deleted: {name}", "INFO", "VideoService")
     return {"status": f"Удалено: {name}"}
 
 
@@ -100,6 +101,7 @@ def rename_history(name: str, body: RenameBody):
     if os.path.exists(new_path) and old_path != new_path:
         raise HTTPException(400, f"Имя занято: {new_name}")
     os.rename(old_path, new_path)
+    app_log(f"Video renamed: {name} → {new_name}", "INFO", "VideoService")
     return {"status": f"Переименовано: {name} → {new_name}", "name": new_name}
 
 
@@ -122,15 +124,21 @@ def _ass_time(sec: float) -> str:
 
 
 def _probe_duration(path: str) -> float:
-    try:
-        r = subprocess.run(
-            [FFPROBE, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
-            capture_output=True, text=True, timeout=10,
-        )
-        return float(r.stdout.strip())
-    except Exception:
-        return 0.0
+    # Try format-level duration first (works for MP4, MKV, AVI, etc.)
+    for entries in ("format=duration", "stream=duration"):
+        try:
+            r = subprocess.run(
+                [FFPROBE, "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", entries, "-of", "csv=p=0", path],
+                capture_output=True, text=True, timeout=10,
+            )
+            val = r.stdout.strip().splitlines()[0]
+            dur = float(val)
+            if dur > 0:
+                return dur
+        except Exception:
+            pass
+    return 0.0
 
 
 def _probe_dimensions(path: str) -> tuple:
@@ -497,8 +505,8 @@ def burn_subtitles(
                        "-vf", vf_chain,
                        *codec_args, tmp_out]
 
-                ts0 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                write_log(f"[{ts0}] [FFmpeg] cmd: {' '.join(cmd)}")
+                app_log(f"FFmpeg command: {' '.join(cmd)}", "INFO", "FFmpeg")
+                print(flush=True)  # blank line so \r progress bar has a clean line
                 q.put(("progress", 0.12, "Запуск FFmpeg…"))
                 try:
                     proc = subprocess.Popen(
@@ -523,14 +531,15 @@ def burn_subtitles(
                             if not line:
                                 continue
                             q.put(("log", line))
-                            write_log(f"[FFmpeg] {line}")
                             if "time=" in line and total_sec > 0:
                                 try:
                                     t_str = line.split("time=")[1].split()[0]
                                     if ":" in t_str and not t_str.startswith("-"):
                                         hh, mm, ss = t_str.split(":")
                                         done = int(hh) * 3600 + int(mm) * 60 + float(ss)
+                                        pct = int(min(95, done / total_sec * 100))
                                         q.put(("progress", min(0.95, done / total_sec), line))
+                                        print_progress(pct, "FFmpeg")
                                 except Exception:
                                     pass
                     # Flush any remaining bytes
@@ -538,11 +547,16 @@ def burn_subtitles(
                         q.put(("log", buf.decode("utf-8", errors="replace").strip()))
                     proc.wait()
                     if proc.returncode != 0:
+                        print(flush=True)  # end \r line
+                        app_log(f"FFmpeg error: return code {proc.returncode}", "ERROR", "FFmpeg")
                         q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))
                     elif not os.path.exists(tmp_out):
+                        print(flush=True)
                         q.put(("error", "FFmpeg не создал выходной файл"))
                     else:
+                        print_progress(100, "FFmpeg")
                         shutil.move(tmp_out, out_path)
+                        app_log(f"Video created: {os.path.basename(out_path)}", "INFO", "VideoService")
                         q.put(("done", out_name))
                 except FileNotFoundError:
                     q.put(("error", "FFmpeg не найден. Установите FFmpeg и добавьте в PATH."))
