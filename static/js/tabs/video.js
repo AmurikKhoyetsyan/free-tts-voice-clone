@@ -479,8 +479,8 @@ export async function init() {
     async function _runBurn(srtName) {
         _processing = true;
         updateDownloadBtn();
-        statusEl.className   = 'status busy';
-        statusEl.textContent = 'Обработка…';
+        statusEl.textContent = '';
+        statusEl.className   = 'status';
         progressWrap.hidden  = false;
         progressFill.style.width = '3%';
         if (progressPct) progressPct.textContent = '0%';
@@ -528,14 +528,10 @@ export async function init() {
                         progressFill.style.width = pct + '%';
                         if (progressPct) progressPct.textContent = pct + '%';
                     }
-                    if (desc) {
-                        statusEl.textContent = parseFfmpegDesc(desc) || 'Обработка…';
-                    }
                 },
                 done(payload) {
                     _processing = false;
-                    progressFill.style.width = '100%';
-                    if (progressPct) progressPct.textContent = '100%';
+                    progressWrap.hidden      = true;
                     statusEl.textContent     = '✓ Готово';
                     statusEl.className       = 'status ok';
 
@@ -559,8 +555,7 @@ export async function init() {
                     statusEl.className   = 'status err';
                     toast(msg, 'err');
                     log(msg, 'err');
-                    progressFill.style.width = '0%';
-                    if (progressPct) progressPct.textContent = '0%';
+                    progressWrap.hidden = true;
                 },
             }
         );
@@ -601,23 +596,6 @@ export async function init() {
         document.body.appendChild(a);
         a.click();
         a.remove();
-    }
-
-    function parseFfmpegDesc(raw) {
-        if (!raw) return '';
-        const frame = raw.match(/frame=\s*(\d+)/);
-        const fps   = raw.match(/fps=\s*([\d.]+)/);
-        const time  = raw.match(/time=(\d+:\d+:\d+[.,]\d+)/);
-        const speed = raw.match(/speed=([\d.]+x)/);
-        if (frame || time) {
-            const parts = [];
-            if (frame) parts.push(`кадр ${frame[1]}`);
-            if (fps)   parts.push(`${parseFloat(fps[1])} fps`);
-            if (time)  parts.push(time[1]);
-            if (speed) parts.push(speed[1]);
-            return parts.join('  ·  ');
-        }
-        return raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
     }
 
     // ── Subtitle overlay ──────────────────────────────────────────────────────

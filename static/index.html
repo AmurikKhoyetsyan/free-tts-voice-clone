@@ -660,14 +660,6 @@
                         <div class="status" id="vid-transcribe-status"></div>
                     </div>
 
-                    <!-- Прогресс FFmpeg -->
-                    <div id="vid-progress-wrap" hidden>
-                        <div class="vid-progress-bar" style="position:relative">
-                            <div class="vid-progress-fill" id="vid-progress-fill"></div>
-                            <span id="vid-progress-pct"
-                                  style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-dim)">0%</span>
-                        </div>
-                    </div>
                     <div class="row gap" style="margin-top:8px;align-items:center">
                         <div id="vid-tmpl-mount" style="flex:1"></div>
                         <button class="btn" id="vid-tmpl-apply-btn">Применить</button>
@@ -685,6 +677,12 @@
                                 <div id="vid-sub-overlay" class="vid-sub-overlay"></div>
                             </div>
                             <div class="vid-empty" id="vid-empty">Загрузите видео для предпросмотра</div>
+                        </div>
+                        <div id="vid-progress-wrap" hidden style="margin-top:6px">
+                            <div class="vid-progress-bar" style="position:relative">
+                                <div class="vid-progress-fill" id="vid-progress-fill"></div>
+                                <span id="vid-progress-pct" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-dim)">0%</span>
+                            </div>
                         </div>
                         <div class="status" id="vid-status"></div>
                         <div class="vid-timestamp" id="vid-timestamp">00:00:00,000 / 00:00:00,000</div>
