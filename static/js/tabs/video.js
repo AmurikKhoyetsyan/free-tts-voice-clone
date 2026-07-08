@@ -519,6 +519,15 @@ export async function init() {
         fd.append('karaoke_enabled', String(karaokeEnEl ? karaokeEnEl.checked : false));
         fd.append('karaoke_color',   karaokeColorEl ? karaokeColorEl.value.replace('#', '') : 'ffdd00');
 
+        // Per-subtitle animation data (index → animation type)
+        if (currentSubs && currentSubs.length > 0) {
+            const animData = currentSubs.map((s, i) => ({
+                index: i + 1,
+                animation: s.animation || 'none',
+            }));
+            fd.append('subs_json', JSON.stringify(animData));
+        }
+
         await synthesizeStream(
             '/api/video/burn',
             { method: 'POST', body: fd },

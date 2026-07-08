@@ -154,8 +154,33 @@ def _probe_dimensions(path: str) -> tuple:
         return 1920, 1080
 
 
+def _make_ass_anim_tag(anim: str, pos_tag: str = "", dur_ms: int = 400) -> str:
+    """Return an ASS override-tag block for the requested animation type."""
+    if not anim or anim == "none":
+        return ""
+    dur  = str(dur_ms)
+    half = str(dur_ms // 2)
+    if anim == "fade-in":
+        return "{\\fad(" + dur + ",0)}"
+    if anim in ("slide-up", "slide-down"):
+        m = re.search(r"\\pos\((\d+),(\d+)\)", pos_tag)
+        if m:
+            x, y  = int(m.group(1)), int(m.group(2))
+            dy    = 30 if anim == "slide-up" else -30
+            return ("{\\an5\\fad(" + half + ",0)"
+                    "\\move(" + str(x) + "," + str(y + dy) + ","
+                              + str(x) + "," + str(y) + ",0," + dur + ")}")
+        return "{\\fad(" + half + ",0)}"
+    if anim == "zoom-in":
+        return "{\\fscx1\\fscy1\\t(0," + dur + ",\\fscx100\\fscy100)}"
+    if anim == "typewriter":
+        return "{\\fad(" + half + ",0)}"
+    return ""
+
+
 def _srt_to_ass(srt_content: str, style_dict: dict,
-                pos_tag: str = "", frame_w: int = 0, frame_h: int = 0) -> str:
+                pos_tag: str = "", frame_w: int = 0, frame_h: int = 0,
+                anim_map: dict = None) -> str:
     """Convert SRT to ASS with embedded style and optional \\pos / margins."""
     sd           = style_dict
     border_style = int(sd.get("BorderStyle", 1))
@@ -293,6 +318,10 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         if len(lines) < 3:
             continue
         try:
+            try:
+                sub_idx = int(lines[0].strip())
+            except ValueError:
+                sub_idx = 0
             start_s, end_s = lines[1].split(" --> ")
             text = "\\N".join(l for l in lines[2:] if l.strip())
             if karaoke_on:
@@ -301,15 +330,17 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                 if words:
                     cs   = max(1, round(dur * 100 / len(words)))
                     text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
+            anim     = (anim_map or {}).get(sub_idx, "none")
+            anim_tag = _make_ass_anim_tag(anim, pos_tag)
             t0 = _ass_time(s2sec(start_s))
             t1 = _ass_time(s2sec(end_s))
             events.append(
-                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{pos_tag}{text}"
+                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{pos_tag}{anim_tag}{text}"
             )
             if has_text_outline:
                 # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
                 events.append(
-                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{pos_tag}{text}"
+                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{pos_tag}{anim_tag}{text}"
                 )
         except Exception:
             continue
@@ -352,6 +383,7 @@ def burn_subtitles(
     karaoke_enabled: str   = Form("false"),
     karaoke_color:   str   = Form("ffdd00"),
     text_align:      str   = Form("center"),
+    subs_json:       str   = Form("[]"),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -359,6 +391,12 @@ def burn_subtitles(
         raise HTTPException(400, "Видео не найдено")
     if not os.path.exists(srt_src):
         raise HTTPException(400, "SRT файл не найден")
+
+    try:
+        _subs_list = json.loads(subs_json) if subs_json.strip() else []
+        anim_map   = {int(s.get("index", 0)): str(s.get("animation", "none")) for s in _subs_list}
+    except Exception:
+        anim_map = {}
 
     orig_ext = os.path.splitext(video_name)[1].lstrip(".") or "mp4"
     ext      = (output_format.strip().lstrip(".") or orig_ext).lower()
@@ -472,7 +510,7 @@ def burn_subtitles(
                 q.put(("progress", 0.10, "Конвертация субтитров…"))
                 with open(srt_src, encoding="utf-8") as f:
                     srt_content = f.read()
-                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw, fh)
+                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw, fh, anim_map=anim_map)
                 tmp_sub  = os.path.join(tmp, "sub.ass")
                 with open(tmp_sub, "w", encoding="utf-8", newline='\n') as f:
                     f.write(ass_text)
