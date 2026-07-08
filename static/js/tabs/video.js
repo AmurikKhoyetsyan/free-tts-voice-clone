@@ -422,6 +422,7 @@ export async function init() {
                 await refreshSRTList();
                 srtSel.setValue(r.name, true);
                 toast('SRT загружен: ' + r.name, 'ok');
+                log('SRT загружен: ' + r.name, 'done');
             } catch (e) {
                 toast('Ошибка загрузки SRT: ' + e.message, 'err');
             }
@@ -754,6 +755,7 @@ export async function init() {
             try {
                 const r = await postJSON('/api/subtitles', { name: versionedName, content });
                 toast(r.status || 'Сохранено', 'ok');
+                log('Субтитры сохранены: ' + versionedName, 'done');
                 subEditorStatus.textContent = '✓ Версия: ' + versionedName;
                 subEditorStatus.className   = 'status ok';
                 events.dispatchEvent(new CustomEvent('subtitles-changed'));

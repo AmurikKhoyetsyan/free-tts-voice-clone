@@ -121,6 +121,7 @@ export async function init() {
         try {
             const r = await putJSON(`/api/voices/saved/${encodeURIComponent(old)}`, { new_name: newName });
             toast(`Переименован: ${old} → ${r.new_name}`, 'ok');
+            log('Голос переименован: ' + old + ' → ' + r.new_name, 'done');
             await refresh(r.new_name);
             events.dispatchEvent(new CustomEvent('voices-changed'));
         } catch (e) {
@@ -140,6 +141,7 @@ export async function init() {
         try {
             const r = await del(`/api/voices/saved/${encodeURIComponent(name)}`);
             toast(r.status, 'ok');
+            log('Голос удалён: ' + name, 'done');
             if (!previewAudio.paused) previewAudio.pause();
             previewName = null;
             await refresh();

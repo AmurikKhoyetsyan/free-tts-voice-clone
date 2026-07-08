@@ -449,6 +449,7 @@ export async function init() {
             try {
                 await del(`/api/subtitles/${encodeURIComponent(name)}`);
                 toast('Удалено: ' + name, 'ok');
+                log('Субтитр удалён: ' + name, 'done');
                 events.dispatchEvent(new CustomEvent('subtitles-changed'));
                 await loadSavedList();
             } catch (err) {
