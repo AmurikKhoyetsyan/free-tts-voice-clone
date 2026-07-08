@@ -804,20 +804,44 @@
                     <!-- Preview -->
                     <div class="ive-preview-wrap">
                         <div class="ive-preview-inner" id="ive-preview-inner">
-                            <img    id="ive-preview-img"   style="display:none;max-width:100%;max-height:100%" alt="">
-                            <video  id="ive-preview-video" style="display:none;max-width:100%;max-height:100%" muted playsinline></video>
-                            <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
+                            <!-- Zoom-able content layer -->
+                            <div id="ive-preview-content" class="ive-preview-content">
+                                <img    id="ive-preview-img"   style="display:none" alt="">
+                                <video  id="ive-preview-video" style="display:none" muted playsinline></video>
+                                <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
+                            </div>
                             <div class="ive-preview-empty" id="ive-preview-empty">
                                 <div>Добавьте медиафайлы</div>
                                 <div style="font-size:11px;opacity:.45;margin-top:4px">или перетащите сюда</div>
                             </div>
                         </div>
-                        <!-- Playback controls -->
-                        <div class="ive-playback-bar">
-                            <button class="ive-ctrl-btn" id="ive-play-btn" title="Воспроизвести">▶</button>
-                            <button class="ive-ctrl-btn" id="ive-stop-btn" title="Стоп">■</button>
-                            <input  type="range" class="ive-seek-bar" id="ive-seek-bar" min="0" max="100" step="0.1" value="0">
-                            <span class="ive-time-display" id="ive-time-display">0:00 / 0:00</span>
+                        <!-- Professional transport bar -->
+                        <div class="ive-transport-bar">
+                            <div class="ive-transport-btns">
+                                <button class="ive-tb-btn" id="ive-go-start"   title="К началу (Home)"></button>
+                                <button class="ive-tb-btn" id="ive-rewind-btn" title="−5с (J)"></button>
+                                <button class="ive-tb-btn ive-tb-play"  id="ive-play-btn"  title="Воспроизведение (Space)"></button>
+                                <button class="ive-tb-btn ive-tb-pause" id="ive-pause-btn" title="Пауза (Space)"></button>
+                                <button class="ive-tb-btn ive-tb-stop"  id="ive-stop-btn"  title="Стоп"></button>
+                                <button class="ive-tb-btn" id="ive-fwd-btn"    title="+5с (L)"></button>
+                                <button class="ive-tb-btn" id="ive-go-end"     title="К концу (End)"></button>
+                            </div>
+                            <input type="range" class="ive-seek-bar" id="ive-seek-bar" min="0" max="10000" step="1" value="0">
+                            <div class="ive-time-group">
+                                <span class="ive-cur-time" id="ive-cur-time">0:00.0</span>
+                                <span class="ive-time-sep">/</span>
+                                <span class="ive-tot-time" id="ive-tot-time">0:00.0</span>
+                            </div>
+                            <div class="ive-zoom-group">
+                                <select class="ive-zoom-mode-sel" id="ive-zoom-mode">
+                                    <option value="fit">Fit</option>
+                                    <option value="original">100%</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <span class="ive-zoom-display" id="ive-zoom-display">Fit</span>
+                                <input type="number" class="ive-zoom-pct-input" id="ive-zoom-pct" min="10" max="800" step="5" value="100" style="display:none">
+                                <span class="ive-zoom-pct-sign" id="ive-zoom-sign" style="display:none">%</span>
+                            </div>
                         </div>
                     </div>
 
@@ -826,7 +850,7 @@
                         <div class="ive-timeline-hdr">
                             <span style="font-size:11px;color:var(--text-dim)">Timeline</span>
                             <div style="display:flex;align-items:center;gap:8px">
-                                <span style="font-size:10px;color:var(--text-dim)">Ctrl+колесо = зум</span>
+                                <span style="font-size:10px;color:var(--text-dim)">Ctrl+↕ = зум</span>
                                 <span id="ive-total-dur" style="color:var(--accent);font-size:11px">0.0с</span>
                             </div>
                         </div>
