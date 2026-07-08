@@ -109,17 +109,20 @@
 }
 .ive-preview-inner.ive-drag-over { outline: 2px dashed var(--accent); }
 
-/* Zoom-able content wrapper */
+/* Zoom-able content wrapper — sized explicitly by JS to match the selected resolution aspect ratio */
 .ive-preview-content {
     position: relative;
-    display: flex; align-items: center; justify-content: center;
+    background: #000;
     transform-origin: center center;
     will-change: transform;
+    overflow: hidden;
+    flex-shrink: 0;
 }
 .ive-preview-content img,
 .ive-preview-content video {
     display: block;
-    max-width: 100%; max-height: 100%;
+    width: 100%; height: 100%;
+    object-fit: contain;
     pointer-events: none;
 }
 

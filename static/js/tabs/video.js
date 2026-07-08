@@ -642,6 +642,8 @@ export async function init() {
             return;
         }
 
+        const animOpts = ['none','fade-in','slide-up','slide-down','typewriter','zoom-in'];
+
         subEditorEl.innerHTML = mkAdd(-1) + subs.map((s, i) => `
             <div class="sub-row${selectedSubIdx === i ? ' sub-row-selected' : ''}" data-index="${i}">
                 <div>
@@ -657,6 +659,16 @@ export async function init() {
                     <button class="sub-del-btn" title="Удалить">${ICONS.trash}</button>
                 </div>
                 <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
+                <div class="sub-row-style">
+                    <button class="sub-style-btn${s.bold      ? ' active':''}" data-sub-style="bold"      data-si="${i}" title="Жирный"><b>B</b></button>
+                    <button class="sub-style-btn${s.italic    ? ' active':''}" data-sub-style="italic"    data-si="${i}" title="Курсив"><i>I</i></button>
+                    <button class="sub-style-btn${s.underline ? ' active':''}" data-sub-style="underline" data-si="${i}" title="Подчёркнутый"><u>U</u></button>
+                    <select class="sub-anim-sel" data-sub-field="animation" data-si="${i}" title="Анимация">
+                        ${animOpts.map(a => `<option value="${a}"${(s.animation||'none')===a?' selected':''}>${a}</option>`).join('')}
+                    </select>
+                    <input class="sub-pos-inp" type="number" data-sub-field="posX" data-si="${i}" placeholder="X px" title="X позиция (пкс, пусто=авто)" value="${s.posX != null ? s.posX : ''}">
+                    <input class="sub-pos-inp" type="number" data-sub-field="posY" data-si="${i}" placeholder="Y px" title="Y позиция (пкс, пусто=авто)" value="${s.posY != null ? s.posY : ''}">
+                </div>
             </div>
             ${mkAdd(i)}
         `).join('');
@@ -750,7 +762,35 @@ export async function init() {
     }
 
     // ── Video sub editor delegation (set up once) ─────────────────────────────
+    subEditorEl.addEventListener('change', e => {
+        const el = e.target;
+        const si = el.dataset.si != null ? parseInt(el.dataset.si) : -1;
+        if (si < 0 || !currentSubs?.[si]) return;
+        const field = el.dataset.subField;
+        if (!field) return;
+        if (el.type === 'number') {
+            const v = el.value.trim();
+            currentSubs[si][field] = v === '' ? null : (parseFloat(v) || 0);
+        } else {
+            currentSubs[si][field] = el.value;
+        }
+        updateOverlay();
+        processedVideoUrl = null; updateDownloadBtn();
+    });
+
     subEditorEl.addEventListener('click', e => {
+        const styleBtn = e.target.closest('.sub-style-btn[data-sub-style]');
+        if (styleBtn) {
+            const si  = parseInt(styleBtn.dataset.si);
+            const key = styleBtn.dataset.subStyle;
+            if (!currentSubs?.[si]) return;
+            currentSubs[si][key] = !currentSubs[si][key];
+            styleBtn.classList.toggle('active', currentSubs[si][key]);
+            updateOverlay();
+            processedVideoUrl = null; updateDownloadBtn();
+            return;
+        }
+
         const delBtn = e.target.closest('.sub-del-btn');
         if (delBtn) {
             const row = delBtn.closest('.sub-row');
@@ -824,7 +864,7 @@ export async function init() {
         } else {
             overlay.textContent = sub.text;
         }
-        applySubStyle();
+        applySubStyle(sub);
     }
 
     function formatTimestamp(t) {
@@ -852,15 +892,15 @@ export async function init() {
     }
 
     // ── Style application ─────────────────────────────────────────────────────
-    function applySubStyle() {
+    function applySubStyle(sub = null) {
         const fontSize     = parseFloat(fontSizeN ? fontSizeN.value : fontSizeR.value) || 24;
         const fontFamily   = fontFamilyEl.value;
         const textColor    = colorEl.value;
-        const bold         = boldEl.classList.contains('active');
-        const italic       = italicEl?.classList.contains('active')    ?? false;
-        const underline    = underlineEl?.classList.contains('active') ?? false;
+        const bold         = sub?.bold     ?? boldEl.classList.contains('active');
+        const italic       = sub?.italic   ?? (italicEl?.classList.contains('active')    ?? false);
+        const underline    = sub?.underline ?? (underlineEl?.classList.contains('active') ?? false);
         const activeAlign  = [...alignBtns].find(b => b.classList.contains('active'));
-        const textAlign    = activeAlign?.dataset.align || 'center';
+        const textAlign    = sub?.align ?? (activeAlign?.dataset.align || 'center');
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
         const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
@@ -921,10 +961,13 @@ export async function init() {
         // Translate marginV (video px) → overlay % for preview approximation
         const marginVPct = videoNatH > 0 ? (marginV / videoNatH * 100) : 2;
 
-        // Position
-        if (posXpx !== null && posYpx !== null && videoNatW > 0) {
-            overlay.style.left      = (posXpx / videoNatW * 100) + '%';
-            overlay.style.top       = (posYpx / videoNatH * 100) + '%';
+        // Position — per-subtitle posX/posY override the global controls
+        const effectivePosX = (sub?.posX != null) ? sub.posX : posXpx;
+        const effectivePosY = (sub?.posY != null) ? sub.posY : posYpx;
+
+        if (effectivePosX !== null && effectivePosY !== null && videoNatW > 0) {
+            overlay.style.left      = (effectivePosX / videoNatW * 100) + '%';
+            overlay.style.top       = (effectivePosY / videoNatH * 100) + '%';
             overlay.style.bottom    = '';
             overlay.style.transform = 'translate(-50%, -50%)';
         } else {

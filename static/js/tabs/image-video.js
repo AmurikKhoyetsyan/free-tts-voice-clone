@@ -206,6 +206,7 @@ export async function init() {
     const zoomDisplay   = $('ive-zoom-display');
     const zoomPct       = $('ive-zoom-pct');
     const zoomSign      = $('ive-zoom-sign');
+    const resEl         = $('ive-exp-res');
     // Timeline
     const totalDurEl    = $('ive-total-dur');
     const videoTrackEl  = $('ive-video-track');
@@ -348,6 +349,11 @@ export async function init() {
     await loadProjectsList();
     renderAll();
 
+    // Size the preview content to match the selected export resolution aspect ratio
+    _updatePreviewSize();
+    resEl?.addEventListener('change', _updatePreviewSize);
+    new ResizeObserver(_updatePreviewSize).observe(previewInner);
+
     // ══════════════════════════════════════════════════════════════════════════
     // Upload helpers
     // ══════════════════════════════════════════════════════════════════════════
@@ -468,11 +474,13 @@ export async function init() {
             previewContent.style.transform = '';
             zoomDisplay.textContent = 'Fit';
             zoomPct.style.display = 'none'; zoomSign.style.display = 'none';
+            _updatePreviewSize();
         } else if (mode === 'original') {
             S.previewZoom = 1;
             previewContent.style.transform = '';
             zoomDisplay.textContent = '100%';
             zoomPct.style.display = 'none'; zoomSign.style.display = 'none';
+            _updatePreviewSize();
         } else {
             const scale = Math.max(0.1, Math.min(8, pct / 100));
             S.previewZoom = scale;
@@ -480,6 +488,25 @@ export async function init() {
             zoomDisplay.textContent = Math.round(scale * 100) + '%';
             zoomPct.value = Math.round(scale * 100);
             zoomPct.style.display = ''; zoomSign.style.display = '';
+            _updatePreviewSize();
+        }
+    }
+
+    function _updatePreviewSize() {
+        const resVal = resEl ? resEl.value : '1920x1080';
+        const parts  = resVal.split('x').map(Number);
+        const resW   = parts[0] || 1920;
+        const resH   = parts[1] || 1080;
+
+        if (S.previewMode === 'original') {
+            previewContent.style.width  = resW + 'px';
+            previewContent.style.height = resH + 'px';
+        } else {
+            const cW    = previewInner.clientWidth  || 640;
+            const cH    = previewInner.clientHeight || 360;
+            const scale = Math.min(cW / resW, cH / resH);
+            previewContent.style.width  = Math.floor(resW * scale) + 'px';
+            previewContent.style.height = Math.floor(resH * scale) + 'px';
         }
     }
 
