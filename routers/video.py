@@ -7,10 +7,11 @@ from core.log import write_log
 
 router = APIRouter(prefix="/api/video", tags=["video"])
 
-BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRT_DIR   = os.path.join(BASE_DIR, ".output", "subtitle")
-VIDEO_IN  = os.path.join(BASE_DIR, ".output", "video", "src")
-VIDEO_OUT = os.path.join(BASE_DIR, ".output", "video")
+BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRT_DIR    = os.path.join(BASE_DIR, ".output", "subtitle")
+VIDEO_IN   = os.path.join(BASE_DIR, ".output", "video", "src")
+VIDEO_OUT  = os.path.join(BASE_DIR, ".output", "video")
+AUDIO_DIR  = os.path.join(BASE_DIR, ".output", "audio")
 os.makedirs(VIDEO_IN,  exist_ok=True)
 os.makedirs(VIDEO_OUT, exist_ok=True)
 
@@ -307,6 +308,228 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
             continue
 
     return header + "\n".join(events) + "\n"
+
+
+def _probe_media_duration(path: str) -> float:
+    """Probe duration of any media file (audio or video)."""
+    try:
+        r = subprocess.run(
+            [FFPROBE, "-v", "error",
+             "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=15,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+# ── Audio + subtitles → video ─────────────────────────────────────────────────
+
+@router.post("/audio-to-video")
+def audio_to_video_stream(
+    audio_name:      str   = Form(...),
+    srt_name:        str   = Form(""),
+    font_family:     str   = Form("Arial"),
+    font_size:       int   = Form(24),
+    font_color:      str   = Form("ffffff"),
+    bold:            bool  = Form(False),
+    italic:          bool  = Form(False),
+    underline:       bool  = Form(False),
+    position:        str   = Form("bottom"),
+    bg_opacity:      int   = Form(50),
+    bg_color:        str   = Form("000000"),
+    bg_pad_x:        int   = Form(12),
+    bg_pad_y:        int   = Form(6),
+    outline_size:    float = Form(1.0),
+    outline_color:   str   = Form("000000"),
+    shadow_size:     float = Form(0.0),
+    shadow_color:    str   = Form("000000"),
+    max_width_pct:   float = Form(90.0),
+    margin_v:        int   = Form(10),
+    text_align:      str   = Form("center"),
+    vid_bg_color:    str   = Form("1a1a1a"),
+    output_width:    int   = Form(1280),
+    output_height:   int   = Form(720),
+    karaoke_enabled: str   = Form("false"),
+    karaoke_color:   str   = Form("ffdd00"),
+):
+    audio_src = os.path.join(AUDIO_DIR, os.path.basename(audio_name))
+    if not os.path.exists(audio_src):
+        raise HTTPException(400, "Аудиофайл не найден")
+
+    srt_src = None
+    if srt_name.strip():
+        p = os.path.join(SRT_DIR, os.path.basename(srt_name))
+        if os.path.exists(p):
+            srt_src = p
+
+    stem     = os.path.splitext(os.path.basename(audio_name))[0]
+    out_name = stem + "_sub.mp4"
+    out_path = os.path.join(VIDEO_OUT, out_name)
+
+    fw = max(1, output_width  or 1280)
+    fh = max(1, output_height or 720)
+
+    _pos_row = {"bottom": 0, "middle": 1, "top": 2}.get(position, 0)
+    _h_col   = {"left": 0, "center": 1, "right": 2}.get(text_align, 1)
+    align    = [[1, 2, 3], [4, 5, 6], [7, 8, 9]][_pos_row][_h_col]
+
+    style_dict: dict = {
+        "FontName":       font_family,
+        "FontSize":       font_size,
+        "PrimaryColour":  _hex_to_ass(font_color),
+        "Bold":           -1 if bold      else 0,
+        "Italic":         -1 if italic    else 0,
+        "Underline":      -1 if underline else 0,
+        "Alignment":      align,
+        "MaxWidth":       max_width_pct,
+        "MarginV":        margin_v,
+        "KaraokeEnabled": karaoke_enabled.lower() in ("true", "1", "yes"),
+        "KaraokeColor":   karaoke_color.lstrip("#"),
+    }
+
+    if bg_opacity > 0:
+        style_dict.update({
+            "BorderStyle": 3,
+            "BackColour":  _hex_to_ass(bg_color, bg_opacity),
+            "PadX":        bg_pad_x,
+            "PadY":        bg_pad_y,
+        })
+        if outline_size > 0:
+            style_dict["TextOutlineSize"]   = outline_size
+            style_dict["TextOutlineColour"] = _hex_to_ass(outline_color)
+        if shadow_size > 0:
+            style_dict["Shadow"] = shadow_size
+    else:
+        style_dict["BorderStyle"] = 1
+        if outline_size > 0:
+            style_dict.update({
+                "Outline":       outline_size,
+                "OutlineColour": _hex_to_ass(outline_color),
+            })
+        if shadow_size > 0:
+            style_dict.update({
+                "Shadow":    shadow_size,
+                "BackColour": _hex_to_ass(shadow_color),
+            })
+
+    total_sec = _probe_media_duration(audio_src)
+    q: queue.Queue = queue.Queue()
+    _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+    def worker():
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                q.put(("progress", 0.05, "Подготовка аудио…"))
+                audio_ext = os.path.splitext(audio_name)[1] or ".wav"
+                tmp_audio = os.path.join(tmp, "audio" + audio_ext)
+                shutil.copy(audio_src, tmp_audio)
+                tmp_out   = os.path.join(tmp, "output.mp4")
+                bg_hex    = vid_bg_color.lstrip("#") or "1a1a1a"
+
+                sub_filter = ""
+                if srt_src:
+                    q.put(("progress", 0.10, "Конвертация субтитров…"))
+                    with open(srt_src, encoding="utf-8") as f:
+                        srt_content = f.read()
+                    ass_text = _srt_to_ass(srt_content, style_dict, "", fw, fh)
+                    tmp_sub  = os.path.join(tmp, "sub.ass")
+                    with open(tmp_sub, "w", encoding="utf-8", newline='\n') as f:
+                        f.write(ass_text)
+                    if os.name == "nt":
+                        esc_sub   = tmp_sub.replace("\\", "/").replace(":", "\\:")
+                        win_dir   = os.environ.get("WINDIR", "C:\\Windows")
+                        esc_fonts = (win_dir + "\\Fonts").replace("\\", "/").replace(":", "\\:")
+                        sub_filter = f",subtitles='{esc_sub}':fontsdir='{esc_fonts}'"
+                    else:
+                        esc_sub    = tmp_sub.replace("'", "\\'")
+                        sub_filter = f",subtitles='{esc_sub}'"
+
+                color_src = f"color=c=#{bg_hex}:s={fw}x{fh}:r=25"
+                vf_chain  = f"format=yuv420p{sub_filter}"
+
+                cmd = [
+                    FFMPEG, "-y", "-nostdin",
+                    "-f", "lavfi", "-i", color_src,
+                    "-i", tmp_audio,
+                    "-vf", vf_chain,
+                    "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                    "-c:a", "aac", "-b:a", "192k",
+                    "-shortest",
+                    tmp_out,
+                ]
+
+                ts0 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                write_log(f"[{ts0}] [FFmpeg audio-to-video] cmd: {' '.join(cmd)}")
+                q.put(("progress", 0.12, "Запуск FFmpeg…"))
+                try:
+                    proc = subprocess.Popen(
+                        cmd, cwd=tmp,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        stdin=subprocess.DEVNULL, bufsize=0,
+                        creationflags=_CREATE_NO_WINDOW,
+                    )
+                    buf = b""
+                    while True:
+                        chunk = proc.stdout.read(1024)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        parts = re.split(rb"\r\n|\r|\n", buf)
+                        buf = parts[-1]
+                        for raw in parts[:-1]:
+                            line = raw.decode("utf-8", errors="replace").strip()
+                            if not line:
+                                continue
+                            q.put(("log", line))
+                            write_log(f"[FFmpeg] {line}")
+                            if "time=" in line and total_sec > 0:
+                                try:
+                                    t_str = line.split("time=")[1].split()[0]
+                                    if ":" in t_str and not t_str.startswith("-"):
+                                        hh, mm, ss = t_str.split(":")
+                                        done = int(hh) * 3600 + int(mm) * 60 + float(ss)
+                                        q.put(("progress", min(0.95, done / total_sec), line))
+                                except Exception:
+                                    pass
+                    if buf.strip():
+                        q.put(("log", buf.decode("utf-8", errors="replace").strip()))
+                    proc.wait()
+                    if proc.returncode != 0:
+                        q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))
+                    elif not os.path.exists(tmp_out):
+                        q.put(("error", "FFmpeg не создал выходной файл"))
+                    else:
+                        shutil.move(tmp_out, out_path)
+                        q.put(("done", out_name))
+                except FileNotFoundError:
+                    q.put(("error", "FFmpeg не найден. Установите FFmpeg и добавьте в PATH."))
+        except Exception as e:
+            q.put(("error", str(e)))
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        yield f"event: progress\ndata: {json.dumps({'value': 0.03, 'desc': 'Подготовка…'})}\n\n"
+        while True:
+            item = q.get()
+            ev   = item[0]
+            if ev == "log":
+                yield f"event: progress\ndata: {json.dumps({'value': None, 'desc': item[1]})}\n\n"
+            elif ev == "progress":
+                pct, desc = item[1], item[2]
+                yield f"event: progress\ndata: {json.dumps({'value': pct, 'desc': desc})}\n\n"
+            elif ev == "done":
+                nm  = item[1]
+                url = f"/api/video/output/{nm}"
+                yield f"event: done\ndata: {json.dumps({'video_url': url, 'filename': nm})}\n\n"
+                break
+            elif ev == "error":
+                yield f"event: error\ndata: {json.dumps({'status': '❌ ' + item[1]})}\n\n"
+                break
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 # ── Burn subtitles ────────────────────────────────────────────────────────────

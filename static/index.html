@@ -63,6 +63,30 @@
                     <div class="audio-player" data-player="win"></div>
                     <div class="status" id="win-status"></div>
                 </div>
+                <div id="win-sub-panel" class="result-block" hidden style="position:static;top:auto;margin-top:12px">
+                    <div class="result-label">Субтитры</div>
+                    <div class="row gap" style="flex-wrap:wrap;margin-bottom:8px">
+                        <label class="label" style="flex:1;min-width:110px">Разбивка
+                            <select id="win-sub-split">
+                                <option value="auto" selected>Авто</option>
+                                <option value="sentence">По предложениям</option>
+                                <option value="line">По строкам</option>
+                            </select>
+                        </label>
+                        <label class="label" style="width:90px">Макс. симв.
+                            <input type="number" id="win-sub-chars" value="35" min="1" max="120">
+                        </label>
+                    </div>
+                    <textarea id="win-sub-editor" rows="8" spellcheck="false" placeholder="Субтитры генерируются автоматически…" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;background:var(--bg-input,#1a1a2e);color:var(--text,#e0e0e0);border:1px solid var(--border,#333);border-radius:4px;padding:8px;resize:vertical;margin-bottom:8px"></textarea>
+                    <button class="btn btn-primary" id="win-sub-dl-btn" style="width:100%">Скачать</button>
+                    <div id="win-sub-progress-wrap" hidden style="margin-top:8px">
+                        <div class="vid-progress-bar">
+                            <div class="vid-progress-fill" id="win-sub-progress-fill"></div>
+                            <span class="vid-progress-pct" id="win-sub-progress-pct">0%</span>
+                        </div>
+                    </div>
+                    <div class="status" id="win-sub-status"></div>
+                </div>
             </div>
         </div>
     </section>
@@ -223,20 +247,20 @@
                     <label class="label">Скорость чтения <span class="hint" id="sub-wpm-val">150</span> сл/мин
                         <input type="range" id="sub-wpm" min="80" max="300" step="10" value="150">
                     </label>
-                    <label class="label">Макс. символов <span class="hint" id="sub-chars-val">60</span>
-                        <input type="range" id="sub-chars" min="1" max="120" step="1" value="60">
+                    <label class="label">Макс. символов <span class="hint" id="sub-chars-val">35</span>
+                        <input type="range" id="sub-chars" min="1" max="120" step="1" value="35">
                     </label>
                 </div>
                 <div class="label">Разбивка
                     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px">
                         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
-                            <input type="radio" name="sub-split" value="sentence" checked> По предложениям
+                            <input type="radio" name="sub-split" value="sentence"> По предложениям
                         </label>
                         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
                             <input type="radio" name="sub-split" value="line"> По строкам
                         </label>
                         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400">
-                            <input type="radio" name="sub-split" value="auto"> Авто
+                            <input type="radio" name="sub-split" value="auto" checked> Авто
                         </label>
                     </div>
                 </div>
@@ -540,7 +564,6 @@
                     <button class="btn" id="vid-tmpl-apply-btn">Применить</button>
                     <button class="btn" id="vid-save-style-btn" title="Сохранить текущий стиль как шаблон">+ Шаблон</button>
                 </div>
-                <button class="btn btn-primary" id="vid-go" style="margin-top:8px;width:100%">Добавить субтитры (FFmpeg)</button>
             </div>
             <div class="col">
                 <div class="result-block" style="position:static;top:auto">
@@ -573,7 +596,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="result-block" id="vid-export-block" hidden style="position:static;top:auto;margin-top:12px">
+                <div class="result-block" id="vid-export-block" style="position:static;top:auto;margin-top:12px">
                     <div class="result-label">Экспорт</div>
                     <div class="row gap">
                         <select id="vid-format" class="fill">
@@ -584,7 +607,7 @@
                             <option value="webm">WebM</option>
                             <option value="mov">MOV</option>
                         </select>
-                        <a id="vid-download-btn" class="btn btn-primary" download>Скачать</a>
+                        <button id="vid-download-btn" class="btn btn-primary">Скачать</button>
                     </div>
                 </div>
             </div>
