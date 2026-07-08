@@ -124,15 +124,21 @@ def _ass_time(sec: float) -> str:
 
 
 def _probe_duration(path: str) -> float:
-    try:
-        r = subprocess.run(
-            [FFPROBE, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=duration", "-of", "csv=p=0", path],
-            capture_output=True, text=True, timeout=10,
-        )
-        return float(r.stdout.strip())
-    except Exception:
-        return 0.0
+    # Try format-level duration first (works for MP4, MKV, AVI, etc.)
+    for entries in ("format=duration", "stream=duration"):
+        try:
+            r = subprocess.run(
+                [FFPROBE, "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", entries, "-of", "csv=p=0", path],
+                capture_output=True, text=True, timeout=10,
+            )
+            val = r.stdout.strip().splitlines()[0]
+            dur = float(val)
+            if dur > 0:
+                return dur
+        except Exception:
+            pass
+    return 0.0
 
 
 def _probe_dimensions(path: str) -> tuple:
@@ -500,6 +506,7 @@ def burn_subtitles(
                        *codec_args, tmp_out]
 
                 app_log(f"FFmpeg command: {' '.join(cmd)}", "INFO", "FFmpeg")
+                print(flush=True)  # blank line so \r progress bar has a clean line
                 q.put(("progress", 0.12, "Запуск FFmpeg…"))
                 try:
                     proc = subprocess.Popen(
@@ -540,11 +547,14 @@ def burn_subtitles(
                         q.put(("log", buf.decode("utf-8", errors="replace").strip()))
                     proc.wait()
                     if proc.returncode != 0:
+                        print(flush=True)  # end \r line
                         app_log(f"FFmpeg error: return code {proc.returncode}", "ERROR", "FFmpeg")
                         q.put(("error", f"FFmpeg завершился с кодом {proc.returncode}"))
                     elif not os.path.exists(tmp_out):
+                        print(flush=True)
                         q.put(("error", "FFmpeg не создал выходной файл"))
                     else:
+                        print_progress(100, "FFmpeg")
                         shutil.move(tmp_out, out_path)
                         app_log(f"Video created: {os.path.basename(out_path)}", "INFO", "VideoService")
                         q.put(("done", out_name))
