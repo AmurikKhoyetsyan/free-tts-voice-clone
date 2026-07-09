@@ -545,8 +545,8 @@ export async function init() {
 
     // Size the preview content to match the selected export resolution aspect ratio
     _updatePreviewSize();
-    resEl?.addEventListener('change', _updatePreviewSize);
-    new ResizeObserver(_updatePreviewSize).observe(previewInner);
+    resEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
+    new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
 
     // ══════════════════════════════════════════════════════════════════════════
     // Upload helpers
@@ -1382,10 +1382,16 @@ export async function init() {
             subOverlay.textContent = sub.text;
         }
 
+        // Scale all pixel values to match the preview/export resolution ratio
+        const _resParts = (resEl?.value || '1920x1080').split('x').map(Number);
+        const _resH     = _resParts[1] || 1080;
+        const _pvH      = previewContent.clientHeight || _resH;
+        const sc        = _pvH / _resH;
+
         subOverlay.style.left        = (sub.x ?? 50) + '%';
         subOverlay.style.top         = (sub.y ?? 88) + '%';
         subOverlay.style.transform   = `translate(-50%, -50%) rotate(${sub.rotation || 0}deg)`;
-        subOverlay.style.fontSize    = (sub.fontSize || 40) + 'px';
+        subOverlay.style.fontSize    = ((sub.fontSize || 40) * sc) + 'px';
         subOverlay.style.color       = sub.color || '#ffffff';
         subOverlay.style.fontFamily  = `"${sub.fontFamily || 'Arial'}", sans-serif`;
         subOverlay.style.fontWeight  = sub.bold      ? 'bold'      : 'normal';
@@ -1394,14 +1400,14 @@ export async function init() {
         subOverlay.style.textAlign   = sub.align     || 'center';
         subOverlay.style.lineHeight  = sub.lineHeight || 1.35;
         subOverlay.style.textShadow  = _makeTextShadow(
-            sub.outline ?? 2, sub.outlineColor || '#000000',
-            sub.shadow  ?? 1, sub.shadowColor  || '#000000'
+            (sub.outline ?? 2) * sc, sub.outlineColor || '#000000',
+            (sub.shadow  ?? 1) * sc, sub.shadowColor  || '#000000'
         );
         const bgOp = sub.bgOpacity ?? 0;
         if (bgOp > 0) {
             subOverlay.style.background   = hexToRgba(sub.bgColor || '#000000', bgOp);
-            subOverlay.style.padding      = `${sub.bgPadY ?? 6}px ${sub.bgPadX ?? 12}px`;
-            subOverlay.style.borderRadius = (sub.bgRadius ?? 4) + 'px';
+            subOverlay.style.padding      = `${(sub.bgPadY ?? 6) * sc}px ${(sub.bgPadX ?? 12) * sc}px`;
+            subOverlay.style.borderRadius = ((sub.bgRadius ?? 4) * sc) + 'px';
         } else {
             subOverlay.style.background   = 'none';
             subOverlay.style.padding      = '0';
