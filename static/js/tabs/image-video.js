@@ -280,6 +280,9 @@ export async function init() {
     const zoomPct       = $('ive-zoom-pct');
     const zoomSign      = $('ive-zoom-sign');
     const resEl         = $('ive-exp-res');
+    const resWEl        = document.getElementById('ive-exp-res-w');
+    const resHEl        = document.getElementById('ive-exp-res-h');
+    const resXEl        = document.getElementById('ive-exp-res-x');
     // Timeline
     const totalDurEl    = $('ive-total-dur');
     const videoTrackEl  = $('ive-video-track');
@@ -326,7 +329,7 @@ export async function init() {
     async function _amurBrowse(dir) {
         const q = dir ? '?path=' + encodeURIComponent(dir) : '';
         try {
-            const r = await fetch('/api/imgvid/amur/browse' + q);
+            const r = await fetch('/api/imgvid/project/browse' + q);
             const d = await r.json();
             amurDirInput.value = d.dir;
             const _esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -337,7 +340,7 @@ export async function init() {
                         <span>${_esc(f.name)}</span>
                         <span style="color:var(--text-muted);font-size:11px">${(f.size/1024).toFixed(1)} KB</span>
                     </div>`).join('')
-                : '<div style="padding:10px;text-align:center;color:var(--text-muted);font-size:12px">Нет .amur файлов</div>';
+                : '<div style="padding:10px;text-align:center;color:var(--text-muted);font-size:12px">Нет .project файлов</div>';
             amurFilesEl.querySelectorAll('.amur-file-row').forEach(el => {
                 el.addEventListener('mouseenter', () => el.style.background = 'var(--surface-hover, rgba(0,0,0,0.05))');
                 el.addEventListener('mouseleave', () => { if (!el.classList.contains('selected')) el.style.background = ''; });
@@ -360,13 +363,13 @@ export async function init() {
 
     async function _openSaveAmurDialog(projectName) {
         _amurMode = 'save';
-        amurTitle.textContent = 'Сохранить проект как .amur';
+        amurTitle.textContent = 'Сохранить проект как .project';
         amurFilenameRow.hidden = false;
         amurUploadRow.hidden = true;
         amurOkBtn.textContent = 'Сохранить';
         amurUploadInput.value = '';
         await _amurBrowse('');
-        amurFilenameInput.value = (projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
+        amurFilenameInput.value = (projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.project';
         amurModal.hidden = false;
         amurFilenameInput.focus();
         return new Promise(resolve => { _amurResolve = resolve; });
@@ -374,7 +377,7 @@ export async function init() {
 
     async function _openLoadAmurDialog() {
         _amurMode = 'load';
-        amurTitle.textContent = 'Открыть проект .amur';
+        amurTitle.textContent = 'Открыть проект .project';
         amurFilenameRow.hidden = true;
         amurUploadRow.hidden = false;
         amurOkBtn.textContent = 'Открыть';
@@ -646,7 +649,7 @@ export async function init() {
         const result = await _openSaveAmurDialog(S.projectName);
         if (!result) return;
         try {
-            const r = await fetch('/api/imgvid/amur/save-to-path', {
+            const r = await fetch('/api/imgvid/project/save-to-path', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pid: S.projectId, dir: result.dir, filename: result.filename }),
@@ -657,19 +660,19 @@ export async function init() {
         } catch (e) { toast(e.message, 'err'); }
     });
     openAmurBtn?.addEventListener('click', async () => {
-        if (S.dirty && !confirm('Несохранённые изменения. Открыть .amur?')) return;
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть .project?')) return;
         const result = await _openLoadAmurDialog();
         if (!result) return;
-        toast('Открытие .amur…', 'info');
+        toast('Открытие .project…', 'info');
         try {
             let d;
             if (result.type === 'file') {
                 const fd = new FormData(); fd.append('file', result.file);
-                const r = await fetch('/api/imgvid/amur/unpack', { method: 'POST', body: fd });
+                const r = await fetch('/api/imgvid/project/unpack', { method: 'POST', body: fd });
                 d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
             } else {
-                const r = await fetch('/api/imgvid/amur/load-from-path', {
+                const r = await fetch('/api/imgvid/project/load-from-path', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ file_path: result.path }),
@@ -687,8 +690,9 @@ export async function init() {
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
             renderAll(); await loadProjectsList();
-            toast('Проект загружен из .amur', 'ok');
+            toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
     });
     // Listen for open-project event from History tab
@@ -708,6 +712,7 @@ export async function init() {
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
             renderAll(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -744,8 +749,17 @@ export async function init() {
     renderAll();
 
     // Size the preview content to match the selected export resolution aspect ratio
+    function _updateCustomResVis() {
+        const isCustom = resEl?.value === 'custom';
+        if (resWEl) resWEl.style.display = isCustom ? '' : 'none';
+        if (resHEl) resHEl.style.display = isCustom ? '' : 'none';
+        if (resXEl) resXEl.style.display = isCustom ? '' : 'none';
+    }
+    _updateCustomResVis();
     _updatePreviewSize();
-    resEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
+    resEl?.addEventListener('change', () => { _updateCustomResVis(); _updatePreviewSize(); renderPreview(); });
+    resWEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
+    resHEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -891,8 +905,18 @@ export async function init() {
         }
     }
 
+    function _getResolution() {
+        const v = resEl ? resEl.value : '1920x1080';
+        if (v === 'custom') {
+            const w = parseInt(resWEl?.value) || 1920;
+            const h = parseInt(resHEl?.value) || 1080;
+            return `${w}x${h}`;
+        }
+        return v;
+    }
+
     function _updatePreviewSize() {
-        const resVal = resEl ? resEl.value : '1920x1080';
+        const resVal = _getResolution();
         const parts  = resVal.split('x').map(Number);
         const resW   = parts[0] || 1920;
         const resH   = parts[1] || 1080;
@@ -1617,7 +1641,7 @@ export async function init() {
         }
 
         // Scale all pixel values to match the preview/export resolution ratio
-        const _resParts = (resEl?.value || '1920x1080').split('x').map(Number);
+        const _resParts = _getResolution().split('x').map(Number);
         const _resH     = _resParts[1] || 1080;
         const _pvH      = previewContent.clientHeight || _resH;
         const sc        = _pvH / _resH;
@@ -2728,6 +2752,8 @@ export async function init() {
             S.pipLayers = d.pip || d.pipLayers || [];
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
             renderAll(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -2762,7 +2788,7 @@ export async function init() {
         const fd = new FormData();
         fd.append('project_json',  JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers }));
         fd.append('output_format', $('ive-exp-format').value);
-        fd.append('resolution',    $('ive-exp-res').value);
+        fd.append('resolution',    _getResolution());
         fd.append('fps',           $('ive-exp-fps').value);
         fd.append('quality',       $('ive-exp-quality').value);
         try {
@@ -2845,6 +2871,29 @@ export async function init() {
     }
 
     function _getExportSettings() {
-        return { format: $('ive-exp-format')?.value || 'mp4', resolution: $('ive-exp-res')?.value || '1920x1080', fps: $('ive-exp-fps')?.value || '30', quality: $('ive-exp-quality')?.value || 'medium' };
+        return { format: $('ive-exp-format')?.value || 'mp4', resolution: _getResolution(), fps: $('ive-exp-fps')?.value || '30', quality: $('ive-exp-quality')?.value || 'medium' };
+    }
+
+    function _applyExportSettings(s) {
+        if (!s) return;
+        const fmtEl = $('ive-exp-format');
+        const fpsEl = $('ive-exp-fps');
+        const qualEl = $('ive-exp-quality');
+        if (s.format  && fmtEl)  fmtEl.value  = s.format;
+        if (s.fps     && fpsEl)  fpsEl.value  = String(s.fps);
+        if (s.quality && qualEl) qualEl.value = s.quality;
+        if (s.resolution && resEl) {
+            const knownVals = [...resEl.options].map(o => o.value).filter(v => v !== 'custom');
+            if (knownVals.includes(s.resolution)) {
+                resEl.value = s.resolution;
+            } else {
+                resEl.value = 'custom';
+                const [w, h] = s.resolution.split('x').map(Number);
+                if (resWEl && w) resWEl.value = w;
+                if (resHEl && h) resHEl.value = h;
+            }
+            _updateCustomResVis();
+        }
+        _updatePreviewSize();
     }
 }
