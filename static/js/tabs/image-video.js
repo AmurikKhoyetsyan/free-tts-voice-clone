@@ -123,6 +123,24 @@ function hexToRgba(hex, a) {
     return `rgba(${r},${g},${b},${a})`;
 }
 
+function _makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor) {
+    const parts = [];
+    if (outlineSize > 0) {
+        const s = outlineSize, c = outlineColor;
+        parts.push(
+            `${-s}px ${-s}px 0 ${c}`, `${s}px ${-s}px 0 ${c}`,
+            `${-s}px ${s}px 0 ${c}`,  `${s}px ${s}px 0 ${c}`,
+            `0 ${-s}px 0 ${c}`,       `0 ${s}px 0 ${c}`,
+            `${-s}px 0 0 ${c}`,       `${s}px 0 0 ${c}`,
+        );
+    }
+    if (shadowSize > 0) {
+        const blur = Math.ceil(shadowSize / 2);
+        parts.push(`${shadowSize}px ${shadowSize}px ${blur}px ${shadowColor}`);
+    }
+    return parts.join(', ');
+}
+
 // ── Waveform cache (high-resolution: 4000 samples, resampled per draw) ────────
 const _waveCache = new Map();
 const _WAVE_RES  = 4000;
@@ -1344,33 +1362,51 @@ export async function init() {
     }
 
     function _renderSubOverlay(sub, subKey) {
-        subOverlay.style.display    = 'block';
-        subOverlay.textContent      = sub.text;
-        subOverlay.style.left       = (sub.x ?? 50) + '%';
-        subOverlay.style.top        = (sub.y ?? 88) + '%';
-        subOverlay.style.transform  = `translate(-50%, -50%) rotate(${sub.rotation || 0}deg)`;
-        subOverlay.style.fontSize   = (sub.fontSize || 40) + 'px';
-        subOverlay.style.color      = sub.color || '#ffffff';
-        subOverlay.style.fontFamily = `"${sub.fontFamily || 'Arial'}", sans-serif`;
-        subOverlay.style.fontWeight = sub.bold   ? 'bold'   : 'normal';
-        subOverlay.style.fontStyle  = sub.italic ? 'italic' : 'normal';
-        subOverlay.style.textDecoration = sub.underline ? 'underline' : 'none';
-        subOverlay.style.textAlign  = sub.align || 'center';
-        const ol = sub.outline ?? 2, sh = sub.shadow ?? 1;
-        const shadows = [];
-        if (ol > 0) { for (const [dx, dy] of [[-ol,-ol],[ol,-ol],[-ol,ol],[ol,ol]]) shadows.push(`${dx}px ${dy}px 0 #000`); }
-        if (sh > 0) shadows.push(`${sh}px ${sh}px ${sh * 2}px rgba(0,0,0,0.6)`);
-        subOverlay.style.textShadow = shadows.join(', ');
-        const bgOp = sub.bgOpacity ?? 0;
-        if (sub.bgColor && bgOp > 0) {
-            subOverlay.style.background   = hexToRgba(sub.bgColor, bgOp);
-            subOverlay.style.padding      = '4px 10px';
-            subOverlay.style.borderRadius = '4px';
+        subOverlay.style.display = 'block';
+
+        // Karaoke word highlight
+        if (sub.karaokeEnable && sub.end > sub.start) {
+            const karaokeColor = sub.karaokeColor || '#ffdd00';
+            const wordArr  = sub.text.split(/\s+/);
+            const elapsed  = S.currentTime - (sub.start || 0);
+            const subDur   = (sub.end || 3) - (sub.start || 0);
+            const spoken   = Math.min(wordArr.length, Math.floor(wordArr.length * elapsed / subDur + 0.5));
+            const tokens   = sub.text.split(/(\s+)/);
+            let wi = 0;
+            subOverlay.innerHTML = tokens.map(tok => {
+                if (/^\s+$/.test(tok)) return tok;
+                const color = wi++ < spoken ? karaokeColor : (sub.color || '#ffffff');
+                return `<span style="color:${color}">${eh(tok)}</span>`;
+            }).join('');
         } else {
-            subOverlay.style.background = 'none';
-            subOverlay.style.padding    = '0';
+            subOverlay.textContent = sub.text;
         }
-        // Animation with custom duration
+
+        subOverlay.style.left        = (sub.x ?? 50) + '%';
+        subOverlay.style.top         = (sub.y ?? 88) + '%';
+        subOverlay.style.transform   = `translate(-50%, -50%) rotate(${sub.rotation || 0}deg)`;
+        subOverlay.style.fontSize    = (sub.fontSize || 40) + 'px';
+        subOverlay.style.color       = sub.color || '#ffffff';
+        subOverlay.style.fontFamily  = `"${sub.fontFamily || 'Arial'}", sans-serif`;
+        subOverlay.style.fontWeight  = sub.bold      ? 'bold'      : 'normal';
+        subOverlay.style.fontStyle   = sub.italic    ? 'italic'    : 'normal';
+        subOverlay.style.textDecoration = sub.underline ? 'underline' : 'none';
+        subOverlay.style.textAlign   = sub.align     || 'center';
+        subOverlay.style.lineHeight  = sub.lineHeight || 1.35;
+        subOverlay.style.textShadow  = _makeTextShadow(
+            sub.outline ?? 2, sub.outlineColor || '#000000',
+            sub.shadow  ?? 1, sub.shadowColor  || '#000000'
+        );
+        const bgOp = sub.bgOpacity ?? 0;
+        if (bgOp > 0) {
+            subOverlay.style.background   = hexToRgba(sub.bgColor || '#000000', bgOp);
+            subOverlay.style.padding      = `${sub.bgPadY ?? 6}px ${sub.bgPadX ?? 12}px`;
+            subOverlay.style.borderRadius = (sub.bgRadius ?? 4) + 'px';
+        } else {
+            subOverlay.style.background   = 'none';
+            subOverlay.style.padding      = '0';
+            subOverlay.style.borderRadius = '0';
+        }
         const animType = sub.animation || 'none';
         const animDur  = (sub.animDuration || 0.6).toFixed(2) + 's';
         const key = subKey || ((sub.id || '') + ':' + (sub.start ?? 0));
@@ -1380,10 +1416,8 @@ export async function init() {
             void subOverlay.offsetWidth;
             subOverlay.style.animation = animType !== 'none' ? `sub-${animType} ${animDur} ease forwards` : '';
         }
-        // Enable drag in preview
         subOverlay.style.cursor = 'grab';
-        subOverlay._activeSub = sub;
-        // Show selection outline when this sub is the selected one
+        subOverlay._activeSub   = sub;
         const isSelected = S.selSubIdx >= 0 && S.subtitles[S.selSubIdx] === sub;
         subOverlay.classList.toggle('selected', isSelected);
     }
@@ -1406,7 +1440,10 @@ export async function init() {
         const subs = S.subtitles;
         propsBody.innerHTML = `
     <div class="ive-subs-header">
-        <button class="btn btn-sm" id="pv-add-sub">+ Субтитр</button>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-sm" id="pv-add-sub">+ Субтитр</button>
+            ${S.selSubIdx >= 0 && subs.length > 1 ? `<button class="btn btn-sm" id="pv-apply-style-all" title="Применить стиль выделенного субтитра ко всем остальным">Стиль → все</button>` : ''}
+        </div>
         <span style="font-size:10px;color:var(--text-dim)">Независимая дорожка</span>
     </div>
     <div id="pv-subs-list">${subs.map((sub, si) => `
@@ -1467,15 +1504,60 @@ export async function init() {
                 <button class="ive-align-btn${(sub.align||'center')==='right'?' active':''}" data-align="right" data-si="${si}">${ICONS.alignRight}</button>
             </div>
         </label>
+        <details class="ive-sub-extra">
+            <summary>Дополнительно</summary>
+            <div class="ive-row2">
+                <label class="ive-label">Цвет контура<input class="ive-input" type="color" data-sf="outlineColor" data-si="${si}" value="${sub.outlineColor || '#000000'}"></label>
+                <label class="ive-label">Цвет тени<input class="ive-input" type="color" data-sf="shadowColor" data-si="${si}" value="${sub.shadowColor || '#000000'}"></label>
+            </div>
+            <div class="ive-row2">
+                <label class="ive-label">Межстрочный<input class="ive-input" type="number" data-sf="lineHeight" data-si="${si}" min="0.5" max="4" step="0.05" value="${(sub.lineHeight || 1.35).toFixed(2)}"></label>
+            </div>
+            <div class="ive-row2">
+                <label class="ive-label">Отступ фон X<input class="ive-input" type="number" data-sf="bgPadX" data-si="${si}" min="0" max="100" value="${sub.bgPadX ?? 12}"></label>
+                <label class="ive-label">Отступ фон Y<input class="ive-input" type="number" data-sf="bgPadY" data-si="${si}" min="0" max="100" value="${sub.bgPadY ?? 6}"></label>
+            </div>
+            <div class="ive-row2">
+                <label class="ive-label">Радиус фона<input class="ive-input" type="number" data-sf="bgRadius" data-si="${si}" min="0" max="50" value="${sub.bgRadius ?? 4}"></label>
+            </div>
+            <div class="ive-sub-karaoke">
+                <label class="ive-label" style="flex-direction:row;align-items:center;gap:6px;font-size:12px">
+                    <input type="checkbox" data-sf="karaokeEnable" data-si="${si}"${sub.karaokeEnable ? ' checked' : ''}>
+                    <span>Подсветка слов</span>
+                </label>
+                <label class="ive-label" style="flex-direction:row;align-items:center;gap:6px;font-size:12px">
+                    <input class="ive-input" type="color" data-sf="karaokeColor" data-si="${si}" value="${sub.karaokeColor || '#ffdd00'}">
+                    <span>Цвет подсветки</span>
+                </label>
+            </div>
+        </details>
     </div>`).join('')}</div>`;
+
+        $('pv-apply-style-all')?.addEventListener('click', () => {
+            const src = S.subtitles[S.selSubIdx]; if (!src) return;
+            const keys = ['fontFamily','fontSize','color','bold','italic','underline',
+                          'outline','outlineColor','shadow','shadowColor',
+                          'bgColor','bgOpacity','bgPadX','bgPadY','bgRadius',
+                          'animation','animDuration','align','lineHeight',
+                          'karaokeEnable','karaokeColor',
+                          'x','y','rotation'];
+            S.subtitles.forEach((sub, si) => {
+                if (si === S.selSubIdx) return;
+                keys.forEach(k => { if (src[k] !== undefined) sub[k] = src[k]; });
+            });
+            S.dirty = true; renderProps(); renderPreview();
+            toast(`Стиль применён к ${subs.length} субтитрам`, 'ok');
+        });
 
         $('pv-add-sub').addEventListener('click', () => {
             const t = S.currentTime;
             S.subtitles.push({ id: uid(), text: '', start: Math.round(t * 10) / 10, end: Math.round((t + 3) * 10) / 10,
                 x: 50, y: 88, fontFamily: 'Arial', fontSize: 40, color: '#ffffff',
-                outline: 2, shadow: 1, bold: false, italic: false, underline: false,
-                align: 'center', bgColor: '#000000', bgOpacity: 0,
-                animation: 'none', animDuration: 0.6, rotation: 0 });
+                outline: 2, outlineColor: '#000000', shadow: 1, shadowColor: '#000000',
+                bold: false, italic: false, underline: false,
+                align: 'center', bgColor: '#000000', bgOpacity: 0, bgPadX: 12, bgPadY: 6, bgRadius: 4,
+                animation: 'none', animDuration: 0.6, rotation: 0,
+                lineHeight: 1.35, karaokeEnable: false, karaokeColor: '#ffdd00' });
             S.selSubIdx = S.subtitles.length - 1;
             S.dirty = true; renderProps(); renderPreview(); renderTimeline();
         });
@@ -1513,7 +1595,8 @@ export async function init() {
             el.addEventListener(ev, () => {
                 const sub = S.subtitles[+el.dataset.si]; if (!sub) return;
                 const key = el.dataset.sf;
-                if (el.type === 'number') sub[key] = parseFloat(el.value) || 0;
+                if (el.type === 'checkbox') sub[key] = el.checked;
+                else if (el.type === 'number') sub[key] = parseFloat(el.value) || 0;
                 else if (el.type === 'range') {
                     sub[key] = parseFloat(el.value);
                     const vEl = el.nextElementSibling;

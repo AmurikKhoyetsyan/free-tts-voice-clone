@@ -443,9 +443,17 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         half_ms   = anim_ms // 2
         rotation  = float(sub.get("rotation", 0))
 
+        oc = sub.get("outlineColor", "#000000").lstrip("#")
+        try:    ass_oc = f"&H00{int(oc[4:6],16):02X}{int(oc[2:4],16):02X}{int(oc[0:2],16):02X}"
+        except: ass_oc = "&H00000000"
+        sc = sub.get("shadowColor", "#000000").lstrip("#")
+        try:    ass_sc = f"&H00{int(sc[4:6],16):02X}{int(sc[2:4],16):02X}{int(sc[0:2],16):02X}"
+        except: ass_sc = "&H00000000"
+
         base = (f"\\fn{font}\\fs{size}\\c{primary}"
                 f"\\b{bold}\\i{italic}\\u{underline}"
                 f"\\bord{outline:.1f}\\shad{shadow:.1f}"
+                f"\\3c{ass_oc}\\4c{ass_sc}"
                 f"\\an5\\pos({px},{py})")
         if rotation:
             base += f"\\frz{rotation:.1f}"
@@ -462,7 +470,29 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
                 back = "&H80000000"
             base += f"\\3c{back}\\bord4"
 
-        if anim == "fade-in":
+        # Karaoke word-by-word highlight
+        karaoke_on = bool(sub.get("karaokeEnable", False))
+        kc = sub.get("karaokeColor", "#ffdd00").lstrip("#")
+        try:    ass_kc = f"&H00{int(kc[4:6],16):02X}{int(kc[2:4],16):02X}{int(kc[0:2],16):02X}"
+        except: ass_kc = "&H0000DDFF"
+
+        if karaoke_on and raw_text.strip() and abs_end > abs_start:
+            words = raw_text.split()
+            n = max(1, len(words))
+            word_dur = (abs_end - abs_start) / n
+            for stage in range(n):
+                t0 = abs_start + stage * word_dur
+                t1 = abs_start + (stage + 1) * word_dur if stage < n - 1 else abs_end
+                highlighted = " ".join(words[:stage + 1])
+                remaining   = " ".join(words[stage + 1:])
+                if remaining:
+                    ktext = "{\\1c" + ass_kc + "}" + highlighted + "{\\1c" + primary + "} " + remaining
+                else:
+                    ktext = "{\\1c" + ass_kc + "}" + highlighted
+                tags = "{" + base + "}"
+                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,0,0,0,,{tags}{ktext}")
+
+        elif anim == "fade-in":
             tags = "{" + base + f"\\fad({anim_ms},0)" + "}"
             lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
 
