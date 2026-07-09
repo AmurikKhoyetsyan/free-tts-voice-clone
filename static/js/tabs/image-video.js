@@ -3,6 +3,7 @@ import { toast }           from '../toast.js';
 import { synthesizeStream } from '../api.js';
 import { openConfirm }     from '../modal.js';
 import { ICONS }           from '../icons.js';
+import { events }          from '../events.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TRANSITIONS = [
@@ -269,6 +270,14 @@ export async function init() {
     const timeRulerEl   = $('ive-time-ruler');
     const audioLblEl    = $('ive-audio-lbl');
     const propsBody     = $('ive-props-body');
+    // Transition preview elements
+    const previewContentNext = $('ive-preview-content-next');
+    const previewImgNext     = $('ive-preview-img-next');
+    const previewVideoNext   = $('ive-preview-video-next');
+    const transOverlayEl     = $('ive-trans-overlay');
+    // .amur buttons
+    const saveAmurBtn        = $('ive-save-amur-btn');
+    const openAmurInput      = $('ive-open-amur-input');
 
     // ── New project ───────────────────────────────────────────────────────────
     newBtn.addEventListener('click', async () => {
@@ -431,6 +440,59 @@ export async function init() {
     // ── Save / Export ─────────────────────────────────────────────────────────
     saveBtn.addEventListener('click', _saveProject);
     exportBtn.addEventListener('click', _startExport);
+    // .amur save/open
+    saveAmurBtn?.addEventListener('click', async () => {
+        if (!S.projectId) { await _saveProject(); }
+        if (!S.projectId) { toast('Не удалось сохранить проект', 'err'); return; }
+        try {
+            const r = await fetch(`/api/imgvid/projects/${S.projectId}/pack`);
+            if (!r.ok) { toast('Ошибка упаковки', 'err'); return; }
+            const blob = await r.blob();
+            const fname = (S.projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
+            const url = URL.createObjectURL(blob);
+            const a = Object.assign(document.createElement('a'), { href: url, download: fname });
+            document.body.appendChild(a); a.click(); a.remove();
+            URL.revokeObjectURL(url);
+            toast('Проект скачан как .amur', 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+    });
+    openAmurInput?.addEventListener('change', async () => {
+        const file = openAmurInput.files[0]; if (!file) return;
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть .amur?')) { openAmurInput.value = ''; return; }
+        toast('Открытие .amur…', 'info');
+        try {
+            const fd = new FormData(); fd.append('file', file);
+            const r  = await fetch('/api/imgvid/amur/unpack', { method: 'POST', body: fd });
+            const d  = await r.json();
+            if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            _stopPlayback();
+            S.projectId = d.id; S.projectName = d.name;
+            S.clips = d.slides || []; S.audioTracks = d.audio || [];
+            S.subtitles = d.subtitles || [];
+            S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            renderAll(); await loadProjectsList();
+            toast('Проект загружен из .amur', 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+        openAmurInput.value = '';
+    });
+    // Listen for open-project event from History tab
+    events?.addEventListener('imgvid-open-project', async (ev) => {
+        const pid = ev.detail?.pid; if (!pid) return;
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть другой проект?')) return;
+        try {
+            const r = await fetch(`/api/imgvid/projects/${pid}`);
+            const d = await r.json();
+            _stopPlayback();
+            S.projectId = d.id; S.projectName = d.name;
+            S.clips = d.slides || []; S.audioTracks = d.audio || [];
+            S.subtitles = d.subtitles || [];
+            S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            renderAll(); await loadProjectsList();
+            toast('Проект открыт: ' + d.name, 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+    });
 
     // ── Keyboard shortcuts ────────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
@@ -614,17 +676,161 @@ export async function init() {
         const parts  = resVal.split('x').map(Number);
         const resW   = parts[0] || 1920;
         const resH   = parts[1] || 1080;
-
+        let w, h;
         if (S.previewMode === 'original') {
-            previewContent.style.width  = resW + 'px';
-            previewContent.style.height = resH + 'px';
+            w = resW; h = resH;
         } else {
-            const cW    = previewInner.clientWidth  || 640;
-            const cH    = previewInner.clientHeight || 360;
-            const scale = Math.min(cW / resW, cH / resH);
-            previewContent.style.width  = Math.floor(resW * scale) + 'px';
-            previewContent.style.height = Math.floor(resH * scale) + 'px';
+            const cW = previewInner.clientWidth  || 640;
+            const cH = previewInner.clientHeight || 360;
+            const sc = Math.min(cW / resW, cH / resH);
+            w = Math.floor(resW * sc); h = Math.floor(resH * sc);
         }
+        previewContent.style.width  = w + 'px';
+        previewContent.style.height = h + 'px';
+        if (previewContentNext) {
+            const iW   = previewInner.clientWidth  || 640;
+            const iH   = previewInner.clientHeight || 360;
+            const left = Math.floor((iW - w) / 2);
+            const top  = Math.floor((iH - h) / 2);
+            previewContentNext.style.width  = w + 'px';
+            previewContentNext.style.height = h + 'px';
+            previewContentNext.style.left   = left + 'px';
+            previewContentNext.style.top    = top  + 'px';
+            if (transOverlayEl) {
+                transOverlayEl.style.width  = w + 'px';
+                transOverlayEl.style.height = h + 'px';
+                transOverlayEl.style.left   = left + 'px';
+                transOverlayEl.style.top    = top  + 'px';
+            }
+        }
+    }
+
+    // ── Transition preview ────────────────────────────────────────────────────
+    function _applyTransitionCSS(type, p) {
+        if (!previewContentNext) return;
+        const zT = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
+        previewContent.style.opacity  = '1';
+        previewContent.style.clipPath = '';
+        previewContentNext.style.opacity  = '1';
+        previewContentNext.style.clipPath = '';
+        if (transOverlayEl) transOverlayEl.style.display = 'none';
+        switch (type) {
+            case 'fade': case 'crossfade': case 'dissolve':
+                previewContent.style.opacity = String(1 - p);
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'fadeblack': case 'fadegrays': {
+                const col = type === 'fadegrays' ? '#888' : '#000';
+                if (transOverlayEl) { transOverlayEl.style.display = 'block'; transOverlayEl.style.background = col; }
+                if (p < 0.5) {
+                    previewContent.style.opacity = String(1 - p * 2);
+                    if (transOverlayEl) transOverlayEl.style.opacity = String(p * 2);
+                } else {
+                    previewContent.style.opacity = '0';
+                    if (transOverlayEl) transOverlayEl.style.opacity = String((1 - p) * 2);
+                }
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            }
+            case 'fadewhite':
+                if (transOverlayEl) { transOverlayEl.style.display = 'block'; transOverlayEl.style.background = '#fff'; }
+                if (p < 0.5) {
+                    previewContent.style.opacity = String(1 - p * 2);
+                    if (transOverlayEl) transOverlayEl.style.opacity = String(p * 2);
+                } else {
+                    previewContent.style.opacity = '0';
+                    if (transOverlayEl) transOverlayEl.style.opacity = String((1 - p) * 2);
+                }
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'slideleft':
+                previewContent.style.transform = `translateX(${-p * 100}%) ${zT}`.trim();
+                previewContentNext.style.transform = `translateX(${(1 - p) * 100}%)`;
+                break;
+            case 'slideright':
+                previewContent.style.transform = `translateX(${p * 100}%) ${zT}`.trim();
+                previewContentNext.style.transform = `translateX(${-(1 - p) * 100}%)`;
+                break;
+            case 'slideup':
+                previewContent.style.transform = `translateY(${-p * 100}%) ${zT}`.trim();
+                previewContentNext.style.transform = `translateY(${(1 - p) * 100}%)`;
+                break;
+            case 'slidedown':
+                previewContent.style.transform = `translateY(${p * 100}%) ${zT}`.trim();
+                previewContentNext.style.transform = `translateY(${-(1 - p) * 100}%)`;
+                break;
+            case 'wipeleft':
+                previewContent.style.clipPath = `inset(0 ${p * 100}% 0 0)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'wiperight':
+                previewContent.style.clipPath = `inset(0 0 0 ${p * 100}%)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'wipeup':
+                previewContent.style.clipPath = `inset(${p * 100}% 0 0 0)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'wipedown':
+                previewContent.style.clipPath = `inset(0 0 ${p * 100}% 0)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'zoomin':
+                previewContent.style.transform = `scale(${1 + p * 0.3}) ${zT}`.trim();
+                previewContent.style.opacity = String(1 - p);
+                previewContentNext.style.transform = '';
+                break;
+            case 'hblur': case 'pixelize':
+                previewContent.style.opacity = String(1 - p);
+                previewContent.style.filter  = `blur(${p * 15}px)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.opacity = String(p);
+                previewContentNext.style.filter  = `blur(${(1 - p) * 10}px)`;
+                previewContentNext.style.transform = '';
+                break;
+            case 'circlecrop': case 'radial':
+                previewContent.style.clipPath = `circle(${(1 - p) * 72}% at 50% 50%)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'hlslice':
+                previewContent.style.clipPath = `inset(0 ${p * 50}% 0 ${p * 50}%)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            case 'vuslice':
+                previewContent.style.clipPath = `inset(${p * 50}% 0 ${p * 50}% 0)`;
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+                break;
+            default:
+                previewContent.style.opacity = String(1 - p);
+                previewContent.style.transform = zT;
+                previewContentNext.style.transform = '';
+        }
+    }
+
+    function _resetTransitionPreview() {
+        if (!previewContentNext) return;
+        const zT = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
+        previewContent.style.opacity  = '1';
+        previewContent.style.clipPath = '';
+        if (zT) previewContent.style.transform = zT;
+        else previewContent.style.transform = '';
+        previewContentNext.style.display   = 'none';
+        previewContentNext.style.opacity   = '1';
+        previewContentNext.style.transform = '';
+        previewContentNext.style.clipPath  = '';
+        previewContentNext.style.filter    = '';
+        if (transOverlayEl) transOverlayEl.style.display = 'none';
+        if (previewVideoNext && !previewVideoNext.paused) previewVideoNext.pause();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -730,17 +936,6 @@ export async function init() {
                 ${clip.type === 'video' ? '<div class="ive-tl-clip-badge">▶</div><div class="ive-tl-clip-resize-left"></div>' : ''}
                 <div class="ive-tl-clip-resize" data-ridx="${i}"></div>`;
 
-            // Transition badge on right edge
-            const trans = clip.transition;
-            if (trans?.type && trans.type !== 'none') {
-                const tdurPx = Math.max(4, Math.min((trans.duration || 0.5) * S.pxPerSec, dur * S.pxPerSec * 0.4));
-                const badge = document.createElement('div');
-                badge.className = 'ive-tl-trans-badge';
-                badge.style.width = tdurPx + 'px';
-                badge.title = `${trans.type} (${trans.duration || 0.5}s)`;
-                div.appendChild(badge);
-            }
-
             div.addEventListener('click', e => {
                 if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
                 _selectClip(i);
@@ -831,6 +1026,36 @@ export async function init() {
             }
             videoTrackEl.appendChild(div);
             cursor += dur;
+        });
+        // Add inter-clip transition blocks centered at clip boundaries
+        let tCursor = 0;
+        S.clips.forEach((clip, i) => {
+            const dur = clip.duration || 3;
+            if (i > 0) {
+                const prev = S.clips[i - 1];
+                const trans = prev.transition;
+                if (trans?.type && trans.type !== 'none') {
+                    const transDur  = trans.duration || 0.5;
+                    const transDurPx = Math.max(20, transDur * S.pxPerSec);
+                    const junctionX  = tCursor * S.pxPerSec;
+                    const block = document.createElement('div');
+                    block.className = 'ive-tl-trans-block';
+                    block.style.left  = (junctionX - transDurPx / 2) + 'px';
+                    block.style.width = transDurPx + 'px';
+                    const lbl = TRANSITIONS.find(t => t.value === trans.type)?.label || trans.type;
+                    block.innerHTML = `<span class="ive-tl-trans-label">${eh(lbl)}</span><span class="ive-tl-trans-dur">${transDur}s</span>`;
+                    block.addEventListener('click', e => {
+                        e.stopPropagation();
+                        _selectClip(i - 1);
+                        S.activeTab = 'slide';
+                        document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                        document.querySelector('[data-ptab="slide"]')?.classList.add('active');
+                        renderProps();
+                    });
+                    videoTrackEl.appendChild(block);
+                }
+            }
+            tCursor += dur;
         });
     }
 
@@ -1025,17 +1250,27 @@ export async function init() {
     function renderPreview() {
         const info = clipAtTime(S.currentTime);
         if (!info) {
-            previewImg.style.display   = 'none';
-            previewVideo.style.display = 'none';
-            previewEmpty.style.display = 'flex';
-            subOverlay.style.display   = 'none';
+            previewImg.style.display    = 'none';
+            previewVideo.style.display  = 'none';
+            previewEmpty.style.display  = 'flex';
+            subOverlay.style.display    = 'none';
             previewContent.style.filter = '';
+            _resetTransitionPreview();
             return;
         }
-        const { clip, local } = info;
-        previewEmpty.style.display   = 'none';
-        previewContent.style.filter  = buildCSSFilter(clip.effects || []);
+        const { clip, idx, local } = info;
+        const clipDur   = clip.duration || 3;
+        const nextClip  = S.clips[idx + 1];
+        const trans     = clip.transition;
+        const transType = (trans?.type && trans.type !== 'none') ? trans.type : 'none';
+        const transDur  = Math.max(0.01, parseFloat(trans?.duration || 0.5));
+        const inTrans   = transType !== 'none' && nextClip && local >= clipDur - transDur;
+        const transProgress = inTrans ? Math.max(0, Math.min(1, (local - (clipDur - transDur)) / transDur)) : 0;
 
+        previewEmpty.style.display  = 'none';
+        previewContent.style.filter = inTrans ? '' : buildCSSFilter(clip.effects || []);
+
+        // Show current clip
         if (clip.type === 'image') {
             previewVideo.style.display = 'none';
             if (previewImg.dataset.src !== clip.fileUrl) {
@@ -1057,15 +1292,46 @@ export async function init() {
                 if (!previewVideo.paused) previewVideo.pause();
             } else {
                 if (previewVideo.paused) previewVideo.play().catch(() => {});
-                // Keep video in sync with project time
                 if (Math.abs(previewVideo.currentTime - videoTime) > 0.3) previewVideo.currentTime = videoTime;
             }
         }
 
-        // Find active subtitle: check global S.subtitles first (independent track)
+        // Transition preview: show next clip and apply CSS effect
+        if (inTrans && previewContentNext) {
+            const nextLocal = transProgress * transDur;
+            if (nextClip.type === 'image') {
+                previewVideoNext.style.display = 'none';
+                if (previewImgNext.dataset.src !== nextClip.fileUrl) {
+                    previewImgNext.src = nextClip.fileUrl; previewImgNext.dataset.src = nextClip.fileUrl;
+                }
+                previewImgNext.style.display = 'block';
+            } else {
+                previewImgNext.style.display = 'none';
+                if (previewVideoNext.dataset.src !== nextClip.fileUrl) {
+                    previewVideoNext.src = nextClip.fileUrl; previewVideoNext.dataset.src = nextClip.fileUrl;
+                    previewVideoNext.load();
+                }
+                previewVideoNext.style.display = 'block';
+                const nVT = nextLocal + (nextClip.trimIn || 0);
+                const nSpeed = nextClip.speed ?? 1;
+                if (previewVideoNext.playbackRate !== nSpeed) previewVideoNext.playbackRate = nSpeed;
+                if (!S.isPlaying) {
+                    if (Math.abs(previewVideoNext.currentTime - nVT) > 0.15) previewVideoNext.currentTime = nVT;
+                    if (!previewVideoNext.paused) previewVideoNext.pause();
+                } else {
+                    if (previewVideoNext.paused) previewVideoNext.play().catch(() => {});
+                    if (Math.abs(previewVideoNext.currentTime - nVT) > 0.3) previewVideoNext.currentTime = nVT;
+                }
+            }
+            previewContentNext.style.display = 'block';
+            _applyTransitionCSS(transType, transProgress);
+        } else {
+            _resetTransitionPreview();
+        }
+
+        // Find active subtitle
         const t = S.currentTime;
         let activeSub = S.subtitles.find(s => t >= (s.start || 0) && t <= (s.end ?? 3));
-        // Fall back to per-clip subtitles
         if (!activeSub && clip) {
             activeSub = (clip.subtitles || []).find(s => local >= (s.start || 0) && local <= (s.end ?? clip.duration));
         }

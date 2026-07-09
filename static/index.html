@@ -232,6 +232,7 @@
                     <button class="hist-type-btn" data-htype="subtitles">Субтитры</button>
                     <button class="hist-type-btn" data-htype="video">Видео</button>
                     <button class="hist-type-btn" data-htype="templates">Шаблоны</button>
+                    <button class="hist-type-btn" data-htype="projects">Проекты</button>
                 </div>
                 <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
             </div>
@@ -307,6 +308,11 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Projects (.amur) -->
+            <div class="hist-section" id="hist-section-projects" hidden>
+                <div id="hist-proj-list" class="hist-list"></div>
             </div>
         </section>
 
@@ -804,8 +810,15 @@
                     <!-- Preview -->
                     <div class="ive-preview-wrap">
                         <div class="ive-preview-inner" id="ive-preview-inner">
+                            <!-- Next-clip layer for CSS transition preview (behind main layer) -->
+                            <div id="ive-preview-content-next" class="ive-preview-content" style="display:none;position:absolute;z-index:1">
+                                <img   id="ive-preview-img-next"   style="display:none" alt="">
+                                <video id="ive-preview-video-next" style="display:none" muted playsinline></video>
+                            </div>
+                            <!-- Solid-color overlay for fadeblack/fadewhite transitions -->
+                            <div id="ive-trans-overlay" style="display:none;position:absolute;z-index:9;pointer-events:none;background:#000;"></div>
                             <!-- Zoom-able content layer -->
-                            <div id="ive-preview-content" class="ive-preview-content">
+                            <div id="ive-preview-content" class="ive-preview-content" style="position:relative;z-index:2">
                                 <img    id="ive-preview-img"   style="display:none" alt="">
                                 <video  id="ive-preview-video" style="display:none" muted playsinline></video>
                                 <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
@@ -880,6 +893,11 @@
                         <div class="ive-project-name-wrap">
                             <input class="ive-input" type="text" id="ive-project-name" placeholder="Название проекта" value="Новый проект">
                             <button class="btn" id="ive-save-btn">Сохранить</button>
+                            <button class="btn btn-sm" id="ive-save-amur-btn" title="Скачать проект как .amur">⬇ .amur</button>
+                            <label class="btn btn-sm" title="Открыть .amur проект" style="cursor:pointer;margin:0">
+                                ↑ .amur
+                                <input type="file" id="ive-open-amur-input" accept=".amur" style="display:none">
+                            </label>
                         </div>
                         <div class="ive-export-settings">
                             <select class="ive-select" id="ive-exp-format">

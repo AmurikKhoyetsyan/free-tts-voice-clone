@@ -145,8 +145,9 @@
     transition: outline-color 0.15s;
 }
 .ive-sub-overlay.selected {
-    outline: 2px dashed rgba(255, 200, 0, 0.9);
-    outline-offset: 6px;
+    outline: 2px dashed rgba(255, 210, 0, 0.95);
+    outline-offset: 8px;
+    box-shadow: 0 0 0 10px rgba(255, 200, 0, 0.08);
 }
 
 /* ── Professional Transport Bar ─────────────────────────────────────────── */
@@ -318,10 +319,28 @@
 .ive-tl-clip.dragging { opacity: .4; }
 .ive-tl-clip.drag-over { outline: 2px solid var(--accent); }
 
-.ive-tl-trans-badge {
-    position: absolute; right: 0; top: 0; bottom: 0;
-    background: linear-gradient(to right, transparent, rgba(249,115,22,0.45));
-    pointer-events: none; z-index: 1;
+.ive-tl-trans-block {
+    position: absolute;
+    top: 2px; bottom: 2px;
+    min-width: 20px;
+    background: rgba(249,115,22,0.2);
+    border: 1px solid rgba(249,115,22,0.65);
+    border-radius: 4px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 8;
+    pointer-events: auto;
+    cursor: pointer;
+    overflow: hidden;
+}
+.ive-tl-trans-block:hover { background: rgba(249,115,22,0.38); border-color: var(--accent); }
+.ive-tl-trans-label {
+    font-size: 8px; color: #f97316; font-weight: 700;
+    text-transform: uppercase; white-space: nowrap;
+    overflow: hidden; max-width: 100%; text-overflow: ellipsis; padding: 0 2px; line-height: 1.2;
+}
+.ive-tl-trans-dur {
+    font-size: 7px; color: rgba(249,115,22,0.7); white-space: nowrap; line-height: 1;
 }
 
 .ive-tl-clip-thumb { width: 100%; height: 38px; object-fit: cover; flex-shrink: 0; display: block; }

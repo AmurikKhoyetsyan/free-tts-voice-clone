@@ -1,6 +1,6 @@
-import os, re, json, uuid, shutil, subprocess, tempfile, threading, queue, datetime
+import os, re, json, uuid, shutil, subprocess, tempfile, threading, queue, datetime, io, zipfile
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -225,6 +225,7 @@ class ProjectBody(BaseModel):
     name:            str = "Без названия"
     slides:          list = []
     audio:           list = []
+    subtitles:       list = []
     export_settings: dict = {}
 
 
@@ -244,6 +245,7 @@ async def save_project(body: ProjectBody):
         "id": pid, "name": body.name,
         "created_at": existing_created, "updated_at": now,
         "slides": body.slides, "audio": body.audio,
+        "subtitles": body.subtitles,
         "export_settings": body.export_settings,
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -289,6 +291,92 @@ async def delete_project(pid: str):
         os.remove(path)
     app_log(f"Project deleted: {pid}", "INFO", "ImgVid")
     return {"ok": True}
+
+# ── .amur format (pack/unpack) ────────────────────────────────────────────────
+
+@router.get("/projects/{pid}/pack")
+async def pack_project_amur(pid: str):
+    path = os.path.join(PROJECTS_DIR, f"{pid}.json")
+    if not os.path.exists(path):
+        raise HTTPException(404, "Проект не найден")
+    with open(path, encoding="utf-8") as f:
+        project = json.load(f)
+    files_to_pack = []
+    for slide in project.get("slides", []):
+        fn = slide.get("file") or slide.get("image", "")
+        if fn:
+            for d in (IMAGES_DIR, CLIPS_DIR):
+                fp = os.path.join(d, fn)
+                if os.path.exists(fp):
+                    sub = "clips" if d == CLIPS_DIR else "images"
+                    files_to_pack.append((f"media/{sub}/{fn}", fp))
+                    break
+        thumb_url = slide.get("thumbUrl", "")
+        if thumb_url:
+            tname = thumb_url.split("/")[-1]
+            tp = os.path.join(THUMBS_DIR, tname)
+            if os.path.exists(tp):
+                files_to_pack.append((f"media/thumbs/{tname}", tp))
+    for track in project.get("audio", []):
+        fn = track.get("file", "")
+        if fn:
+            fp = os.path.join(AUDIO_DIR, fn)
+            if os.path.exists(fp):
+                files_to_pack.append((f"media/audio/{fn}", fp))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("project.json", json.dumps(project, ensure_ascii=False, indent=2))
+        for arc_name, file_path in files_to_pack:
+            zf.write(file_path, arc_name)
+    buf.seek(0)
+    safe_name = re.sub(r'[^\w\-]', '_', project.get("name", "project"))
+    app_log(f"Project packed as .amur: {pid}", "INFO", "ImgVid")
+    return Response(
+        content=buf.read(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.amur"'},
+    )
+
+
+@router.post("/amur/unpack")
+async def unpack_amur(file: UploadFile = File(...)):
+    content = await file.read()
+    buf = io.BytesIO(content)
+    try:
+        with zipfile.ZipFile(buf, 'r') as zf:
+            names = zf.namelist()
+            if "project.json" not in names:
+                raise HTTPException(400, "Неверный .amur: project.json не найден")
+            project = json.loads(zf.read("project.json").decode("utf-8"))
+            for arc_name in names:
+                if arc_name == "project.json":
+                    continue
+                fname = os.path.basename(arc_name)
+                if not fname:
+                    continue
+                data = zf.read(arc_name)
+                if arc_name.startswith("media/images/"):
+                    dest = os.path.join(IMAGES_DIR, fname)
+                elif arc_name.startswith("media/clips/"):
+                    dest = os.path.join(CLIPS_DIR, fname)
+                elif arc_name.startswith("media/audio/"):
+                    dest = os.path.join(AUDIO_DIR, fname)
+                elif arc_name.startswith("media/thumbs/"):
+                    dest = os.path.join(THUMBS_DIR, fname)
+                else:
+                    continue
+                with open(dest, 'wb') as f2:
+                    f2.write(data)
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Повреждённый .amur файл")
+    pid = project.get("id") or uuid.uuid4().hex
+    project["id"] = pid
+    project["updated_at"] = datetime.datetime.now().isoformat()
+    ppath = os.path.join(PROJECTS_DIR, f"{pid}.json")
+    with open(ppath, "w", encoding="utf-8") as f3:
+        json.dump(project, f3, ensure_ascii=False, indent=2)
+    app_log(f"Project unpacked from .amur: {project.get('name', pid)}", "INFO", "ImgVid")
+    return project
 
 # ── Output ────────────────────────────────────────────────────────────────────
 
