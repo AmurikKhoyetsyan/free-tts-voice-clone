@@ -592,22 +592,45 @@ async def export_video(
                 total_dur = sum(float(s.get("duration", 3)) for s in slides)
                 if valid_audio:
                     if len(valid_audio) == 1:
-                        t   = valid_audio[0]
-                        ai  = audio_start_idx
-                        vol = float(t.get("volume", 1.0))
-                        fi  = float(t.get("fade_in", 0))
-                        fo  = float(t.get("fade_out", 0))
-                        af  = [f"volume={vol}"]
+                        t           = valid_audio[0]
+                        ai          = audio_start_idx
+                        vol         = float(t.get("volume", 1.0))
+                        fi          = float(t.get("fadeIn", t.get("fade_in", 0)))
+                        fo          = float(t.get("fadeOut", t.get("fade_out", 0)))
+                        trim_in     = float(t.get("trimIn", 0))
+                        start_off   = float(t.get("startOffset", 0))
+                        track_dur   = t.get("duration")
+                        track_dur_f = float(track_dur) if track_dur is not None else None
+                        af = []
+                        if trim_in > 0:
+                            af.append(f"atrim=start={trim_in:.3f}")
+                            af.append("asetpts=PTS-STARTPTS")
+                        af.append(f"volume={vol}")
                         if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
-                        if fo > 0: af.append(f"afade=t=out:st={max(0, total_dur-fo):.2f}:d={fo:.2f}")
+                        if fo > 0:
+                            fade_start = (track_dur_f - fo) if track_dur_f else max(0, total_dur - fo - start_off)
+                            af.append(f"afade=t=out:st={max(0, fade_start):.2f}:d={fo:.2f}")
+                        if start_off > 0:
+                            delay_ms = int(start_off * 1000)
+                            af.append(f"adelay={delay_ms}|{delay_ms}")
                         af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
                         filter_parts.append(f"[{ai}:a]{','.join(af)}[aout]")
                         audio_map = ["-map", "[aout]"]
                     else:
                         for j, t in enumerate(valid_audio):
-                            ai  = audio_start_idx + j
-                            vol = float(t.get("volume", 1.0))
-                            filter_parts.append(f"[{ai}:a]volume={vol}[a{j}]")
+                            ai          = audio_start_idx + j
+                            vol         = float(t.get("volume", 1.0))
+                            trim_in     = float(t.get("trimIn", 0))
+                            start_off   = float(t.get("startOffset", 0))
+                            af = []
+                            if trim_in > 0:
+                                af.append(f"atrim=start={trim_in:.3f}")
+                                af.append("asetpts=PTS-STARTPTS")
+                            af.append(f"volume={vol}")
+                            if start_off > 0:
+                                delay_ms = int(start_off * 1000)
+                                af.append(f"adelay={delay_ms}|{delay_ms}")
+                            filter_parts.append(f"[{ai}:a]{','.join(af)}[a{j}]")
                         amix_in = "".join(f"[a{j}]" for j in range(len(valid_audio)))
                         filter_parts.append(
                             f"{amix_in}amix=inputs={len(valid_audio)}:duration=first,"
@@ -712,3 +735,30 @@ async def export_video(
                 break
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/extract-audio")
+async def extract_audio_from_video(body: dict):
+    file = body.get("file", "")
+    if not file:
+        raise HTTPException(400, "No file specified")
+    vp = os.path.join(CLIPS_DIR, file)
+    if not os.path.exists(vp):
+        raise HTTPException(404, "Video file not found")
+    _NO_WIN = 0x08000000 if os.name == "nt" else 0
+    ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_name = f"ext_{ts}.wav"
+    out_path = os.path.join(AUDIO_DIR, out_name)
+    cmd = [FFMPEG, "-y", "-nostdin", "-i", vp, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", out_path]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                stdin=subprocess.DEVNULL, creationflags=_NO_WIN)
+        proc.wait(timeout=120)
+    except Exception as exc:
+        raise HTTPException(500, f"FFmpeg error: {exc}")
+    if not os.path.exists(out_path):
+        raise HTTPException(500, "FFmpeg did not create output file")
+    duration = _probe_duration_clip(out_path)
+    original = f"audio_from_{os.path.splitext(file)[0]}.wav"
+    app_log(f"Audio extracted: {out_name} ({duration}s)", "INFO", "ImgVid")
+    return {"name": out_name, "url": f"/api/imgvid/audio/{out_name}", "original": original, "duration": duration}
