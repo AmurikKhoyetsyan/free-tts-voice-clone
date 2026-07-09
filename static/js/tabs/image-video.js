@@ -1440,20 +1440,18 @@ export async function init() {
         const subs = S.subtitles;
         propsBody.innerHTML = `
     <div class="ive-subs-header">
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
-            <button class="btn btn-sm" id="pv-add-sub">+ Субтитр</button>
-            ${S.selSubIdx >= 0 && subs.length > 1 ? `<button class="btn btn-sm" id="pv-apply-style-all" title="Применить стиль выделенного субтитра ко всем остальным">Стиль → все</button>` : ''}
-        </div>
+        <button class="btn btn-sm" id="pv-add-sub">+ Субтитр</button>
         <span style="font-size:10px;color:var(--text-dim)">Независимая дорожка</span>
     </div>
     <div id="pv-subs-list">${subs.map((sub, si) => `
     <div class="ive-sub-item${si === S.selSubIdx ? ' ive-sub-sel' : ''}" data-subitem="${si}">
         <div class="ive-sub-hdr">
             <span>#${si + 1}</span>
-            <div style="display:flex;gap:2px">
+            <div style="display:flex;gap:2px;align-items:center">
                 <button class="ive-style-btn${sub.bold      ? ' active' : ''}" data-sbf="bold"      data-si="${si}"><b>B</b></button>
                 <button class="ive-style-btn${sub.italic    ? ' active' : ''}" data-sbf="italic"    data-si="${si}"><i>I</i></button>
                 <button class="ive-style-btn${sub.underline ? ' active' : ''}" data-sbf="underline" data-si="${si}"><u>U</u></button>
+                ${subs.length > 1 ? `<button class="btn btn-xs" data-apply-all="${si}" title="Применить стиль этого субтитра ко всем">→ все</button>` : ''}
                 <button class="hist-btn danger" data-sdel="${si}">${ICONS.trash}</button>
             </div>
         </div>
@@ -1533,20 +1531,24 @@ export async function init() {
         </details>
     </div>`).join('')}</div>`;
 
-        $('pv-apply-style-all')?.addEventListener('click', () => {
-            const src = S.subtitles[S.selSubIdx]; if (!src) return;
-            const keys = ['fontFamily','fontSize','color','bold','italic','underline',
-                          'outline','outlineColor','shadow','shadowColor',
-                          'bgColor','bgOpacity','bgPadX','bgPadY','bgRadius',
-                          'animation','animDuration','align','lineHeight',
-                          'karaokeEnable','karaokeColor',
-                          'x','y','rotation'];
-            S.subtitles.forEach((sub, si) => {
-                if (si === S.selSubIdx) return;
-                keys.forEach(k => { if (src[k] !== undefined) sub[k] = src[k]; });
+        propsBody.querySelectorAll('[data-apply-all]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                const srcIdx = +btn.dataset.applyAll;
+                const src = S.subtitles[srcIdx]; if (!src) return;
+                const keys = ['fontFamily','fontSize','color','bold','italic','underline',
+                              'outline','outlineColor','shadow','shadowColor',
+                              'bgColor','bgOpacity','bgPadX','bgPadY','bgRadius',
+                              'animation','animDuration','align','lineHeight',
+                              'karaokeEnable','karaokeColor',
+                              'x','y','rotation'];
+                S.subtitles.forEach((sub, si) => {
+                    if (si === srcIdx) return;
+                    keys.forEach(k => { if (src[k] !== undefined) sub[k] = src[k]; });
+                });
+                S.dirty = true; renderProps(); renderPreview();
+                toast(`Стиль #${srcIdx + 1} применён к ${subs.length - 1} субтитрам`, 'ok');
             });
-            S.dirty = true; renderProps(); renderPreview();
-            toast(`Стиль применён к ${subs.length} субтитрам`, 'ok');
         });
 
         $('pv-add-sub').addEventListener('click', () => {

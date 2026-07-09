@@ -521,6 +521,13 @@
     font-size: 11px; font-weight: 600; color: var(--text-dim);
 }
 
+.btn-xs {
+    font-size: 10px; padding: 1px 5px; height: 20px; line-height: 1;
+    border: 1px solid var(--border-strong); border-radius: 3px;
+    background: var(--surface-2); color: var(--text-muted); cursor: pointer;
+}
+.btn-xs:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
 /* Audio props */
 .ive-audio-props-item {
     background: var(--bg1); border: 1px solid var(--border);
