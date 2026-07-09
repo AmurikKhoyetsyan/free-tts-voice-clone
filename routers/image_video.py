@@ -227,6 +227,7 @@ class ProjectBody(BaseModel):
     slides:          list = []
     audio:           list = []
     subtitles:       list = []
+    pip:             list = []
     export_settings: dict = {}
 
 
@@ -247,6 +248,7 @@ async def save_project(body: ProjectBody):
         "created_at": existing_created, "updated_at": now,
         "slides": body.slides, "audio": body.audio,
         "subtitles": body.subtitles,
+        "pip": body.pip,
         "export_settings": body.export_settings,
     }
     with open(path, "w", encoding="utf-8") as f:
@@ -293,9 +295,9 @@ async def delete_project(pid: str):
     app_log(f"Project deleted: {pid}", "INFO", "ImgVid")
     return {"ok": True}
 
-# ── .amur format helpers ──────────────────────────────────────────────────────
+# ── .project format helpers ───────────────────────────────────────────────────
 
-def _make_amur_buf(project: dict) -> io.BytesIO:
+def _make_project_buf(project: dict) -> io.BytesIO:
     files_to_pack = []
     for slide in project.get("slides", []):
         fn = slide.get("file") or slide.get("image", "")
@@ -327,10 +329,10 @@ def _make_amur_buf(project: dict) -> io.BytesIO:
     return buf
 
 
-def _extract_amur_zip(zf: zipfile.ZipFile) -> dict:
+def _extract_project_zip(zf: zipfile.ZipFile) -> dict:
     names = zf.namelist()
     if "project.json" not in names:
-        raise HTTPException(400, "Неверный .amur: project.json не найден")
+        raise HTTPException(400, "Неверный .project: project.json не найден")
     project = json.loads(zf.read("project.json").decode("utf-8"))
     for arc_name in names:
         if arc_name == "project.json":
@@ -363,68 +365,75 @@ def _finalize_project(project: dict) -> dict:
         json.dump(project, fh, ensure_ascii=False, indent=2)
     return project
 
-# ── .amur format (pack/unpack) ────────────────────────────────────────────────
+# ── .project format (pack/unpack) ─────────────────────────────────────────────
 
 @router.get("/projects/{pid}/pack")
-async def pack_project_amur(pid: str):
+async def pack_project(pid: str):
     path = os.path.join(PROJECTS_DIR, f"{pid}.json")
     if not os.path.exists(path):
         raise HTTPException(404, "Проект не найден")
     with open(path, encoding="utf-8") as f:
         project = json.load(f)
-    buf = _make_amur_buf(project)
+    buf = _make_project_buf(project)
     safe_name = re.sub(r'[^\w\-]', '_', project.get("name", "project"))
-    app_log(f"Project packed as .amur: {pid}", "INFO", "ImgVid")
+    app_log(f"Project packed as .project: {pid}", "INFO", "ImgVid")
     return Response(
         content=buf.read(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.amur"'},
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.project"'},
     )
 
 
-@router.post("/amur/unpack")
-async def unpack_amur(file: UploadFile = File(...)):
+@router.post("/project/unpack")
+async def unpack_project(file: UploadFile = File(...)):
     content = await file.read()
     buf = io.BytesIO(content)
     try:
         with zipfile.ZipFile(buf, 'r') as zf:
-            project = _extract_amur_zip(zf)
+            project = _extract_project_zip(zf)
     except zipfile.BadZipFile:
-        raise HTTPException(400, "Повреждённый .amur файл")
+        raise HTTPException(400, "Повреждённый .project файл")
     project = _finalize_project(project)
-    app_log(f"Project unpacked from .amur: {project.get('name', project['id'])}", "INFO", "ImgVid")
+    app_log(f"Project unpacked from .project: {project.get('name', project['id'])}", "INFO", "ImgVid")
     return project
 
 
-class AmurSaveBody(BaseModel):
+class ProjectSaveBody(BaseModel):
     pid: str
     dir: str = ""
     filename: str = ""
 
-@router.post("/amur/save-to-path")
-async def save_amur_to_path(body: AmurSaveBody):
+@router.post("/project/save-to-path")
+async def save_project_to_path(body: ProjectSaveBody):
     proj_path = os.path.join(PROJECTS_DIR, f"{body.pid}.json")
     if not os.path.exists(proj_path):
+        app_log(f"Project not found for save-to-path: {body.pid}", "ERROR", "ImgVid")
         raise HTTPException(404, "Проект не найден")
-    with open(proj_path, encoding="utf-8") as f:
-        project = json.load(f)
-    target_dir = body.dir if body.dir else SAVED_PROJECTS_DIR
-    if not os.path.isabs(target_dir):
-        target_dir = os.path.join(BASE_DIR, target_dir)
-    os.makedirs(target_dir, exist_ok=True)
-    fname = body.filename or (re.sub(r'[^\w\-]', '_', project.get("name", "project")) + ".amur")
-    if not fname.lower().endswith('.amur'):
-        fname += '.amur'
-    dest = os.path.join(target_dir, fname)
-    buf = _make_amur_buf(project)
-    with open(dest, 'wb') as fh:
-        fh.write(buf.read())
-    app_log(f"Project saved as .amur: {dest}", "INFO", "ImgVid")
-    return {"ok": True, "path": dest, "filename": fname}
+    try:
+        with open(proj_path, encoding="utf-8") as f:
+            project = json.load(f)
+        target_dir = body.dir if body.dir else SAVED_PROJECTS_DIR
+        if not os.path.isabs(target_dir):
+            target_dir = os.path.join(BASE_DIR, target_dir)
+        os.makedirs(target_dir, exist_ok=True)
+        fname = body.filename or (re.sub(r'[^\w\-]', '_', project.get("name", "project")) + ".project")
+        if not fname.lower().endswith('.project'):
+            fname += '.project'
+        dest = os.path.join(target_dir, fname)
+        buf = _make_project_buf(project)
+        with open(dest, 'wb') as fh:
+            fh.write(buf.read())
+        app_log(f"Project saved as .project: {dest}", "INFO", "ImgVid")
+        return {"ok": True, "path": dest, "filename": fname}
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_log(f"Error saving .project to path: {e}", "ERROR", "ImgVid")
+        raise HTTPException(500, f"Ошибка сохранения проекта: {e}")
 
 
-@router.get("/amur/browse")
-async def browse_amur(path: str = ""):
+@router.get("/project/browse")
+async def browse_project(path: str = ""):
     if path and os.path.isabs(path):
         target = path
     elif path:
@@ -437,7 +446,7 @@ async def browse_amur(path: str = ""):
     try:
         for fn in os.listdir(target):
             fp = os.path.join(target, fn)
-            if os.path.isfile(fp) and fn.lower().endswith('.amur'):
+            if os.path.isfile(fp) and fn.lower().endswith('.project'):
                 files.append({
                     "name": fn, "path": fp,
                     "size": os.path.getsize(fp),
@@ -454,27 +463,33 @@ async def browse_amur(path: str = ""):
     }
 
 
-class AmurLoadBody(BaseModel):
+class ProjectLoadBody(BaseModel):
     file_path: str
 
-@router.post("/amur/load-from-path")
-async def load_amur_from_path(body: AmurLoadBody):
+@router.post("/project/load-from-path")
+async def load_project_from_path(body: ProjectLoadBody):
     dest = body.file_path
     if not os.path.isabs(dest):
         dest = os.path.join(BASE_DIR, dest)
     if not os.path.exists(dest):
         raise HTTPException(404, "Файл не найден")
-    with open(dest, 'rb') as fh:
-        content = fh.read()
-    buf = io.BytesIO(content)
     try:
+        with open(dest, 'rb') as fh:
+            content = fh.read()
+        buf = io.BytesIO(content)
         with zipfile.ZipFile(buf, 'r') as zf:
-            project = _extract_amur_zip(zf)
+            project = _extract_project_zip(zf)
+        project = _finalize_project(project)
+        app_log(f"Project loaded from path: {dest}", "INFO", "ImgVid")
+        return project
     except zipfile.BadZipFile:
-        raise HTTPException(400, "Повреждённый .amur файл")
-    project = _finalize_project(project)
-    app_log(f"Project loaded from path: {dest}", "INFO", "ImgVid")
-    return project
+        app_log(f"Corrupted .project file: {dest}", "ERROR", "ImgVid")
+        raise HTTPException(400, "Повреждённый .project файл")
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_log(f"Error loading .project from path: {e}", "ERROR", "ImgVid")
+        raise HTTPException(500, f"Ошибка загрузки проекта: {e}")
 
 # ── Output ────────────────────────────────────────────────────────────────────
 
@@ -519,7 +534,7 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         abs_start = float(sub.get("abs_start", 0))
         abs_end   = float(sub.get("abs_end", 3))
         font  = sub.get("fontFamily", "Arial")
-        size  = int(sub.get("fontSize", 48))
+        size  = int(sub.get("fontSize", 40))
         color = sub.get("color", "#ffffff").lstrip("#")
         try:
             r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
@@ -556,7 +571,7 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         if rotation:
             base += f"\\frz{rotation:.1f}"
 
-        # Background
+        # Background box via thick outline with matching color
         bg_op = float(sub.get("bgOpacity", 0))
         if bg_op > 0:
             bg_hex = sub.get("bgColor", "#000000").lstrip("#")
@@ -566,7 +581,9 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
                 back = f"&H{aa:02X}{bb:02X}{bg_c:02X}{br:02X}"
             except Exception:
                 back = "&H80000000"
-            base += f"\\3c{back}\\bord4"
+            # \3c sets outline color; \bord enlarges border to create box effect
+            # Preserve original outline color then override with background color
+            base += f"\\3c{back}\\shad0\\bord{max(outline, 8):.1f}"
 
         # Karaoke word-by-word highlight
         karaoke_on = bool(sub.get("karaokeEnable", False))
@@ -659,8 +676,38 @@ async def export_video(
         raise HTTPException(400, "Неверный JSON проекта")
 
     slides = project.get("slides", [])
+    pip_layers_raw = project.get("pip", project.get("pipLayers", []))
+
+    # ── Pre-export validation ────────────────────────────────────────────────
     if not slides:
-        raise HTTPException(400, "Нет слайдов для экспорта")
+        app_log("Export aborted: no slides", "WARN", "ImgVid")
+        raise HTTPException(400, "Нет клипов для экспорта")
+    if not output_format or output_format not in ("mp4", "mov", "mkv", "webm"):
+        app_log(f"Export aborted: invalid format '{output_format}'", "WARN", "ImgVid")
+        raise HTTPException(400, f"Неверный формат: {output_format}")
+    try:
+        _w, _h = map(int, resolution.split("x"))
+        if _w < 1 or _h < 1 or _w > 7680 or _h > 7680:
+            raise ValueError
+    except Exception:
+        app_log(f"Export aborted: invalid resolution '{resolution}'", "WARN", "ImgVid")
+        raise HTTPException(400, f"Неверное разрешение: {resolution}")
+    if fps not in (24, 25, 30, 60):
+        fps = 30
+    missing = []
+    for slide in slides:
+        clip_type = slide.get("type", "image")
+        fname = slide.get("file", slide.get("image", ""))
+        if clip_type == "video":
+            fp = os.path.join(CLIPS_DIR, fname)
+        else:
+            fp = os.path.join(IMAGES_DIR, fname)
+        if not os.path.exists(fp):
+            missing.append(fname)
+    if missing:
+        msg = f"Файлы не найдены: {', '.join(missing[:5])}"
+        app_log(f"Export aborted: {msg}", "ERROR", "ImgVid")
+        raise HTTPException(400, msg)
 
     try:
         width, height = map(int, resolution.split("x"))
@@ -675,6 +722,18 @@ async def export_video(
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 q.put(("progress", 0.03, "Подготовка…"))
+
+                # ── Resolve PIP layers ───────────────────────────────────────
+                valid_pip = []
+                for pip in pip_layers_raw:
+                    pip_type = pip.get("type", "image")
+                    fname = pip.get("file", "")
+                    if pip_type == "video":
+                        fp = os.path.join(CLIPS_DIR, fname)
+                    else:
+                        fp = os.path.join(IMAGES_DIR, fname)
+                    if os.path.exists(fp):
+                        valid_pip.append({**pip, "_path": fp})
 
                 # ── Inputs ───────────────────────────────────────────────────
                 cmd_inputs = []
@@ -704,6 +763,18 @@ async def export_video(
                     if os.path.exists(ap):
                         cmd_inputs += ["-i", ap]
                         valid_audio.append(track)
+
+                # Add PIP inputs after audio
+                _total_dur_approx = sum(float(s.get("duration", 3)) for s in slides)
+                pip_input_start = audio_start_idx + len(valid_audio)
+                for pip in valid_pip:
+                    pip_type = pip.get("type", "image")
+                    pip_path = pip["_path"]
+                    if pip_type == "video":
+                        cmd_inputs += ["-i", pip_path]
+                    else:
+                        # Loop image for entire duration
+                        cmd_inputs += ["-loop", "1", "-t", f"{_total_dur_approx:.3f}", "-i", pip_path]
 
                 # ── Per-slide filters ────────────────────────────────────────
                 q.put(("progress", 0.07, "Применение эффектов…"))
@@ -801,9 +872,58 @@ async def export_video(
                     last = prev
 
                 if sub_filter:
-                    filter_parts.append(f"[{last}]{sub_filter}[vout]")
+                    filter_parts.append(f"[{last}]{sub_filter}[vout_base]")
                 else:
-                    filter_parts.append(f"[{last}]null[vout]")
+                    filter_parts.append(f"[{last}]null[vout_base]")
+
+                # ── PIP overlays ─────────────────────────────────────────────
+                final_video_label = "vout_base"
+                for pi, pip in enumerate(valid_pip):
+                    pip_type    = pip.get("type", "image")
+                    px_pct      = float(pip.get("x", 5))
+                    py_pct      = float(pip.get("y", 5))
+                    pw_pct      = float(pip.get("w", 30))
+                    ph_pct      = float(pip.get("h", 20))
+                    pip_start   = float(pip.get("startTime", 0))
+                    pip_end     = float(pip.get("endTime", pip_start + 5))
+                    pip_opacity = float(pip.get("opacity", 1))
+                    pip_speed   = float(pip.get("speed", 1) or 1)
+                    pip_trimin  = float(pip.get("trimIn", 0) or 0)
+
+                    px = int(width  * px_pct / 100)
+                    py = int(height * py_pct / 100)
+                    pw = max(1, int(width  * pw_pct / 100))
+                    ph = max(1, int(height * ph_pct / 100))
+
+                    inp_idx = pip_input_start + pi
+                    pip_label_scaled = f"pip_s_{pi}"
+                    next_label       = f"vout_pip{pi}"
+
+                    # Build pip video filter chain
+                    pip_vf_parts = []
+                    if pip_type == "video":
+                        if pip_trimin > 0:
+                            pip_vf_parts.append(f"trim=start={pip_trimin:.3f},setpts=PTS-STARTPTS")
+                        if pip_speed != 1.0:
+                            pip_vf_parts.append(f"setpts={1.0/pip_speed:.6f}*PTS")
+                    pip_vf_parts.append(f"scale={pw}:{ph}")
+                    filter_parts.append(f"[{inp_idx}:v]{','.join(pip_vf_parts)}[{pip_label_scaled}]")
+
+                    # Opacity
+                    pip_label_in = pip_label_scaled
+                    if pip_opacity < 1.0:
+                        op_label = f"pip_op_{pi}"
+                        filter_parts.append(
+                            f"[{pip_label_in}]format=rgba,colorchannelmixer=aa={pip_opacity:.3f}[{op_label}]"
+                        )
+                        pip_label_in = op_label
+
+                    # Overlay with time enable
+                    enable = f"between(t\\,{pip_start:.3f}\\,{pip_end:.3f})"
+                    filter_parts.append(
+                        f"[{final_video_label}][{pip_label_in}]overlay={px}:{py}:enable='{enable}'[{next_label}]"
+                    )
+                    final_video_label = next_label
 
                 # ── Audio ────────────────────────────────────────────────────
                 audio_map = []
@@ -881,7 +1001,7 @@ async def export_video(
                     [FFMPEG, "-y", "-nostdin"]
                     + cmd_inputs
                     + ["-filter_complex", filter_complex]
-                    + ["-map", "[vout]"]
+                    + ["-map", f"[{final_video_label}]"]
                     + audio_map
                     + vcodec + acodec
                     + [out_path]

@@ -788,11 +788,13 @@
                                     <button class="btn btn-sm" id="ive-add-images-btn" title="Добавить фото">🖼</button>
                                     <button class="btn btn-sm" id="ive-add-video-btn"  title="Добавить видео">🎬</button>
                                     <button class="btn btn-sm" id="ive-add-audio-btn"  title="Добавить аудио">♪</button>
+                                    <button class="btn btn-sm" id="ive-add-pip-btn"   title="Добавить PIP слой">PIP</button>
                                 </div>
                             </div>
                             <input type="file" id="ive-image-input" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple hidden>
                             <input type="file" id="ive-video-input" accept=".mp4,.mov,.mkv,.webm,.avi" multiple hidden>
                             <input type="file" id="ive-audio-input" accept=".mp3,.wav,.aac,.flac,.ogg" hidden>
+                            <input type="file" id="ive-pip-input" accept=".jpg,.jpeg,.png,.webp,.bmp,.mp4,.mov,.mkv,.webm,.avi" hidden>
                             <div id="ive-media-list" class="ive-media-list"></div>
                             <div class="ive-global-dur-row">
                                 <label style="flex:1;font-size:11px">Длит. (с)</label>
@@ -821,6 +823,9 @@
                             <div id="ive-preview-content" class="ive-preview-content" style="position:relative;z-index:2">
                                 <img    id="ive-preview-img"   style="display:none" alt="">
                                 <video  id="ive-preview-video" style="display:none" muted playsinline></video>
+                            </div>
+                            <!-- Subtitle container — always above transitions, outside preview-content -->
+                            <div id="ive-sub-container" style="display:none;position:absolute;z-index:20;pointer-events:none">
                                 <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
                             </div>
                             <div class="ive-preview-empty" id="ive-preview-empty">
@@ -833,8 +838,7 @@
                             <div class="ive-transport-btns">
                                 <button class="ive-tb-btn" id="ive-go-start"   title="К началу (Home)"></button>
                                 <button class="ive-tb-btn" id="ive-rewind-btn" title="−5с (J)"></button>
-                                <button class="ive-tb-btn ive-tb-play"  id="ive-play-btn"  title="Воспроизведение (Space)"></button>
-                                <button class="ive-tb-btn ive-tb-pause" id="ive-pause-btn" title="Пауза (Space)"></button>
+                                <button class="ive-tb-btn ive-tb-play" id="ive-playpause-btn" title="Воспроизведение / Пауза (Space)"></button>
                                 <button class="ive-tb-btn ive-tb-stop"  id="ive-stop-btn"  title="Стоп"></button>
                                 <button class="ive-tb-btn" id="ive-fwd-btn"    title="+5с (L)"></button>
                                 <button class="ive-tb-btn" id="ive-go-end"     title="К концу (End)"></button>
@@ -874,6 +878,7 @@
                                 <div class="ive-track-lbl" id="ive-video-lbl">VIDEO</div>
                                 <div class="ive-track-lbl" id="ive-audio-lbl">AUDIO</div>
                                 <div class="ive-track-lbl" id="ive-subs-lbl">SUBS</div>
+                                <div class="ive-track-lbl" id="ive-pip-lbl">PIP</div>
                             </div>
                             <!-- Scrollable track area -->
                             <div class="ive-tracks-scroll" id="ive-tracks-scroll">
@@ -882,6 +887,7 @@
                                     <div class="ive-track-row ive-video-row" id="ive-video-track"></div>
                                     <div class="ive-audio-rows"  id="ive-audio-track"></div>
                                     <div class="ive-track-row ive-subs-row"  id="ive-subtitle-track"></div>
+                                    <div class="ive-track-row ive-pip-row"   id="ive-pip-track"></div>
                                     <div class="ive-playhead" id="ive-playhead" style="display:none"></div>
                                 </div>
                             </div>
@@ -893,8 +899,8 @@
                         <div class="ive-project-name-wrap">
                             <input class="ive-input" type="text" id="ive-project-name" placeholder="Название проекта" value="Новый проект">
                             <button class="btn" id="ive-save-btn">Сохранить</button>
-                            <button class="btn btn-sm" id="ive-save-amur-btn" title="Сохранить проект как .amur">⬇ .amur</button>
-                            <button class="btn btn-sm" id="ive-open-amur-btn" title="Открыть .amur проект">↑ .amur</button>
+                            <button class="btn btn-sm" id="ive-save-amur-btn" title="Сохранить проект как .project">⬇ .project</button>
+                            <button class="btn btn-sm" id="ive-open-amur-btn" title="Открыть .project проект">↑ .project</button>
                         </div>
                         <div class="ive-export-settings">
                             <select class="ive-select" id="ive-exp-format">
@@ -904,12 +910,16 @@
                                 <option value="webm">WebM</option>
                             </select>
                             <select class="ive-select" id="ive-exp-res">
-                                <option value="1920x1080">1920×1080</option>
-                                <option value="1280x720">1280×720</option>
-                                <option value="3840x2160">4K</option>
-                                <option value="1080x1920">1080×1920 (вертик.)</option>
-                                <option value="1080x1080">1080×1080 (квадрат)</option>
+                                <option value="1920x1080">YouTube (1920×1080)</option>
+                                <option value="1280x720">HD (1280×720)</option>
+                                <option value="1080x1920">TikTok / Reels / Shorts (1080×1920)</option>
+                                <option value="1080x1080">Instagram Post (1080×1080)</option>
+                                <option value="3840x2160">4K (3840×2160)</option>
+                                <option value="custom">Своё разрешение…</option>
                             </select>
+                            <input class="ive-input" type="number" id="ive-exp-res-w" placeholder="Ш" title="Ширина" style="display:none;width:64px" min="1" max="7680">
+                            <span id="ive-exp-res-x" style="display:none;color:var(--text-dim)">×</span>
+                            <input class="ive-input" type="number" id="ive-exp-res-h" placeholder="В" title="Высота" style="display:none;width:64px" min="1" max="7680">
                             <select class="ive-select" id="ive-exp-fps">
                                 <option value="24">24 fps</option>
                                 <option value="30" selected>30 fps</option>
@@ -981,18 +991,18 @@
 
 <div class="modal" id="modal-amur" hidden>
     <div class="modal-box" style="max-width:520px">
-        <h3 id="modal-amur-title">Файл .amur</h3>
+        <h3 id="modal-amur-title">Файл .project</h3>
         <div style="display:flex;gap:6px;margin-top:14px;align-items:center">
             <input type="text" id="modal-amur-dir" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px" placeholder="Папка">
             <button class="btn btn-sm" id="modal-amur-dir-go" title="Перейти в папку">→</button>
         </div>
         <div id="modal-amur-filename-row" style="margin-top:8px">
-            <input type="text" id="modal-amur-filename" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box" placeholder="Имя файла (.amur)">
+            <input type="text" id="modal-amur-filename" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box" placeholder="Имя файла (.project)">
         </div>
         <div id="modal-amur-files" style="margin-top:8px;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)"></div>
         <div id="modal-amur-upload-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Или загрузить с компьютера:</div>
-            <input type="file" id="modal-amur-upload-input" accept=".amur">
+            <input type="file" id="modal-amur-upload-input" accept=".project">
         </div>
         <div class="modal-actions">
             <button class="btn" id="modal-amur-cancel">Отмена</button>

@@ -40,7 +40,8 @@ const ANIMS = ['none', 'fade-in', 'fade-out', 'slide-up', 'slide-down', 'typewri
 const S = {
     projectId: null, projectName: 'Новый проект',
     clips: [], audioTracks: [], subtitles: [],
-    selIdx: -1, selAudioIdx: -1, selSubIdx: -1, activeTab: 'slide', dirty: false,
+    selIdx: -1, selAudioIdx: -1, selSubIdx: -1, selPipIdx: -1, selIdxs: new Set(),
+    activeTab: 'slide', dirty: false,
     // Playback
     currentTime: 0, isPlaying: false,
     _playStartReal: 0, _playStartProject: 0, _rafId: null, _syncTick: 0,
@@ -49,6 +50,8 @@ const S = {
     // Preview zoom
     previewMode: 'fit',   // 'fit' | 'original' | 'custom'
     previewZoom: 1.0,     // actual CSS scale factor
+    // PIP layers
+    pipLayers: [],
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -259,12 +262,12 @@ export async function init() {
     const previewImg    = $('ive-preview-img');
     const previewVideo  = $('ive-preview-video');
     const previewEmpty  = $('ive-preview-empty');
+    const subContainer  = $('ive-sub-container');
     const subOverlay    = $('ive-sub-overlay');
     // Transport
     const goStart       = $('ive-go-start');
     const rewindBtn     = $('ive-rewind-btn');
-    const playBtn       = $('ive-play-btn');
-    const pauseBtn      = $('ive-pause-btn');
+    const playPauseBtn  = $('ive-playpause-btn');
     const stopBtn       = $('ive-stop-btn');
     const fwdBtn        = $('ive-fwd-btn');
     const goEnd         = $('ive-go-end');
@@ -277,11 +280,15 @@ export async function init() {
     const zoomPct       = $('ive-zoom-pct');
     const zoomSign      = $('ive-zoom-sign');
     const resEl         = $('ive-exp-res');
+    const resWEl        = document.getElementById('ive-exp-res-w');
+    const resHEl        = document.getElementById('ive-exp-res-h');
+    const resXEl        = document.getElementById('ive-exp-res-x');
     // Timeline
     const totalDurEl    = $('ive-total-dur');
     const videoTrackEl  = $('ive-video-track');
     const audioTrackEl  = $('ive-audio-track');
     const subTrackEl    = $('ive-subtitle-track');
+    const pipTrackEl    = $('ive-pip-track');
     const tracksScroll  = $('ive-tracks-scroll');
     const tracksInner   = $('ive-tracks-inner');
     const playheadEl    = $('ive-playhead');
@@ -293,6 +300,10 @@ export async function init() {
     const previewImgNext     = $('ive-preview-img-next');
     const previewVideoNext   = $('ive-preview-video-next');
     const transOverlayEl     = $('ive-trans-overlay');
+    // PIP
+    const addPipBtn   = $('ive-add-pip-btn');
+    const pipInput    = $('ive-pip-input');
+
     // .amur buttons
     const saveAmurBtn        = $('ive-save-amur-btn');
     const openAmurBtn        = $('ive-open-amur-btn');
@@ -309,13 +320,16 @@ export async function init() {
     const amurCancelBtn      = document.getElementById('modal-amur-cancel');
     const amurOkBtn          = document.getElementById('modal-amur-ok');
 
+    // PIP element pool: pip.id → { wrapper, img, video }
+    const _pipEls = new Map();
+
     let _amurMode = 'save';
     let _amurResolve = null;
 
     async function _amurBrowse(dir) {
         const q = dir ? '?path=' + encodeURIComponent(dir) : '';
         try {
-            const r = await fetch('/api/imgvid/amur/browse' + q);
+            const r = await fetch('/api/imgvid/project/browse' + q);
             const d = await r.json();
             amurDirInput.value = d.dir;
             const _esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -326,7 +340,7 @@ export async function init() {
                         <span>${_esc(f.name)}</span>
                         <span style="color:var(--text-muted);font-size:11px">${(f.size/1024).toFixed(1)} KB</span>
                     </div>`).join('')
-                : '<div style="padding:10px;text-align:center;color:var(--text-muted);font-size:12px">Нет .amur файлов</div>';
+                : '<div style="padding:10px;text-align:center;color:var(--text-muted);font-size:12px">Нет .project файлов</div>';
             amurFilesEl.querySelectorAll('.amur-file-row').forEach(el => {
                 el.addEventListener('mouseenter', () => el.style.background = 'var(--surface-hover, rgba(0,0,0,0.05))');
                 el.addEventListener('mouseleave', () => { if (!el.classList.contains('selected')) el.style.background = ''; });
@@ -349,13 +363,13 @@ export async function init() {
 
     async function _openSaveAmurDialog(projectName) {
         _amurMode = 'save';
-        amurTitle.textContent = 'Сохранить проект как .amur';
+        amurTitle.textContent = 'Сохранить проект как .project';
         amurFilenameRow.hidden = false;
         amurUploadRow.hidden = true;
         amurOkBtn.textContent = 'Сохранить';
         amurUploadInput.value = '';
         await _amurBrowse('');
-        amurFilenameInput.value = (projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
+        amurFilenameInput.value = (projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.project';
         amurModal.hidden = false;
         amurFilenameInput.focus();
         return new Promise(resolve => { _amurResolve = resolve; });
@@ -363,7 +377,7 @@ export async function init() {
 
     async function _openLoadAmurDialog() {
         _amurMode = 'load';
-        amurTitle.textContent = 'Открыть проект .amur';
+        amurTitle.textContent = 'Открыть проект .project';
         amurFilenameRow.hidden = true;
         amurUploadRow.hidden = false;
         amurOkBtn.textContent = 'Открыть';
@@ -427,11 +441,10 @@ export async function init() {
     });
 
     // ── Transport controls ────────────────────────────────────────────────────
-    goStart.addEventListener('click',   () => _seek(0));
-    rewindBtn.addEventListener('click', () => _seek(S.currentTime - 5));
-    playBtn.addEventListener('click',   () => { if (!S.isPlaying) _startPlayback(); });
-    pauseBtn.addEventListener('click',  () => { if (S.isPlaying)  _pausePlayback(); });
-    stopBtn.addEventListener('click',   () => { _stopPlayback(); _seek(0); });
+    goStart.addEventListener('click',      () => _seek(0));
+    rewindBtn.addEventListener('click',    () => _seek(S.currentTime - 5));
+    playPauseBtn.addEventListener('click', _togglePlay);
+    stopBtn.addEventListener('click',      () => { _stopPlayback(); _seek(0); });
     fwdBtn.addEventListener('click',    () => _seek(S.currentTime + 5));
     goEnd.addEventListener('click',     () => _seek(totalDur()));
 
@@ -553,11 +566,11 @@ export async function init() {
         subOverlay.style.cursor = 'grabbing';
     });
 
-    previewContent.addEventListener('mousemove', e => {
+    document.addEventListener('mousemove', e => {
         if (!_subDragging) return;
         const sub = subOverlay._activeSub;
         if (!sub) return;
-        const rect = previewContent.getBoundingClientRect();
+        const rect = (subContainer || previewContent).getBoundingClientRect();
         const dxPct = (e.clientX - _subDx0) / rect.width  * 100;
         const dyPct = (e.clientY - _subDy0) / rect.height * 100;
         sub.x = Math.max(0, Math.min(100, Math.round((_subX0 + dxPct) * 10) / 10));
@@ -588,7 +601,7 @@ export async function init() {
 
     // ── Timeline interaction ──────────────────────────────────────────────────
     tracksScroll.addEventListener('click', e => {
-        if (e.target.closest('.ive-tl-clip') || e.target.closest('.ive-tl-audio-item') || e.target.closest('.ive-tl-sub-item')) return;
+        if (e.target.closest('.ive-tl-clip') || e.target.closest('.ive-tl-audio-item') || e.target.closest('.ive-tl-sub-item') || e.target.closest('.ive-tl-pip-item')) return;
         const rect = tracksInner.getBoundingClientRect();
         _seek(Math.max(0, (e.clientX - rect.left) / S.pxPerSec));
     });
@@ -636,7 +649,7 @@ export async function init() {
         const result = await _openSaveAmurDialog(S.projectName);
         if (!result) return;
         try {
-            const r = await fetch('/api/imgvid/amur/save-to-path', {
+            const r = await fetch('/api/imgvid/project/save-to-path', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pid: S.projectId, dir: result.dir, filename: result.filename }),
@@ -647,19 +660,19 @@ export async function init() {
         } catch (e) { toast(e.message, 'err'); }
     });
     openAmurBtn?.addEventListener('click', async () => {
-        if (S.dirty && !confirm('Несохранённые изменения. Открыть .amur?')) return;
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть .project?')) return;
         const result = await _openLoadAmurDialog();
         if (!result) return;
-        toast('Открытие .amur…', 'info');
+        toast('Открытие .project…', 'info');
         try {
             let d;
             if (result.type === 'file') {
                 const fd = new FormData(); fd.append('file', result.file);
-                const r = await fetch('/api/imgvid/amur/unpack', { method: 'POST', body: fd });
+                const r = await fetch('/api/imgvid/project/unpack', { method: 'POST', body: fd });
                 d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
             } else {
-                const r = await fetch('/api/imgvid/amur/load-from-path', {
+                const r = await fetch('/api/imgvid/project/load-from-path', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ file_path: result.path }),
@@ -671,10 +684,15 @@ export async function init() {
             S.projectId = d.id; S.projectName = d.name;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
             S.subtitles = d.subtitles || [];
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers = d.pip || d.pipLayers || [];
+            S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
             renderAll(); await loadProjectsList();
-            toast('Проект загружен из .amur', 'ok');
+            toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
     });
     // Listen for open-project event from History tab
@@ -688,8 +706,13 @@ export async function init() {
             S.projectId = d.id; S.projectName = d.name;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
             S.subtitles = d.subtitles || [];
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers = d.pip || d.pipLayers || [];
+            S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
             renderAll(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -715,20 +738,28 @@ export async function init() {
 
     // ── Boot ──────────────────────────────────────────────────────────────────
     // Populate transport buttons with SVG icons
-    goStart.innerHTML   = ICONS.tbGoStart;
-    rewindBtn.innerHTML = ICONS.skipBack;
-    playBtn.innerHTML   = ICONS.play;
-    pauseBtn.innerHTML  = ICONS.pause;
-    stopBtn.innerHTML   = ICONS.tbStop;
-    fwdBtn.innerHTML    = ICONS.skipFwd;
-    goEnd.innerHTML     = ICONS.tbGoEnd;
+    goStart.innerHTML       = ICONS.tbGoStart;
+    rewindBtn.innerHTML     = ICONS.skipBack;
+    playPauseBtn.innerHTML  = ICONS.play;
+    stopBtn.innerHTML       = ICONS.tbStop;
+    fwdBtn.innerHTML        = ICONS.skipFwd;
+    goEnd.innerHTML         = ICONS.tbGoEnd;
 
     await loadProjectsList();
     renderAll();
 
     // Size the preview content to match the selected export resolution aspect ratio
+    function _updateCustomResVis() {
+        const isCustom = resEl?.value === 'custom';
+        if (resWEl) resWEl.style.display = isCustom ? '' : 'none';
+        if (resHEl) resHEl.style.display = isCustom ? '' : 'none';
+        if (resXEl) resXEl.style.display = isCustom ? '' : 'none';
+    }
+    _updateCustomResVis();
     _updatePreviewSize();
-    resEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
+    resEl?.addEventListener('change', () => { _updateCustomResVis(); _updatePreviewSize(); renderPreview(); });
+    resWEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
+    resHEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -795,19 +826,21 @@ export async function init() {
         S._playStartReal    = performance.now();
         S._playStartProject = S.currentTime;
         S._syncTick = 0;
-        playBtn.classList.add('playing');
-        pauseBtn.classList.add('playing');
+        playPauseBtn.innerHTML = ICONS.pause;
+        playPauseBtn.classList.add('playing');
         _syncAudio(S.currentTime, true);
         S._rafId = requestAnimationFrame(_tick);
     }
 
     function _pausePlayback() {
         S.isPlaying = false;
-        playBtn.classList.remove('playing');
-        pauseBtn.classList.remove('playing');
+        playPauseBtn.innerHTML = ICONS.play;
+        playPauseBtn.classList.remove('playing');
         if (S._rafId) { cancelAnimationFrame(S._rafId); S._rafId = null; }
         _pauseAllAudio();
         previewVideo.pause();
+        // Pause all PIP video elements
+        _pipEls.forEach(({ video }) => { if (video) video.pause(); });
     }
 
     function _stopPlayback() {
@@ -872,8 +905,18 @@ export async function init() {
         }
     }
 
+    function _getResolution() {
+        const v = resEl ? resEl.value : '1920x1080';
+        if (v === 'custom') {
+            const w = parseInt(resWEl?.value) || 1920;
+            const h = parseInt(resHEl?.value) || 1080;
+            return `${w}x${h}`;
+        }
+        return v;
+    }
+
     function _updatePreviewSize() {
-        const resVal = resEl ? resEl.value : '1920x1080';
+        const resVal = _getResolution();
         const parts  = resVal.split('x').map(Number);
         const resW   = parts[0] || 1920;
         const resH   = parts[1] || 1080;
@@ -902,6 +945,13 @@ export async function init() {
                 transOverlayEl.style.height = h + 'px';
                 transOverlayEl.style.left   = left + 'px';
                 transOverlayEl.style.top    = top  + 'px';
+            }
+            // Sync subtitle container with same position as previewContentNext
+            if (subContainer) {
+                subContainer.style.width  = w + 'px';
+                subContainer.style.height = h + 'px';
+                subContainer.style.left   = left + 'px';
+                subContainer.style.top    = top  + 'px';
             }
         }
     }
@@ -1078,7 +1128,7 @@ export async function init() {
                     else { S.audioTracks.splice(i, 1); if (S.selAudioIdx >= S.audioTracks.length) S.selAudioIdx = -1; }
                     S.dirty = true; renderAll(); return;
                 }
-                if (row.dataset.mk === 'clip') _selectClip(+row.dataset.mi);
+                if (row.dataset.mk === 'clip') _selectClip(+row.dataset.mi, { ctrl: e.ctrlKey, shift: e.shiftKey });
             });
         });
     }
@@ -1093,6 +1143,7 @@ export async function init() {
         _renderVideoTrack(total);
         _renderAudioTracks(total, contentW);
         _renderSubsTrack(total);
+        _renderPipTrack(total);
         renderPlayhead();
     }
 
@@ -1123,7 +1174,8 @@ export async function init() {
             const dur = clip.duration || 3;
             const w   = Math.max(16, dur * S.pxPerSec);
             const div = document.createElement('div');
-            div.className = `ive-tl-clip${i === S.selIdx ? ' sel' : ''}`;
+            const isMultiSel = S.selIdxs.size > 1 && S.selIdxs.has(i);
+            div.className = `ive-tl-clip${i === S.selIdx ? ' sel' : ''}${isMultiSel ? ' multi-sel' : ''}`;
             div.dataset.cidx = i;
             div.style.left  = (cursor * S.pxPerSec) + 'px';
             div.style.width = w + 'px';
@@ -1139,14 +1191,14 @@ export async function init() {
 
             div.addEventListener('click', e => {
                 if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
-                _selectClip(i);
+                _selectClip(i, { ctrl: e.ctrlKey, shift: e.shiftKey });
             });
             // Mouse-based drag to reorder clips
             div.addEventListener('mousedown', e => {
                 if (e.button !== 0) return;
                 if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
                 e.preventDefault(); e.stopPropagation();
-                _selectClip(i);
+                _selectClip(i, { ctrl: e.ctrlKey, shift: e.shiftKey });
                 const sx = e.clientX;
                 let moved = false;
                 const onMove = ev => {
@@ -1455,10 +1507,12 @@ export async function init() {
             previewVideo.style.display  = 'none';
             previewEmpty.style.display  = 'flex';
             subOverlay.style.display    = 'none';
+            if (subContainer) subContainer.style.display = 'none';
             previewContent.style.filter = '';
             previewImg.style.filter     = '';
             previewVideo.style.filter   = '';
             _resetTransitionPreview();
+            _renderPipInPreview(S.currentTime);
             return;
         }
         const { clip, idx, local } = info;
@@ -1477,16 +1531,18 @@ export async function init() {
         const _activeSub = S.subtitles.find(s => _t >= (s.start || 0) && _t <= (s.end ?? 3))
             || (clip ? (clip.subtitles || []).find(s => local >= (s.start || 0) && local <= (s.end ?? clip.duration)) : null);
 
-        // Apply CSS effects filter: if aboveEffects, filter only the media elements
+        // Apply CSS effects filter: if aboveEffects, filter only the media elements (not subContainer)
         const _cssFilter = inTrans ? '' : buildCSSFilter(clip.effects || []);
         if (_activeSub?.aboveEffects) {
             previewContent.style.filter = '';
             previewImg.style.filter   = _cssFilter;
             previewVideo.style.filter = _cssFilter;
+            if (subContainer) subContainer.style.filter = '';
         } else {
             previewContent.style.filter = _cssFilter;
             previewImg.style.filter   = '';
             previewVideo.style.filter = '';
+            if (subContainer) subContainer.style.filter = _cssFilter;
         }
 
         // Show current clip
@@ -1548,11 +1604,16 @@ export async function init() {
             _resetTransitionPreview();
         }
 
+        // Render PIP layers
+        _renderPipInPreview(S.currentTime);
+
         // Render active subtitle (already resolved above)
         if (_activeSub?.text) {
+            if (subContainer) subContainer.style.display = 'block';
             _renderSubOverlay(_activeSub, _activeSub.id || '');
         } else {
             subOverlay.style.display = 'none';
+            if (subContainer) subContainer.style.display = 'none';
             _lastSubStart = null;
         }
     }
@@ -1580,7 +1641,7 @@ export async function init() {
         }
 
         // Scale all pixel values to match the preview/export resolution ratio
-        const _resParts = (resEl?.value || '1920x1080').split('x').map(Number);
+        const _resParts = _getResolution().split('x').map(Number);
         const _resH     = _resParts[1] || 1080;
         const _pvH      = previewContent.clientHeight || _resH;
         const sc        = _pvH / _resH;
@@ -1642,6 +1703,12 @@ export async function init() {
 
     // ── Properties panel ──────────────────────────────────────────────────────
     function renderProps() {
+        if (S.selPipIdx >= 0 && S.selPipIdx < S.pipLayers.length) {
+            _renderPropsPip(S.pipLayers[S.selPipIdx], S.selPipIdx); return;
+        }
+        if (S.selIdxs.size > 1 && S.activeTab !== 'subs') {
+            _renderPropsMulti(); return;
+        }
         if (S.selAudioIdx >= 0 && S.selAudioIdx < S.audioTracks.length && S.activeTab === 'slide') {
             _renderPropsAudio(S.audioTracks[S.selAudioIdx], S.selAudioIdx); return;
         }
@@ -1950,6 +2017,7 @@ export async function init() {
                 <button class="btn btn-sm" id="pv-replace-btn">Заменить</button>
             </div>` : ''}
             ${isVideo ? `<button class="btn btn-sm" id="pv-extract-audio" style="margin-top:4px">Извлечь аудио</button>` : ''}
+            <button class="btn btn-sm" id="pv-apply-all" style="margin-top:4px">Apply to All</button>
             <button class="btn btn-sm danger" id="pv-remove-clip" style="margin-top:4px">Удалить клип</button>
         </div>`;
 
@@ -1996,6 +2064,19 @@ export async function init() {
                 S.dirty = true; renderPreview();
             });
         }
+        $('pv-apply-all').addEventListener('click', () => {
+            S.clips.forEach((c, idx) => {
+                if (c === clip) return;
+                c.duration   = clip.duration;
+                c.transition = JSON.parse(JSON.stringify(clip.transition || {}));
+                c.speed      = clip.speed;
+                c.muteAudio  = clip.muteAudio;
+                c.trimIn     = clip.trimIn;
+            });
+            S.dirty = true;
+            toast(`Настройки применены к ${S.clips.length - 1} клипам`, 'ok');
+            renderTimeline(); renderMediaList();
+        });
         $('pv-remove-clip').addEventListener('click', () => { _deleteSelectedClip(); });
         if (isVideo) {
             $('pv-extract-audio')?.addEventListener('click', async () => {
@@ -2154,7 +2235,7 @@ export async function init() {
             const val = efMap[ef.key] ?? ef.def;
             if (ef.toggle) return `<label class="ive-label ive-toggle-row">${eh(ef.label)}<input class="ive-toggle" type="checkbox" data-ef="${ef.key}"${val ? ' checked' : ''}></label>`;
             return `<label class="ive-label"><span>${eh(ef.label)}</span><div class="ive-range-row"><input class="ive-range" type="range" data-ef="${ef.key}" min="${ef.min}" max="${ef.max}" step="${ef.step}" value="${val}"><span class="ive-range-val" data-efv="${ef.key}">${val}</span></div></label>`;
-        }).join('')}<button class="btn btn-sm" id="pv-reset-ef" style="margin-top:8px">Сбросить всё</button></div>`;
+        }).join('')}<button class="btn btn-sm" id="pv-ef-all" style="margin-top:8px">Apply Effects to All</button><button class="btn btn-sm" id="pv-reset-ef" style="margin-top:4px">Сбросить всё</button></div>`;
 
         propsBody.querySelectorAll('[data-ef]').forEach(el => {
             const key = el.dataset.ef;
@@ -2167,8 +2248,444 @@ export async function init() {
                 S.dirty = true; renderPreview();
             });
         });
+        $('pv-ef-all').addEventListener('click', () => {
+            S.clips.forEach(c => {
+                if (c === clip) return;
+                c.effects = JSON.parse(JSON.stringify(clip.effects || []));
+            });
+            S.dirty = true;
+            toast(`Эффекты применены к ${S.clips.length - 1} клипам`, 'ok');
+        });
         $('pv-reset-ef').addEventListener('click', () => { clip.effects = []; S.dirty = true; renderProps(); renderPreview(); });
     }
+
+    // ── PIP Functions ─────────────────────────────────────────────────────────
+
+    function _getPipEl(pip) {
+        if (_pipEls.has(pip.id)) return _pipEls.get(pip.id);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'ive-pip-el';
+        const img = document.createElement('img');
+        img.alt = '';
+        img.draggable = false;
+        const video = document.createElement('video');
+        video.muted = false;
+        video.playsInline = true;
+        wrapper.appendChild(img);
+        wrapper.appendChild(video);
+        // 8 resize handles
+        for (const dir of ['nw','ne','sw','se','n','s','e','w']) {
+            const rh = document.createElement('div');
+            rh.className = `ive-pip-rh ive-pip-rh-${dir}`;
+            rh.dataset.rhdir = dir;
+            wrapper.appendChild(rh);
+        }
+        previewContent.appendChild(wrapper);
+        const el = { wrapper, img, video };
+        _pipEls.set(pip.id, el);
+        _setupPipEvents(pip, el);
+        return el;
+    }
+
+    function _positionPipEl(pip, el) {
+        if (!el) return;
+        const { wrapper } = el;
+        wrapper.style.left    = (pip.x || 0) + '%';
+        wrapper.style.top     = (pip.y || 0) + '%';
+        wrapper.style.width   = (pip.w || 30) + '%';
+        wrapper.style.height  = (pip.h || 20) + '%';
+        wrapper.style.opacity = pip.opacity ?? 1;
+        wrapper.style.filter  = buildCSSFilter(pip.effects || []);
+        const isSelected = S.selPipIdx >= 0 && S.pipLayers[S.selPipIdx] === pip;
+        wrapper.classList.toggle('selected', isSelected);
+    }
+
+    function _setupPipEvents(pip, el) {
+        const { wrapper } = el;
+
+        // Move: mousedown on wrapper (not on a resize handle)
+        wrapper.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            if (e.target.dataset.rhdir) return; // Let resize handle it
+            e.stopPropagation(); e.preventDefault();
+            const rect = previewContent.getBoundingClientRect();
+            const sx = e.clientX, sy = e.clientY;
+            const x0 = pip.x || 0, y0 = pip.y || 0;
+            let moved = false;
+            S.selPipIdx = S.pipLayers.indexOf(pip);
+            S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
+            renderTimeline(); renderProps();
+            _positionPipEl(pip, el);
+            const onMove = ev => {
+                const dx = ev.clientX - sx;
+                const dy = ev.clientY - sy;
+                if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+                moved = true;
+                pip.x = Math.max(0, Math.min(100, x0 + dx / rect.width * 100));
+                pip.y = Math.max(0, Math.min(100, y0 + dy / rect.height * 100));
+                S.dirty = true;
+                _positionPipEl(pip, el);
+                renderTimeline();
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (moved) { renderProps(); }
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+
+        // Click (no drag) to select
+        wrapper.addEventListener('click', e => {
+            if (e.target.dataset.rhdir) return;
+            const idx = S.pipLayers.indexOf(pip);
+            if (idx < 0) return;
+            S.selPipIdx = idx; S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
+            // Switch to slide tab
+            S.activeTab = 'slide';
+            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+            document.querySelector('[data-ptab="slide"]')?.classList.add('active');
+            renderTimeline(); renderProps(); renderPreview();
+        });
+
+        // Resize handles
+        wrapper.querySelectorAll('.ive-pip-rh').forEach(handle => {
+            handle.addEventListener('mousedown', e => {
+                e.stopPropagation(); e.preventDefault();
+                const dir = handle.dataset.rhdir;
+                const rect = previewContent.getBoundingClientRect();
+                const sx = e.clientX, sy = e.clientY;
+                const x0 = pip.x || 0, y0 = pip.y || 0;
+                const w0 = pip.w || 30, h0 = pip.h || 20;
+                const onMove = ev => {
+                    const dx = (ev.clientX - sx) / rect.width * 100;
+                    const dy = (ev.clientY - sy) / rect.height * 100;
+                    let newX = x0, newY = y0, newW = w0, newH = h0;
+                    // Width changes
+                    if (dir.includes('e')) newW = w0 + dx;
+                    if (dir.includes('w')) { newX = x0 + dx; newW = w0 - dx; }
+                    // Height changes
+                    if (dir.includes('s')) newH = h0 + dy;
+                    if (dir.includes('n')) { newY = y0 + dy; newH = h0 - dy; }
+                    // Proportional resize with Ctrl
+                    if (ev.ctrlKey) {
+                        if (dir === 'n' || dir === 's') {
+                            newW = newH * (w0 / Math.max(1, h0));
+                        } else if (dir === 'e' || dir === 'w') {
+                            newH = newW * (Math.max(1, h0) / w0);
+                        } else {
+                            // Corner
+                            const maxD = Math.max(Math.abs(dx), Math.abs(dy));
+                            newW = w0 + maxD * Math.sign(dx || dy);
+                            newH = newW * (Math.max(1, h0) / w0);
+                        }
+                    }
+                    pip.x = Math.max(0, Math.min(100, newX));
+                    pip.y = Math.max(0, Math.min(100, newY));
+                    pip.w = Math.max(5, Math.min(100, newW));
+                    pip.h = Math.max(5, Math.min(100, newH));
+                    S.dirty = true;
+                    _positionPipEl(pip, el);
+                    renderTimeline();
+                    renderProps();
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+    }
+
+    function _renderPipInPreview(currentTime) {
+        const activeIds = new Set();
+        for (const pip of S.pipLayers) {
+            const start = pip.startTime || 0;
+            const end   = pip.endTime ?? (start + 5);
+            if (currentTime < start || currentTime >= end) continue;
+            activeIds.add(pip.id);
+            const el = _getPipEl(pip);
+            _positionPipEl(pip, el);
+            if (pip.type === 'image') {
+                el.video.style.display = 'none';
+                if (el.img.src !== pip.fileUrl) { el.img.src = pip.fileUrl; }
+                el.img.style.display = 'block';
+            } else {
+                el.img.style.display = 'none';
+                const pipUrl = pip.fileUrl || '';
+                if (el.video.dataset.src !== pipUrl) {
+                    el.video.src = pipUrl; el.video.dataset.src = pipUrl; el.video.load();
+                }
+                el.video.style.display = 'block';
+                const vT = (currentTime - start) + (pip.trimIn || 0);
+                const spd = pip.speed ?? 1;
+                if (el.video.playbackRate !== spd) el.video.playbackRate = spd;
+                el.video.volume = pip.volume ?? 0;
+                if (!S.isPlaying) {
+                    if (Math.abs(el.video.currentTime - vT) > 0.15) el.video.currentTime = vT;
+                    if (!el.video.paused) el.video.pause();
+                } else {
+                    if (el.video.paused) el.video.play().catch(() => {});
+                    if (Math.abs(el.video.currentTime - vT) > 0.3) el.video.currentTime = vT;
+                }
+            }
+            el.wrapper.style.display = 'block';
+        }
+        // Hide inactive pip elements
+        _pipEls.forEach((el, id) => {
+            if (!activeIds.has(id)) {
+                el.wrapper.style.display = 'none';
+                if (el.video) el.video.pause();
+            }
+        });
+    }
+
+    function _renderPipTrack(total) {
+        if (!pipTrackEl) return;
+        const contentW = Math.max(total * S.pxPerSec, (tracksScroll.clientWidth || 500));
+        pipTrackEl.style.width = contentW + 'px';
+        pipTrackEl.innerHTML = '';
+        if (!S.pipLayers.length) {
+            pipTrackEl.innerHTML = '<div class="ive-tl-empty-abs" style="font-size:10px;opacity:.4">Нет PIP</div>';
+            return;
+        }
+        S.pipLayers.forEach((pip, pi) => {
+            const start = pip.startTime || 0;
+            const end   = pip.endTime ?? (start + 5);
+            const left  = start * S.pxPerSec;
+            const w     = Math.max(16, (end - start) * S.pxPerSec);
+
+            const item = document.createElement('div');
+            item.className = `ive-tl-pip-item${pi === S.selPipIdx ? ' sel' : ''}`;
+            item.style.left  = left + 'px';
+            item.style.width = w + 'px';
+            item.textContent = pip.original || pip.file;
+
+            // Right resize handle
+            const rh = document.createElement('div');
+            rh.className = 'ive-tl-pip-resize';
+            item.appendChild(rh);
+
+            item.addEventListener('click', e => {
+                if (e.target === rh) return;
+                S.selPipIdx = pi; S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
+                S.activeTab = 'slide';
+                document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                document.querySelector('[data-ptab="slide"]')?.classList.add('active');
+                renderTimeline(); renderProps(); renderPreview();
+            });
+
+            // Drag to move pip
+            item.addEventListener('mousedown', e => {
+                if (e.button !== 0 || e.target === rh) return;
+                e.preventDefault(); e.stopPropagation();
+                const sx = e.clientX;
+                const s0 = pip.startTime || 0;
+                const dur = (pip.endTime ?? (s0 + 5)) - s0;
+                const onMove = ev => {
+                    const dx = (ev.clientX - sx) / S.pxPerSec;
+                    pip.startTime = Math.max(0, s0 + dx);
+                    pip.endTime   = pip.startTime + dur;
+                    S.dirty = true; _renderPipTrack(total);
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+
+            // Resize end time
+            rh.addEventListener('mousedown', e => {
+                e.stopPropagation(); e.preventDefault();
+                const sx = e.clientX;
+                const end0 = pip.endTime ?? ((pip.startTime || 0) + 5);
+                const onMove = ev => {
+                    const dx = (ev.clientX - sx) / S.pxPerSec;
+                    pip.endTime = Math.max((pip.startTime || 0) + 0.1, end0 + dx);
+                    S.dirty = true; _renderPipTrack(total);
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+
+            pipTrackEl.appendChild(item);
+        });
+    }
+
+    function _renderPropsPip(pip, idx) {
+        const isVideo = pip.type === 'video';
+        propsBody.innerHTML = `<div class="ive-form">
+            <div style="font-size:10px;color:var(--text-dim);padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${eh(pip.original || pip.file)}">PIP: ${eh(pip.original || pip.file)}</div>
+            <div class="ive-row2">
+                <label class="ive-label">Нач.(с)<input class="ive-input" type="number" id="pip-start" min="0" step="0.1" value="${(pip.startTime || 0).toFixed(1)}"></label>
+                <label class="ive-label">Кон.(с)<input class="ive-input" type="number" id="pip-end"   min="0" step="0.1" value="${(pip.endTime ?? ((pip.startTime||0)+5)).toFixed(1)}"></label>
+            </div>
+            <div class="ive-row2">
+                <label class="ive-label">X%<input class="ive-input" type="number" id="pip-x" min="0" max="100" step="0.1" value="${(pip.x||0).toFixed(1)}"></label>
+                <label class="ive-label">Y%<input class="ive-input" type="number" id="pip-y" min="0" max="100" step="0.1" value="${(pip.y||0).toFixed(1)}"></label>
+            </div>
+            <div class="ive-row2">
+                <label class="ive-label">Ширина%<input class="ive-input" type="number" id="pip-w" min="5" max="100" step="0.1" value="${(pip.w||30).toFixed(1)}"></label>
+                <label class="ive-label">Высота%<input class="ive-input" type="number" id="pip-h" min="5" max="100" step="0.1" value="${(pip.h||20).toFixed(1)}"></label>
+            </div>
+            <label class="ive-label">Прозрачность
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" id="pip-opacity" min="0" max="1" step="0.01" value="${pip.opacity??1}">
+                    <span class="ive-range-val" id="pip-opacity-val">${Math.round((pip.opacity??1)*100)}%</span>
+                </div>
+            </label>
+            ${isVideo ? `
+            <label class="ive-label">Громкость
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" id="pip-volume" min="0" max="1" step="0.01" value="${pip.volume??0}">
+                    <span class="ive-range-val" id="pip-volume-val">${Math.round((pip.volume??0)*100)}%</span>
+                </div>
+            </label>
+            <label class="ive-label">Скорость
+                <select class="ive-select" id="pip-speed">
+                    <option value="0.25"${(pip.speed??1)===0.25?' selected':''}>0.25×</option>
+                    <option value="0.5"${(pip.speed??1)===0.5?' selected':''}>0.5×</option>
+                    <option value="0.75"${(pip.speed??1)===0.75?' selected':''}>0.75×</option>
+                    <option value="1"${(!pip.speed||pip.speed===1)?' selected':''}>1× (норма)</option>
+                    <option value="1.5"${(pip.speed??1)===1.5?' selected':''}>1.5×</option>
+                    <option value="2"${(pip.speed??1)===2?' selected':''}>2×</option>
+                </select>
+            </label>
+            <label class="ive-label">Вход (с)<input class="ive-input" type="number" id="pip-trimin" min="0" step="0.1" value="${pip.trimIn||0}"></label>
+            ` : ''}
+            <button class="btn btn-sm danger" id="pip-delete" style="margin-top:8px">Удалить PIP</button>
+        </div>`;
+
+        const wire = (id, key, parse, extra) => {
+            const el = $(`pip-${id}`); if (!el) return;
+            el.addEventListener('change', () => {
+                pip[key] = parse(el.value);
+                S.dirty = true;
+                _positionPipEl(pip, _pipEls.get(pip.id));
+                renderPreview(); renderTimeline();
+                if (extra) extra();
+            });
+            if (el.type === 'range') {
+                el.addEventListener('input', () => {
+                    pip[key] = parse(el.value);
+                    S.dirty = true;
+                    _positionPipEl(pip, _pipEls.get(pip.id));
+                    renderPreview();
+                    const valEl = $(`pip-${id}-val`);
+                    if (valEl) valEl.textContent = Math.round(parseFloat(el.value)*100) + '%';
+                });
+            }
+        };
+        wire('start',   'startTime', v => Math.max(0, parseFloat(v)||0));
+        wire('end',     'endTime',   v => Math.max(0, parseFloat(v)||0));
+        wire('x',       'x',         v => Math.max(0, Math.min(100, parseFloat(v)||0)));
+        wire('y',       'y',         v => Math.max(0, Math.min(100, parseFloat(v)||0)));
+        wire('w',       'w',         v => Math.max(5, Math.min(100, parseFloat(v)||30)));
+        wire('h',       'h',         v => Math.max(5, Math.min(100, parseFloat(v)||20)));
+        wire('opacity', 'opacity',   v => Math.max(0, Math.min(1, parseFloat(v) || 0)));
+        if (isVideo) {
+            wire('volume',  'volume',   v => Math.max(0, Math.min(1, parseFloat(v) || 0)));
+            wire('speed',   'speed',    v => parseFloat(v)||1);
+            wire('trimin',  'trimIn',   v => Math.max(0, parseFloat(v)||0));
+        }
+        $('pip-delete').addEventListener('click', () => {
+            const el = _pipEls.get(pip.id);
+            if (el?.wrapper?.parentNode) el.wrapper.parentNode.removeChild(el.wrapper);
+            _pipEls.delete(pip.id);
+            S.pipLayers.splice(idx, 1);
+            S.selPipIdx = -1;
+            S.dirty = true;
+            renderAll();
+        });
+    }
+
+    function _renderPropsMulti() {
+        const count = S.selIdxs.size;
+        propsBody.innerHTML = `<div class="ive-form">
+            <div style="color:var(--accent);font-size:12px;margin-bottom:8px">Выбрано: ${count} клипа</div>
+            <label class="ive-label">Длительность (с)
+                <input class="ive-input" type="number" id="multi-dur" min="0.5" max="300" step="0.5" placeholder="— без изменений —">
+            </label>
+            <label class="ive-label">Переход
+                <select class="ive-select" id="multi-trans">
+                    <option value="">— без изменений —</option>
+                    ${TRANSITIONS.map(t => `<option value="${t.value}">${t.label}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label">Скорость
+                <select class="ive-select" id="multi-speed">
+                    <option value="">— без изменений —</option>
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="1">1× (норма)</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                    <option value="4">4×</option>
+                </select>
+            </label>
+            <button class="btn btn-sm" id="multi-apply" style="margin-top:8px">Применить</button>
+            <button class="btn btn-sm danger" id="multi-delete" style="margin-top:4px">Удалить выбранные</button>
+        </div>`;
+
+        $('multi-apply').addEventListener('click', () => {
+            const dur   = parseFloat($('multi-dur').value);
+            const trans = $('multi-trans').value;
+            const spd   = parseFloat($('multi-speed').value);
+            [...S.selIdxs].forEach(i => {
+                const c = S.clips[i]; if (!c) return;
+                if (isFinite(dur) && dur >= 0.5) c.duration = dur;
+                if (trans)          { c.transition = c.transition || {}; c.transition.type = trans; }
+                if (isFinite(spd))  c.speed = spd;
+            });
+            S.dirty = true;
+            toast('Применено к ' + S.selIdxs.size + ' клипам', 'ok');
+            renderAll();
+        });
+        $('multi-delete').addEventListener('click', () => {
+            const sorted = [...S.selIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => S.clips.splice(i, 1));
+            S.selIdx = S.clips.length ? 0 : -1;
+            S.selIdxs = new Set(S.selIdx >= 0 ? [S.selIdx] : []);
+            S.dirty = true;
+            renderAll();
+        });
+    }
+
+    // ── PIP Upload ────────────────────────────────────────────────────────────
+    addPipBtn?.addEventListener('click', () => pipInput.click());
+    pipInput?.addEventListener('change', async () => {
+        const f = pipInput.files[0]; if (!f) return;
+        pipInput.value = '';
+        const isVideo = /\.(mp4|mov|mkv|webm|avi)$/i.test(f.name);
+        const fd = new FormData(); fd.append('file', f);
+        const endpoint = isVideo ? '/api/imgvid/clips' : '/api/imgvid/images';
+        try {
+            const r = await fetch(endpoint, { method: 'POST', body: fd });
+            const d = await r.json();
+            if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            const pip = {
+                id: uid(), file: d.name, fileUrl: d.url, type: isVideo ? 'video' : 'image',
+                original: d.original, startTime: S.currentTime, endTime: S.currentTime + 5,
+                x: 5, y: 5, w: 30, h: 20, opacity: 1, volume: 0, speed: 1, trimIn: 0, effects: []
+            };
+            S.pipLayers.push(pip);
+            S.selPipIdx = S.pipLayers.length - 1;
+            S.dirty = true;
+            log('PIP добавлен: ' + d.original, 'done');
+            renderAll(); renderProps();
+            toast('PIP слой добавлен', 'ok');
+        } catch (e) { toast(e.message, 'err'); }
+    });
 
     // ── Projects list ─────────────────────────────────────────────────────────
     async function loadProjectsList() {
@@ -2229,7 +2746,14 @@ export async function init() {
                     cursor += dur;
                 });
             }
+            // Load PIP layers
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers = d.pip || d.pipLayers || [];
+            S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
             renderAll(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -2237,7 +2761,7 @@ export async function init() {
 
     // ── Save ──────────────────────────────────────────────────────────────────
     async function _saveProject() {
-        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, export_settings: _getExportSettings() };
+        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, export_settings: _getExportSettings() };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
                 method: S.projectId ? 'PUT' : 'POST',
@@ -2262,9 +2786,9 @@ export async function init() {
         progFill.style.width = '2%';
         progPct.textContent  = '0%';
         const fd = new FormData();
-        fd.append('project_json',  JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles }));
+        fd.append('project_json',  JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers }));
         fd.append('output_format', $('ive-exp-format').value);
-        fd.append('resolution',    $('ive-exp-res').value);
+        fd.append('resolution',    _getResolution());
         fd.append('fps',           $('ive-exp-fps').value);
         fd.append('quality',       $('ive-exp-quality').value);
         try {
@@ -2295,11 +2819,36 @@ export async function init() {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    function _selectClip(idx) {
-        S.selIdx = idx; S.selAudioIdx = -1;
-        let cursor = 0;
-        for (let i = 0; i < idx; i++) cursor += (S.clips[i].duration || 3);
-        _seek(cursor);
+    function _selectClip(idx, opts = {}) {
+        const { ctrl, shift } = opts;
+        S.selAudioIdx = -1; S.selPipIdx = -1;
+        if (ctrl) {
+            // Toggle idx in selIdxs
+            if (S.selIdxs.has(idx)) {
+                S.selIdxs.delete(idx);
+                if (S.selIdx === idx) {
+                    const remaining = [...S.selIdxs];
+                    S.selIdx = remaining.length ? remaining[remaining.length - 1] : -1;
+                }
+            } else {
+                S.selIdxs.add(idx);
+                S.selIdx = idx;
+            }
+        } else if (shift && S.selIdx >= 0) {
+            // Select range between S.selIdx and idx
+            const lo = Math.min(S.selIdx, idx);
+            const hi = Math.max(S.selIdx, idx);
+            for (let i = lo; i <= hi; i++) S.selIdxs.add(i);
+            S.selIdx = idx;
+        } else {
+            // Normal click
+            S.selIdx = idx;
+            S.selIdxs = new Set([idx]);
+            // Seek to clip start
+            let cursor = 0;
+            for (let i = 0; i < idx; i++) cursor += (S.clips[i].duration || 3);
+            _seek(cursor);
+        }
         renderMediaList(); _renderVideoTrack(totalDur()); renderProps();
     }
 
@@ -2314,10 +2863,37 @@ export async function init() {
         S.projectId = null; S.projectName = 'Новый проект';
         S.clips = []; S.audioTracks = []; S.subtitles = [];
         S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
+        S.selPipIdx = -1; S.selIdxs = new Set();
+        S.pipLayers = [];
         S.dirty = false; S.currentTime = 0;
+        _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+        _pipEls.clear();
     }
 
     function _getExportSettings() {
-        return { format: $('ive-exp-format')?.value || 'mp4', resolution: $('ive-exp-res')?.value || '1920x1080', fps: $('ive-exp-fps')?.value || '30', quality: $('ive-exp-quality')?.value || 'medium' };
+        return { format: $('ive-exp-format')?.value || 'mp4', resolution: _getResolution(), fps: $('ive-exp-fps')?.value || '30', quality: $('ive-exp-quality')?.value || 'medium' };
+    }
+
+    function _applyExportSettings(s) {
+        if (!s) return;
+        const fmtEl = $('ive-exp-format');
+        const fpsEl = $('ive-exp-fps');
+        const qualEl = $('ive-exp-quality');
+        if (s.format  && fmtEl)  fmtEl.value  = s.format;
+        if (s.fps     && fpsEl)  fpsEl.value  = String(s.fps);
+        if (s.quality && qualEl) qualEl.value = s.quality;
+        if (s.resolution && resEl) {
+            const knownVals = [...resEl.options].map(o => o.value).filter(v => v !== 'custom');
+            if (knownVals.includes(s.resolution)) {
+                resEl.value = s.resolution;
+            } else {
+                resEl.value = 'custom';
+                const [w, h] = s.resolution.split('x').map(Number);
+                if (resWEl && w) resWEl.value = w;
+                if (resHEl && h) resHEl.value = h;
+            }
+            _updateCustomResVis();
+        }
+        _updatePreviewSize();
     }
 }
