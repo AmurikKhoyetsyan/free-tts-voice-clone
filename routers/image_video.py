@@ -329,9 +329,9 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
     ])
     lines = [head]
     for sub in subs:
-        text  = str(sub.get("text", "")).replace("\n", "\\N")
-        start = _ass_time(float(sub.get("abs_start", 0)))
-        end   = _ass_time(float(sub.get("abs_end", 3)))
+        raw_text = str(sub.get("text", "")).replace("\n", "\\N")
+        abs_start = float(sub.get("abs_start", 0))
+        abs_end   = float(sub.get("abs_end", 3))
         font  = sub.get("fontFamily", "Arial")
         size  = int(sub.get("fontSize", 48))
         color = sub.get("color", "#ffffff").lstrip("#")
@@ -340,36 +340,91 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
             primary = f"&H00{b:02X}{g:02X}{r:02X}"
         except Exception:
             primary = "&H00FFFFFF"
-        bold    = 1 if sub.get("bold")   else 0
-        italic  = 1 if sub.get("italic") else 0
-        outline = float(sub.get("outline", 2))
-        shadow  = float(sub.get("shadow", 1))
-        x_pct   = float(sub.get("x", 50))
-        y_pct   = float(sub.get("y", 88))
-        px      = int(width  * x_pct / 100)
-        py      = int(height * y_pct / 100)
-        anim    = sub.get("animation", "none") or "none"
+        bold      = 1 if sub.get("bold")   else 0
+        italic    = 1 if sub.get("italic") else 0
+        underline = 1 if sub.get("underline") else 0
+        outline   = float(sub.get("outline", 2))
+        shadow    = float(sub.get("shadow", 1))
+        x_pct     = float(sub.get("x", 50))
+        y_pct     = float(sub.get("y", 88))
+        px        = int(width  * x_pct / 100)
+        py        = int(height * y_pct / 100)
+        anim      = sub.get("animation", "none") or "none"
+        anim_dur  = float(sub.get("animDuration", 0.6))
+        anim_ms   = int(anim_dur * 1000)
+        half_ms   = anim_ms // 2
+        rotation  = float(sub.get("rotation", 0))
 
         base = (f"\\fn{font}\\fs{size}\\c{primary}"
-                f"\\b{bold}\\i{italic}"
-                f"\\bord{outline:.1f}\\shad{shadow:.1f}")
+                f"\\b{bold}\\i{italic}\\u{underline}"
+                f"\\bord{outline:.1f}\\shad{shadow:.1f}"
+                f"\\an5\\pos({px},{py})")
+        if rotation:
+            base += f"\\frz{rotation:.1f}"
 
-        if anim in ("slide-up", "slide-down"):
-            dy    = 30 if anim == "slide-up" else -30
-            tags  = ("{" + base
-                     + f"\\fad(300,300)"
-                     + f"\\move({px},{py + dy},{px},{py},0,600)"
-                     + "}")
-        elif anim == "fade-in":
-            tags  = "{" + base + f"\\pos({px},{py})\\fad(600,600)" + "}"
+        # Background
+        bg_op = float(sub.get("bgOpacity", 0))
+        if bg_op > 0:
+            bg_hex = sub.get("bgColor", "#000000").lstrip("#")
+            try:
+                br, bg_c, bb = int(bg_hex[0:2],16), int(bg_hex[2:4],16), int(bg_hex[4:6],16)
+                aa = int((1.0 - bg_op) * 255)
+                back = f"&H{aa:02X}{bb:02X}{bg_c:02X}{br:02X}"
+            except Exception:
+                back = "&H80000000"
+            base += f"\\3c{back}\\bord4"
+
+        if anim == "fade-in":
+            tags = "{" + base + f"\\fad({anim_ms},0)" + "}"
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+
+        elif anim == "fade-out":
+            tags = "{" + base + f"\\fad(0,{anim_ms})" + "}"
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+
+        elif anim in ("slide-up", "slide-down"):
+            dy   = 30 if anim == "slide-up" else -30
+            tags = "{" + base.replace(f"\\pos({px},{py})", "") + f"\\fad({half_ms},{half_ms})\\move({px},{py + dy},{px},{py},0,{anim_ms})" + "}"
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+
         elif anim == "zoom-in":
-            tags  = "{" + base + f"\\pos({px},{py})\\fscx1\\fscy1\\t(0,600,\\fscx100\\fscy100)" + "}"
-        elif anim == "typewriter":
-            tags  = "{" + base + f"\\pos({px},{py})\\fad(400,0)" + "}"
-        else:
-            tags  = "{" + base + f"\\pos({px},{py})" + "}"
+            tags = "{" + base + f"\\fscx5\\fscy5\\t(0,{anim_ms},\\fscx100\\fscy100)" + "}"
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
 
-        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{tags}{text}")
+        elif anim == "typewriter":
+            # Character-by-character reveal: generate one event per step
+            chars = list(raw_text)
+            # Count non-escape characters (skip \N newline sequences)
+            visible = []
+            idx = 0
+            while idx < len(chars):
+                if raw_text[idx:idx+2] == "\\N":
+                    visible.append("\\N")
+                    idx += 2
+                else:
+                    visible.append(raw_text[idx])
+                    idx += 1
+            n = max(1, len([c for c in visible if c != "\\N"]))
+            char_dur = anim_dur / n
+            tags_base = "{" + base + "}"
+            # Emit incremental events
+            shown = []
+            char_count = 0
+            for step, ch in enumerate(visible):
+                shown.append(ch)
+                if ch != "\\N":
+                    char_count += 1
+                t0 = abs_start + (char_count - 1) * char_dur if ch != "\\N" else abs_start
+                t1 = (abs_start + char_count * char_dur) if step < len(visible) - 1 else abs_end
+                partial = "".join(shown)
+                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(min(t1, abs_end))},Default,,0,0,0,,"
+                             f"{tags_base}{partial}")
+
+        else:
+            # No animation or unknown
+            tags = "{" + base + "}"
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -414,7 +469,11 @@ async def export_video(
                         vp = os.path.join(CLIPS_DIR, slide.get("file", ""))
                         if not os.path.exists(vp):
                             q.put(("error", f"Видеофайл не найден: {slide.get('file')}")); return
-                        cmd_inputs += ["-t", f"{dur:.3f}", "-i", vp]
+                        speed = float(slide.get("speed", 1) or 1)
+                        trim_in = float(slide.get("trimIn", 0) or 0)
+                        # Load a bit extra for trim, actual trim done in filter
+                        load_dur = (dur / max(0.01, speed)) + trim_in + 0.1
+                        cmd_inputs += ["-t", f"{load_dur:.3f}", "-i", vp]
                     else:
                         img_path = os.path.join(IMAGES_DIR, slide.get("file", slide.get("image", "")))
                         if not os.path.exists(img_path):
@@ -440,6 +499,22 @@ async def export_video(
                 filter_parts = []
                 for i, slide in enumerate(slides):
                     parts = [scale_f]
+                    clip_type = slide.get("type", "image")
+                    speed = float(slide.get("speed", 1) or 1)
+                    trim_in = float(slide.get("trimIn", 0) or 0)
+                    dur = float(slide.get("duration", 3))
+
+                    # For video clips: apply trim and speed
+                    if clip_type == "video":
+                        trim_parts = []
+                        if trim_in > 0:
+                            trim_parts.append(f"trim=start={trim_in:.3f}:duration={dur / max(0.01, speed):.3f},setpts=PTS-STARTPTS")
+                        if speed != 1.0:
+                            trim_parts.append(f"setpts={1.0/speed:.6f}*PTS")
+                        if trim_parts:
+                            parts = trim_parts + [scale_f]
+                        # else parts stays as [scale_f]
+
                     for ef in slide.get("effects", []):
                         et, ev = ef.get("type"), ef.get("value", 0)
                         if et in _EFFECTS and float(ev) != 0:
@@ -449,16 +524,28 @@ async def export_video(
                 # ── Subtitles ────────────────────────────────────────────────
                 q.put(("progress", 0.10, "Подготовка субтитров…"))
                 all_subs = []
-                t_cur = 0.0
-                for slide in slides:
-                    dur = float(slide.get("duration", 3))
-                    for sub in slide.get("subtitles", []):
+
+                # Support independent subtitle track (top-level "subtitles" array)
+                top_subs = project.get("subtitles", [])
+                if top_subs:
+                    for sub in top_subs:
                         all_subs.append({
                             **sub,
-                            "abs_start": t_cur + float(sub.get("start", 0)),
-                            "abs_end":   t_cur + float(sub.get("end",   dur)),
+                            "abs_start": float(sub.get("start", 0)),
+                            "abs_end":   float(sub.get("end", 3)),
                         })
-                    t_cur += dur
+                else:
+                    # Legacy: per-clip subtitles
+                    t_cur = 0.0
+                    for slide in slides:
+                        dur = float(slide.get("duration", 3))
+                        for sub in slide.get("subtitles", []):
+                            all_subs.append({
+                                **sub,
+                                "abs_start": t_cur + float(sub.get("start", 0)),
+                                "abs_end":   t_cur + float(sub.get("end", dur)),
+                            })
+                        t_cur += dur
 
                 sub_filter = ""
                 if all_subs:

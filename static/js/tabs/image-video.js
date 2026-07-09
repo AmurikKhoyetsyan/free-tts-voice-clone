@@ -33,13 +33,13 @@ const EFFECTS_DEF = [
 ];
 
 const FONTS = ['Arial', 'Times New Roman', 'Georgia', 'Courier New', 'Verdana', 'Impact', 'Trebuchet MS'];
-const ANIMS = ['none', 'fade-in', 'slide-up', 'slide-down', 'typewriter', 'zoom-in'];
+const ANIMS = ['none', 'fade-in', 'fade-out', 'slide-up', 'slide-down', 'typewriter', 'zoom-in'];
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
     projectId: null, projectName: 'Новый проект',
-    clips: [], audioTracks: [],
-    selIdx: -1, selAudioIdx: -1, activeTab: 'slide', dirty: false,
+    clips: [], audioTracks: [], subtitles: [],
+    selIdx: -1, selAudioIdx: -1, selSubIdx: -1, activeTab: 'slide', dirty: false,
     // Playback
     currentTime: 0, isPlaying: false,
     _playStartReal: 0, _playStartProject: 0, _rafId: null, _syncTick: 0,
@@ -56,6 +56,40 @@ function eh(s)     { return String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;
 function fmt(s)    { const m = Math.floor(s / 60), ss = Math.floor(s % 60), t = Math.floor((s % 1) * 10); return `${m}:${ss.toString().padStart(2,'0')}.${t}`; }
 function fmtShort(s) { const m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${m}:${ss.toString().padStart(2,'0')}`; }
 function totalDur(){ return S.clips.reduce((a, c) => a + (c.duration || 3), 0); }
+
+function _getSnapTargets(excludeIdx, type) {
+    const targets = [];
+    // Clip boundaries
+    let cur = 0;
+    S.clips.forEach(c => {
+        targets.push(cur);
+        cur += c.duration || 3;
+        targets.push(cur);
+    });
+    // Audio track boundaries
+    S.audioTracks.forEach(a => {
+        targets.push(a.startOffset || 0);
+        if (a.duration !== undefined) targets.push((a.startOffset || 0) + a.duration);
+    });
+    // Subtitle boundaries (excluding current)
+    S.subtitles.forEach((s, i) => {
+        if (type === 'sub' && i === excludeIdx) return;
+        targets.push(s.start || 0);
+        targets.push(s.end || 3);
+    });
+    // Playhead
+    targets.push(S.currentTime);
+    return targets;
+}
+
+function _snap(t, targets, threshold = 0.15) {
+    let best = t, bestDist = threshold;
+    for (const target of targets) {
+        const dist = Math.abs(t - target);
+        if (dist < bestDist) { best = target; bestDist = dist; }
+    }
+    return best;
+}
 
 function clipAtTime(t) {
     let cur = 0;
@@ -88,30 +122,34 @@ function hexToRgba(hex, a) {
     return `rgba(${r},${g},${b},${a})`;
 }
 
-// ── Waveform cache ────────────────────────────────────────────────────────────
+// ── Waveform cache (high-resolution: 4000 samples, resampled per draw) ────────
 const _waveCache = new Map();
+const _WAVE_RES  = 4000;
+
 async function drawWaveform(canvas, url) {
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    let peaks = _waveCache.get(url);
-    if (!peaks) {
+
+    let hiPeaks = _waveCache.get(url);
+    if (!hiPeaks) {
         try {
             const buf = await (await fetch(url)).arrayBuffer();
             const ac  = new (window.AudioContext || window.webkitAudioContext)();
             const dec = await ac.decodeAudioData(buf);
             ac.close();
             const data  = dec.getChannelData(0);
-            const block = Math.max(1, Math.floor(data.length / w));
-            peaks = new Float32Array(w);
-            for (let i = 0; i < w; i++) {
+            const block = Math.max(1, Math.floor(data.length / _WAVE_RES));
+            hiPeaks = new Float32Array(_WAVE_RES);
+            for (let i = 0; i < _WAVE_RES; i++) {
                 let mx = 0;
                 for (let j = 0; j < block; j++) mx = Math.max(mx, Math.abs(data[i * block + j] || 0));
-                peaks[i] = mx;
+                hiPeaks[i] = mx;
             }
-            _waveCache.set(url, peaks);
+            _waveCache.set(url, hiPeaks);
         } catch { return; }
     }
+
     ctx.fillStyle = 'rgba(74,158,255,0.08)';
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = 'rgba(74,158,255,0.75)';
@@ -119,9 +157,12 @@ async function drawWaveform(canvas, url) {
     const mid = h / 2;
     ctx.beginPath();
     for (let x = 0; x < w; x++) {
-        const amp = (peaks[x] || 0) * mid * 0.88;
-        ctx.moveTo(x, mid - amp);
-        ctx.lineTo(x, mid + amp);
+        const fi  = (x / (w - 1 || 1)) * (_WAVE_RES - 1);
+        const lo  = Math.floor(fi), hi2 = Math.min(lo + 1, _WAVE_RES - 1);
+        const t   = fi - lo;
+        const amp = ((hiPeaks[lo] || 0) * (1 - t) + (hiPeaks[hi2] || 0) * t) * mid * 0.88;
+        ctx.moveTo(x + 0.5, mid - amp);
+        ctx.lineTo(x + 0.5, mid + amp);
     }
     ctx.stroke();
 }
@@ -290,6 +331,38 @@ export async function init() {
         _applyZoom('custom', newPct);
         zoomMode.value = 'custom';
     }, { passive: false });
+
+    // ── Subtitle overlay drag (move subtitle position with mouse) ─────────────
+    let _subDragging = false, _subDx0 = 0, _subDy0 = 0, _subX0 = 0, _subY0 = 0;
+
+    subOverlay.addEventListener('mousedown', e => {
+        const sub = subOverlay._activeSub;
+        if (!sub) return;
+        e.stopPropagation(); e.preventDefault();
+        _subDragging = true;
+        _subDx0 = e.clientX; _subDy0 = e.clientY;
+        _subX0 = sub.x ?? 50; _subY0 = sub.y ?? 88;
+        subOverlay.style.cursor = 'grabbing';
+    });
+
+    previewContent.addEventListener('mousemove', e => {
+        if (!_subDragging) return;
+        const sub = subOverlay._activeSub;
+        if (!sub) return;
+        const rect = previewContent.getBoundingClientRect();
+        const dxPct = (e.clientX - _subDx0) / rect.width  * 100;
+        const dyPct = (e.clientY - _subDy0) / rect.height * 100;
+        sub.x = Math.max(0, Math.min(100, Math.round((_subX0 + dxPct) * 10) / 10));
+        sub.y = Math.max(0, Math.min(100, Math.round((_subY0 + dyPct) * 10) / 10));
+        subOverlay.style.left = sub.x + '%';
+        subOverlay.style.top  = sub.y + '%';
+        S.dirty = true;
+        if (S.selSubIdx >= 0) renderProps();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (_subDragging) { _subDragging = false; subOverlay.style.cursor = 'grab'; }
+    });
 
     // ── Timeline interaction ──────────────────────────────────────────────────
     tracksScroll.addEventListener('click', e => {
@@ -617,22 +690,61 @@ export async function init() {
                 if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
                 _selectClip(i);
             });
-            div.setAttribute('draggable', 'true');
-            div.addEventListener('dragstart', e => {
-                if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) { e.preventDefault(); return; }
-                e.dataTransfer.setData('cidx', i);
-                setTimeout(() => div.classList.add('dragging'), 0);
-            });
-            div.addEventListener('dragend',  () => div.classList.remove('dragging'));
-            div.addEventListener('dragover', e => { e.preventDefault(); div.classList.add('drag-over'); });
-            div.addEventListener('dragleave',() => div.classList.remove('drag-over'));
-            div.addEventListener('drop', e => {
-                e.preventDefault(); div.classList.remove('drag-over');
-                const src = +e.dataTransfer.getData('cidx');
-                if (src === i) return;
-                const [moved] = S.clips.splice(src, 1);
-                S.clips.splice(i, 0, moved);
-                S.selIdx = i; S.dirty = true; renderAll();
+            // Mouse-based drag to reorder clips
+            div.addEventListener('mousedown', e => {
+                if (e.button !== 0) return;
+                if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
+                e.preventDefault(); e.stopPropagation();
+                _selectClip(i);
+                const sx = e.clientX;
+                let moved = false;
+                const onMove = ev => {
+                    const dx = ev.clientX - sx;
+                    if (!moved && Math.abs(dx) < 5) return;
+                    moved = true;
+                    div.classList.add('dragging');
+                    // Calculate which position to insert at
+                    const tlRect = videoTrackEl.getBoundingClientRect();
+                    const mouseX = ev.clientX - tlRect.left + tracksScroll.scrollLeft;
+                    let dropIdx = 0, cur2 = 0;
+                    for (let j = 0; j < S.clips.length; j++) {
+                        const mid = (cur2 + S.clips[j].duration / 2) * S.pxPerSec;
+                        if (mouseX > mid) dropIdx = j + 1;
+                        cur2 += S.clips[j].duration || 3;
+                    }
+                    // Show drop indicator
+                    document.querySelectorAll('.ive-tl-drop-indicator').forEach(el => el.remove());
+                    let dropX = 0; let dc2 = 0;
+                    for (let j = 0; j < Math.min(dropIdx, S.clips.length); j++) dc2 += S.clips[j].duration || 3;
+                    dropX = dc2 * S.pxPerSec;
+                    const ind = document.createElement('div');
+                    ind.className = 'ive-tl-drop-indicator';
+                    ind.style.cssText = `position:absolute;left:${dropX}px;top:0;bottom:0;width:3px;background:var(--accent);pointer-events:none;z-index:10`;
+                    videoTrackEl.appendChild(ind);
+                };
+                const onUp = ev => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    document.querySelectorAll('.ive-tl-drop-indicator').forEach(el => el.remove());
+                    div.classList.remove('dragging');
+                    if (!moved) return;
+                    const tlRect = videoTrackEl.getBoundingClientRect();
+                    const mouseX = ev.clientX - tlRect.left + tracksScroll.scrollLeft;
+                    let dropIdx = 0, cur2 = 0;
+                    for (let j = 0; j < S.clips.length; j++) {
+                        const mid = (cur2 + (S.clips[j].duration || 3) / 2) * S.pxPerSec;
+                        if (mouseX > mid) dropIdx = j + 1;
+                        cur2 += S.clips[j].duration || 3;
+                    }
+                    if (dropIdx !== i && dropIdx !== i + 1) {
+                        const [moved2] = S.clips.splice(i, 1);
+                        const finalIdx = dropIdx > i ? dropIdx - 1 : dropIdx;
+                        S.clips.splice(finalIdx, 0, moved2);
+                        S.selIdx = finalIdx; S.dirty = true; renderAll();
+                    }
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
             });
             div.querySelector('.ive-tl-clip-resize').addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
@@ -746,6 +858,60 @@ export async function init() {
     function _renderSubsTrack(total) {
         subTrackEl.style.width = Math.max(total * S.pxPerSec, tracksScroll.clientWidth || 500) + 'px';
         subTrackEl.innerHTML = '';
+        S.subtitles.forEach((sub, si) => {
+            const w = Math.max(8, ((sub.end || 3) - (sub.start || 0)) * S.pxPerSec);
+            const el = document.createElement('div');
+            el.className = `ive-tl-sub-item${si === S.selSubIdx ? ' sel' : ''}`;
+            el.style.left  = ((sub.start || 0) * S.pxPerSec) + 'px';
+            el.style.width = w + 'px';
+            el.title = sub.text || '';
+            el.textContent = sub.text ? sub.text.slice(0, 20) : '—';
+            el.addEventListener('click', e => {
+                e.stopPropagation();
+                S.selSubIdx = si;
+                S.selIdx = -1; S.selAudioIdx = -1;
+                S.activeTab = 'subs';
+                document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                document.querySelector('[data-ptab="subs"]')?.classList.add('active');
+                renderTimeline(); renderProps();
+            });
+            // Drag to move subtitle timing
+            el.addEventListener('mousedown', e => {
+                if (e.button !== 0) return;
+                e.stopPropagation(); e.preventDefault();
+                const sx = e.clientX, s0 = sub.start || 0, e0 = sub.end || 3;
+                const dur = e0 - s0;
+                const snapTargets = _getSnapTargets(si, 'sub');
+                const onMove = ev => {
+                    const dx = (ev.clientX - sx) / S.pxPerSec;
+                    let newStart = Math.max(0, s0 + dx);
+                    newStart = _snap(newStart, snapTargets);
+                    sub.start = Math.round(newStart * 10) / 10;
+                    sub.end   = Math.round((newStart + dur) * 10) / 10;
+                    S.dirty = true; renderTimeline();
+                };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+            // Right resize handle
+            const rh = document.createElement('div');
+            rh.className = 'ive-tl-clip-resize';
+            rh.addEventListener('mousedown', e => {
+                e.stopPropagation(); e.preventDefault();
+                const sx = e.clientX, e0 = sub.end || 3;
+                const onMove = ev => {
+                    sub.end = Math.max((sub.start || 0) + 0.1, Math.round((e0 + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
+                    S.dirty = true; renderTimeline();
+                };
+                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+            el.appendChild(rh);
+            subTrackEl.appendChild(el);
+        });
+        // Also render legacy per-clip subtitles if present
         let cursor = 0;
         S.clips.forEach((clip, ci) => {
             const clipDur = clip.duration || 3;
@@ -754,19 +920,13 @@ export async function init() {
                 const absEnd   = cursor + (sub.end || clipDur);
                 const w = Math.max(8, (absEnd - absStart) * S.pxPerSec);
                 const el = document.createElement('div');
-                el.className = 'ive-tl-sub-item';
+                el.className = 'ive-tl-sub-item legacy';
                 el.style.left  = (absStart * S.pxPerSec) + 'px';
                 el.style.width = w + 'px';
-                el.title = sub.text || '';
+                el.title = (sub.text || '') + ' (старый формат)';
                 el.textContent = sub.text ? sub.text.slice(0, 18) : '—';
-                el.addEventListener('click', e => {
-                    e.stopPropagation();
-                    _selectClip(ci);
-                    S.activeTab = 'subs';
-                    document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
-                    document.querySelector('[data-ptab="subs"]')?.classList.add('active');
-                    renderProps();
-                });
+                el.style.opacity = '0.5';
+                el.addEventListener('click', e => { e.stopPropagation(); _selectClip(ci); S.activeTab = 'subs'; document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active')); document.querySelector('[data-ptab="subs"]')?.classList.add('active'); renderProps(); });
                 subTrackEl.appendChild(el);
             });
             cursor += clipDur;
@@ -828,24 +988,27 @@ export async function init() {
             }
         }
 
-        // Subtitles
-        const activeSub = (clip.subtitles || []).find(s => local >= (s.start || 0) && local <= (s.end ?? clip.duration));
+        // Find active subtitle: check global S.subtitles first (independent track)
+        const t = S.currentTime;
+        let activeSub = S.subtitles.find(s => t >= (s.start || 0) && t <= (s.end ?? 3));
+        // Fall back to per-clip subtitles
+        if (!activeSub && clip) {
+            activeSub = (clip.subtitles || []).find(s => local >= (s.start || 0) && local <= (s.end ?? clip.duration));
+        }
         if (activeSub?.text) {
-            _renderSubOverlay(activeSub);
+            _renderSubOverlay(activeSub, activeSub.id || '');
         } else {
             subOverlay.style.display = 'none';
             _lastSubStart = null;
         }
     }
 
-    function _renderSubOverlay(sub) {
+    function _renderSubOverlay(sub, subKey) {
         subOverlay.style.display    = 'block';
         subOverlay.textContent      = sub.text;
-        // Position
         subOverlay.style.left       = (sub.x ?? 50) + '%';
         subOverlay.style.top        = (sub.y ?? 88) + '%';
         subOverlay.style.transform  = `translate(-50%, -50%) rotate(${sub.rotation || 0}deg)`;
-        // Text style
         subOverlay.style.fontSize   = (sub.fontSize || 40) + 'px';
         subOverlay.style.color      = sub.color || '#ffffff';
         subOverlay.style.fontFamily = `"${sub.fontFamily || 'Arial'}", sans-serif`;
@@ -853,32 +1016,33 @@ export async function init() {
         subOverlay.style.fontStyle  = sub.italic ? 'italic' : 'normal';
         subOverlay.style.textDecoration = sub.underline ? 'underline' : 'none';
         subOverlay.style.textAlign  = sub.align || 'center';
-        // Outline + shadow
         const ol = sub.outline ?? 2, sh = sub.shadow ?? 1;
         const shadows = [];
         if (ol > 0) { for (const [dx, dy] of [[-ol,-ol],[ol,-ol],[-ol,ol],[ol,ol]]) shadows.push(`${dx}px ${dy}px 0 #000`); }
         if (sh > 0) shadows.push(`${sh}px ${sh}px ${sh * 2}px rgba(0,0,0,0.6)`);
         subOverlay.style.textShadow = shadows.join(', ');
-        // Background
         const bgOp = sub.bgOpacity ?? 0;
         if (sub.bgColor && bgOp > 0) {
-            subOverlay.style.background    = hexToRgba(sub.bgColor, bgOp);
-            subOverlay.style.padding       = '4px 10px';
-            subOverlay.style.borderRadius  = '4px';
+            subOverlay.style.background   = hexToRgba(sub.bgColor, bgOp);
+            subOverlay.style.padding      = '4px 10px';
+            subOverlay.style.borderRadius = '4px';
         } else {
             subOverlay.style.background = 'none';
             subOverlay.style.padding    = '0';
         }
-
-        // Animation — retrigger when subtitle changes
+        // Animation with custom duration
         const animType = sub.animation || 'none';
-        const subKey = (sub.id || '') + ':' + (sub.start ?? 0);
-        if (subKey !== _lastSubStart) {
-            _lastSubStart = subKey;
+        const animDur  = (sub.animDuration || 0.6).toFixed(2) + 's';
+        const key = subKey || ((sub.id || '') + ':' + (sub.start ?? 0));
+        if (key !== _lastSubStart) {
+            _lastSubStart = key;
             subOverlay.style.animation = 'none';
-            void subOverlay.offsetWidth; // force reflow to restart animation
-            subOverlay.style.animation = animType !== 'none' ? `sub-${animType} 0.4s ease forwards` : '';
+            void subOverlay.offsetWidth;
+            subOverlay.style.animation = animType !== 'none' ? `sub-${animType} ${animDur} ease forwards` : '';
         }
+        // Enable drag in preview
+        subOverlay.style.cursor = 'grab';
+        subOverlay._activeSub = sub;
     }
 
     // ── Properties panel ──────────────────────────────────────────────────────
@@ -886,11 +1050,136 @@ export async function init() {
         if (S.selAudioIdx >= 0 && S.selAudioIdx < S.audioTracks.length && S.activeTab === 'slide') {
             _renderPropsAudio(S.audioTracks[S.selAudioIdx], S.selAudioIdx); return;
         }
+        if (S.activeTab === 'subs') {
+            _renderPropsSubsGlobal(); return;
+        }
         const clip = S.clips[S.selIdx];
         if (!clip) { propsBody.innerHTML = '<div class="ive-empty ive-props-placeholder">Выберите клип</div>'; return; }
         if (S.activeTab === 'slide')   _renderPropsSlide(clip);
-        if (S.activeTab === 'subs')    _renderPropsSubs(clip);
         if (S.activeTab === 'effects') _renderPropsEffects(clip);
+    }
+
+    function _renderPropsSubsGlobal() {
+        const subs = S.subtitles;
+        propsBody.innerHTML = `
+    <div class="ive-subs-header">
+        <button class="btn btn-sm" id="pv-add-sub">+ Субтитр</button>
+        <span style="font-size:10px;color:var(--text-dim)">Независимая дорожка</span>
+    </div>
+    <div id="pv-subs-list">${subs.map((sub, si) => `
+    <div class="ive-sub-item${si === S.selSubIdx ? ' ive-sub-sel' : ''}" data-subitem="${si}">
+        <div class="ive-sub-hdr">
+            <span>#${si + 1}</span>
+            <div style="display:flex;gap:2px">
+                <button class="ive-style-btn${sub.bold      ? ' active' : ''}" data-sbf="bold"      data-si="${si}"><b>B</b></button>
+                <button class="ive-style-btn${sub.italic    ? ' active' : ''}" data-sbf="italic"    data-si="${si}"><i>I</i></button>
+                <button class="ive-style-btn${sub.underline ? ' active' : ''}" data-sbf="underline" data-si="${si}"><u>U</u></button>
+                <button class="hist-btn danger" data-sdel="${si}">${ICONS.trash}</button>
+            </div>
+        </div>
+        <label class="ive-label">Текст<textarea class="ive-textarea" data-sf="text" data-si="${si}" rows="2">${eh(sub.text || '')}</textarea></label>
+        <div class="ive-row2">
+            <label class="ive-label">Нач.(с)<input class="ive-input" type="number" data-sf="start" data-si="${si}" min="0" step="0.1" value="${(sub.start ?? 0).toFixed(1)}"></label>
+            <label class="ive-label">Кон.(с)<input class="ive-input" type="number" data-sf="end"   data-si="${si}" min="0" step="0.1" value="${(sub.end ?? 3).toFixed(1)}"></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">X%<input class="ive-input" type="number" data-sf="x" data-si="${si}" min="0" max="100" value="${sub.x ?? 50}"></label>
+            <label class="ive-label">Y%<input class="ive-input" type="number" data-sf="y" data-si="${si}" min="0" max="100" value="${sub.y ?? 88}"></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">Вращение°<input class="ive-input" type="number" data-sf="rotation" data-si="${si}" min="-180" max="180" step="1" value="${sub.rotation || 0}"></label>
+            <label class="ive-label">Шрифт<select class="ive-select" data-sf="fontFamily" data-si="${si}">${FONTS.map(f => `<option${sub.fontFamily === f ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">Размер<input class="ive-input" type="number" data-sf="fontSize" data-si="${si}" min="8" max="300" value="${sub.fontSize || 40}"></label>
+            <label class="ive-label">Цвет<input class="ive-input" type="color" data-sf="color" data-si="${si}" value="${sub.color || '#ffffff'}"></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">Контур<input class="ive-input" type="number" data-sf="outline" data-si="${si}" min="0" max="15" step="0.5" value="${sub.outline ?? 2}"></label>
+            <label class="ive-label">Тень<input class="ive-input" type="number" data-sf="shadow" data-si="${si}" min="0" max="15" step="0.5" value="${sub.shadow ?? 1}"></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">Фон цвет<input class="ive-input" type="color" data-sf="bgColor" data-si="${si}" value="${sub.bgColor || '#000000'}"></label>
+            <label class="ive-label">Прозрачн.
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" data-sf="bgOpacity" data-si="${si}" min="0" max="1" step="0.05" value="${sub.bgOpacity ?? 0}">
+                    <span class="ive-range-val">${((sub.bgOpacity ?? 0) * 100).toFixed(0)}%</span>
+                </div>
+            </label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">Анимация
+                <select class="ive-select" data-sf="animation" data-si="${si}">
+                    ${ANIMS.map(a => `<option value="${a}"${(sub.animation||'none')===a?' selected':''}>${a}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label">Длит. анимации (с)
+                <input class="ive-input" type="number" data-sf="animDuration" data-si="${si}" min="0.1" max="10" step="0.1" value="${(sub.animDuration || 0.6).toFixed(1)}">
+            </label>
+        </div>
+        <label class="ive-label">Выравн.
+            <div class="ive-row3">
+                <button class="ive-align-btn${(sub.align||'center')==='left'?' active':''}" data-align="left" data-si="${si}">${ICONS.alignLeft}</button>
+                <button class="ive-align-btn${(sub.align||'center')==='center'?' active':''}" data-align="center" data-si="${si}">${ICONS.alignCenter}</button>
+                <button class="ive-align-btn${(sub.align||'center')==='right'?' active':''}" data-align="right" data-si="${si}">${ICONS.alignRight}</button>
+            </div>
+        </label>
+    </div>`).join('')}</div>`;
+
+        $('pv-add-sub').addEventListener('click', () => {
+            const t = S.currentTime;
+            S.subtitles.push({ id: uid(), text: '', start: Math.round(t * 10) / 10, end: Math.round((t + 3) * 10) / 10,
+                x: 50, y: 88, fontFamily: 'Arial', fontSize: 40, color: '#ffffff',
+                outline: 2, shadow: 1, bold: false, italic: false, underline: false,
+                align: 'center', bgColor: '#000000', bgOpacity: 0,
+                animation: 'none', animDuration: 0.6, rotation: 0 });
+            S.selSubIdx = S.subtitles.length - 1;
+            S.dirty = true; renderProps(); renderPreview(); renderTimeline();
+        });
+
+        propsBody.querySelectorAll('[data-sdel]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                S.subtitles.splice(+btn.dataset.sdel, 1);
+                if (S.selSubIdx >= S.subtitles.length) S.selSubIdx = S.subtitles.length - 1;
+                S.dirty = true; renderProps(); renderPreview(); renderTimeline();
+            });
+        });
+
+        propsBody.querySelectorAll('[data-sbf]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const si = +btn.dataset.si, key = btn.dataset.sbf;
+                const sub = S.subtitles[si]; if (!sub) return;
+                sub[key] = !sub[key]; btn.classList.toggle('active', sub[key]);
+                S.dirty = true; renderPreview();
+            });
+        });
+
+        propsBody.querySelectorAll('[data-align]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const si = +btn.dataset.si;
+                const sub = S.subtitles[si]; if (!sub) return;
+                sub.align = btn.dataset.align;
+                btn.closest('.ive-row3')?.querySelectorAll('.ive-align-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                S.dirty = true; renderPreview();
+            });
+        });
+
+        propsBody.querySelectorAll('[data-sf][data-si]').forEach(el => {
+            const ev = el.tagName === 'TEXTAREA' ? 'input' : 'change';
+            el.addEventListener(ev, () => {
+                const sub = S.subtitles[+el.dataset.si]; if (!sub) return;
+                const key = el.dataset.sf;
+                if (el.type === 'number') sub[key] = parseFloat(el.value) || 0;
+                else if (el.type === 'range') {
+                    sub[key] = parseFloat(el.value);
+                    const vEl = el.nextElementSibling;
+                    if (vEl?.classList.contains('ive-range-val')) vEl.textContent = key === 'bgOpacity' ? Math.round(parseFloat(el.value) * 100) + '%' : el.value;
+                } else sub[key] = el.value;
+                S.dirty = true; renderPreview();
+                if (['start', 'end'].includes(key)) renderTimeline();
+            });
+        });
     }
 
     function _renderPropsAudio(track, idx) {
@@ -976,7 +1265,10 @@ export async function init() {
                     <option value="4"${(clip.speed??1)===4?' selected':''}>4×</option>
                 </select>
             </label>
-            ${isVideo ? `<label class="ive-label">Вход (с)
+            ${isVideo ? `<label class="ive-toggle-row ive-label">Убрать аудио видео
+                <input class="ive-toggle" type="checkbox" id="pv-mute-audio"${clip.muteAudio ? ' checked' : ''}>
+            </label>
+            <label class="ive-label">Вход (с)
                 <input class="ive-input" id="pv-trimin" type="number" min="0" step="0.1" value="${clip.trimIn || 0}" title="Начальная точка в файле">
             </label>` : ''}
             ${!isVideo ? `<div class="ive-label ive-row-btns" style="margin-top:4px">
@@ -1021,6 +1313,10 @@ export async function init() {
             S.dirty = true; renderPreview();
         });
         if (isVideo) {
+            $('pv-mute-audio')?.addEventListener('change', e => {
+                clip.muteAudio = e.target.checked;
+                S.dirty = true;
+            });
             $('pv-trimin')?.addEventListener('change', e => {
                 clip.trimIn = Math.max(0, parseFloat(e.target.value) || 0);
                 S.dirty = true; renderPreview();
@@ -1220,6 +1516,26 @@ export async function init() {
             _stopPlayback();
             S.projectId = d.id; S.projectName = d.name;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
+            // Load independent subtitles
+            S.subtitles = d.subtitles || [];
+            // Migrate old per-clip subtitles to independent track if no top-level subs exist
+            if (!S.subtitles.length) {
+                let cursor = 0;
+                S.clips.forEach(clip => {
+                    const dur = clip.duration || 3;
+                    (clip.subtitles || []).forEach(sub => {
+                        S.subtitles.push({
+                            ...sub,
+                            id: sub.id || uid(),
+                            start: Math.round((cursor + (sub.start || 0)) * 100) / 100,
+                            end:   Math.round((cursor + (sub.end   || dur)) * 100) / 100,
+                        });
+                    });
+                    // Clear per-clip subs after migration
+                    clip.subtitles = [];
+                    cursor += dur;
+                });
+            }
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             renderAll(); await loadProjectsList();
             toast('Проект загружен', 'ok');
@@ -1228,7 +1544,7 @@ export async function init() {
 
     // ── Save ──────────────────────────────────────────────────────────────────
     async function _saveProject() {
-        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, export_settings: _getExportSettings() };
+        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, export_settings: _getExportSettings() };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
                 method: S.projectId ? 'PUT' : 'POST',
@@ -1253,7 +1569,7 @@ export async function init() {
         progFill.style.width = '2%';
         progPct.textContent  = '0%';
         const fd = new FormData();
-        fd.append('project_json',  JSON.stringify({ slides: S.clips, audio: S.audioTracks }));
+        fd.append('project_json',  JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles }));
         fd.append('output_format', $('ive-exp-format').value);
         fd.append('resolution',    $('ive-exp-res').value);
         fd.append('fps',           $('ive-exp-fps').value);
@@ -1303,8 +1619,8 @@ export async function init() {
 
     function _resetState() {
         S.projectId = null; S.projectName = 'Новый проект';
-        S.clips = []; S.audioTracks = [];
-        S.selIdx = -1; S.selAudioIdx = -1;
+        S.clips = []; S.audioTracks = []; S.subtitles = [];
+        S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
         S.dirty = false; S.currentTime = 0;
     }
 

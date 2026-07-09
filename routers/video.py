@@ -210,11 +210,15 @@ def _build_override_block(pos_inner: str, anim: str,
         return "{" + inner + "}"
 
     if anim == "zoom-in":
-        inner = (pos_inner or "") + f"\\fscx1\\fscy1\\t(0,{dur},\\fscx100\\fscy100)"
+        inner = (pos_inner or "") + f"\\fscx5\\fscy5\\t(0,{dur},\\fscx100\\fscy100)"
+        return "{" + inner + "}"
+
+    if anim == "fade-out":
+        inner = (pos_inner or "") + f"\\fad(0,{dur})"
         return "{" + inner + "}"
 
     if anim == "typewriter":
-        inner = (pos_inner or "") + f"\\fad({half},0)"
+        inner = (pos_inner or "") + f"\\fad({dur},0)"
         return "{" + inner + "}"
 
     return ("{" + pos_inner + "}") if pos_inner else ""
@@ -372,13 +376,20 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                 if words:
                     cs   = max(1, round(dur * 100 / len(words)))
                     text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
-            anim     = (anim_map or {}).get(sub_idx, "none")
+            anim_entry = (anim_map or {}).get(sub_idx, "none")
+            if isinstance(anim_entry, dict):
+                anim    = anim_entry.get("animation", "none")
+                dur_ms  = int(float(anim_entry.get("animDuration", 0.6)) * 1000)
+            else:
+                anim    = str(anim_entry)
+                dur_ms  = 600
             pos_inner = pos_tag.strip("{}") if pos_tag else ""
             ov_block  = _build_override_block(
                 pos_inner, anim, frame_w, frame_h,
                 int(sd.get("Alignment", 2)),
                 int(sd.get("MarginV",   10)),
                 margin_l, margin_r,
+                dur_ms=dur_ms,
             )
             t0 = _ass_time(s2sec(start_s))
             t1 = _ass_time(s2sec(end_s))
@@ -442,7 +453,11 @@ def burn_subtitles(
 
     try:
         _subs_list = json.loads(subs_json) if subs_json.strip() else []
-        anim_map   = {int(s.get("index", 0)): str(s.get("animation", "none")) for s in _subs_list}
+        anim_map = {}
+        for s in _subs_list:
+            idx = int(s.get("index", 0))
+            anim_dur = float(s.get("animDuration", 0.6))
+            anim_map[idx] = {"animation": str(s.get("animation", "none")), "animDuration": anim_dur}
     except Exception:
         anim_map = {}
 

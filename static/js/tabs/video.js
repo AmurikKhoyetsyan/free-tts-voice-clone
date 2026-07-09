@@ -519,11 +519,12 @@ export async function init() {
         fd.append('karaoke_enabled', String(karaokeEnEl ? karaokeEnEl.checked : false));
         fd.append('karaoke_color',   karaokeColorEl ? karaokeColorEl.value.replace('#', '') : 'ffdd00');
 
-        // Per-subtitle animation data (index → animation type)
+        // Per-subtitle animation data (index → animation type + duration)
         if (currentSubs && currentSubs.length > 0) {
             const animData = currentSubs.map((s, i) => ({
                 index: i + 1,
                 animation: s.animation || 'none',
+                animDuration: s.animDuration || 0.6,
             }));
             fd.append('subs_json', JSON.stringify(animData));
         }
@@ -676,6 +677,7 @@ export async function init() {
                     <select class="sub-anim-sel" data-sub-field="animation" data-si="${i}" title="Анимация">
                         ${animOpts.map(a => `<option value="${a}"${(s.animation||'none')===a?' selected':''}>${a}</option>`).join('')}
                     </select>
+                    <input class="sub-pos-inp" type="number" data-sub-field="animDuration" data-si="${i}" placeholder="Длит. аним. (с)" title="Длительность анимации (с)" min="0.1" max="10" step="0.1" value="${(s.animDuration || 0.6).toFixed(1)}" style="width:70px">
                     <input class="sub-pos-inp" type="number" data-sub-field="posX" data-si="${i}" placeholder="X px" title="X позиция (пкс, пусто=авто)" value="${s.posX != null ? s.posX : ''}">
                     <input class="sub-pos-inp" type="number" data-sub-field="posY" data-si="${i}" placeholder="Y px" title="Y позиция (пкс, пусто=авто)" value="${s.posY != null ? s.posY : ''}">
                 </div>
@@ -824,7 +826,7 @@ export async function init() {
                 ? Math.max(newStart + 0.1, Math.min(newStart + 2, next.start - 0.05))
                 : newStart + 2;
             currentSubs.splice(afterIdx + 1, 0, {
-                index: 0, start: newStart, end: Math.max(newStart + 0.1, newEnd), text: '',
+                index: 0, start: newStart, end: Math.max(newStart + 0.1, newEnd), text: '', animation: 'none', animDuration: 0.6,
             });
             currentSubs.forEach((s, j) => { s.index = j + 1; });
             selectedSubIdx = afterIdx + 1;
@@ -1001,6 +1003,7 @@ export async function init() {
 
         // Subtitle animation — retrigger when subtitle changes
         const animType = sub?.animation || 'none';
+        const animDur  = ((sub?.animDuration || 0.6)).toFixed(2) + 's';
         if (!sub) {
             _lastSubStart = -1;
             overlay.style.animation = '';
@@ -1008,7 +1011,7 @@ export async function init() {
             _lastSubStart = sub.start;
             overlay.style.animation = 'none';
             void overlay.offsetWidth; // force reflow to restart animation
-            overlay.style.animation = animType !== 'none' ? `sub-${animType} 0.4s ease forwards` : '';
+            overlay.style.animation = animType !== 'none' ? `sub-${animType} ${animDur} ease forwards` : '';
         }
 
         // Single-line preference: keep on one line if text fits, wrap only if it doesn't
