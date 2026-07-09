@@ -154,28 +154,70 @@ def _probe_dimensions(path: str) -> tuple:
         return 1920, 1080
 
 
-def _make_ass_anim_tag(anim: str, pos_tag: str = "", dur_ms: int = 400) -> str:
-    """Return an ASS override-tag block for the requested animation type."""
+def _compute_default_pos(alignment: int, frame_w: int, frame_h: int,
+                          margin_v: int, margin_l: int, margin_r: int) -> tuple:
+    """Compute default subtitle (x, y) from ASS alignment + margins."""
+    row = (alignment - 1) // 3   # 0=bottom, 1=middle, 2=top
+    col = (alignment - 1) % 3    # 0=left,   1=center, 2=right
+    x   = [margin_l, frame_w // 2, max(0, frame_w - margin_r)][col]
+    y   = [max(0, frame_h - margin_v), frame_h // 2, margin_v][row]
+    return x, y
+
+
+def _build_override_block(pos_inner: str, anim: str,
+                           frame_w: int, frame_h: int,
+                           alignment: int, margin_v: int,
+                           margin_l: int, margin_r: int,
+                           dur_ms: int = 600) -> str:
+    """
+    Build a SINGLE ASS override block merging position + animation.
+    \fad must share a block with \pos/\an or libass ignores it.
+    """
+    dur  = dur_ms
+    half = dur_ms // 2
+
+    # Extract existing \pos(x,y) and \an from pos_inner, if present
+    m_pos = re.search(r"\\pos\((\d+),(\d+)\)", pos_inner)
+    m_an  = re.search(r"\\an(\d)",              pos_inner)
+
+    if m_pos:
+        px, py = int(m_pos.group(1)), int(m_pos.group(2))
+    elif frame_w > 0 and frame_h > 0:
+        px, py = _compute_default_pos(alignment, frame_w, frame_h, margin_v, margin_l, margin_r)
+    else:
+        px, py = None, None
+
+    an_tag = m_an.group(0) if m_an else f"\\an{alignment}"
+
     if not anim or anim == "none":
-        return ""
-    dur  = str(dur_ms)
-    half = str(dur_ms // 2)
+        return ("{" + pos_inner + "}") if pos_inner else ""
+
     if anim == "fade-in":
-        return "{\\fad(" + dur + ",0)}"
+        # Merge \fad into the same block as \pos so libass applies it
+        inner = (pos_inner or "") + f"\\fad({dur},{dur})"
+        return "{" + inner + "}"
+
+    if anim in ("slide-up", "slide-down") and px is not None:
+        dy    = 30 if anim == "slide-up" else -30
+        # \move replaces \pos; keep \an; add \fad for smooth edges
+        inner = (f"{an_tag}\\fad({half},{half})"
+                 f"\\move({px},{py + dy},{px},{py},0,{dur})")
+        return "{" + inner + "}"
+
     if anim in ("slide-up", "slide-down"):
-        m = re.search(r"\\pos\((\d+),(\d+)\)", pos_tag)
-        if m:
-            x, y  = int(m.group(1)), int(m.group(2))
-            dy    = 30 if anim == "slide-up" else -30
-            return ("{\\an5\\fad(" + half + ",0)"
-                    "\\move(" + str(x) + "," + str(y + dy) + ","
-                              + str(x) + "," + str(y) + ",0," + dur + ")}")
-        return "{\\fad(" + half + ",0)}"
+        # No position info available — fall back to fade
+        inner = (pos_inner or "") + f"\\fad({half},{half})"
+        return "{" + inner + "}"
+
     if anim == "zoom-in":
-        return "{\\fscx1\\fscy1\\t(0," + dur + ",\\fscx100\\fscy100)}"
+        inner = (pos_inner or "") + f"\\fscx1\\fscy1\\t(0,{dur},\\fscx100\\fscy100)"
+        return "{" + inner + "}"
+
     if anim == "typewriter":
-        return "{\\fad(" + half + ",0)}"
-    return ""
+        inner = (pos_inner or "") + f"\\fad({half},0)"
+        return "{" + inner + "}"
+
+    return ("{" + pos_inner + "}") if pos_inner else ""
 
 
 def _srt_to_ass(srt_content: str, style_dict: dict,
@@ -331,16 +373,22 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                     cs   = max(1, round(dur * 100 / len(words)))
                     text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
             anim     = (anim_map or {}).get(sub_idx, "none")
-            anim_tag = _make_ass_anim_tag(anim, pos_tag)
+            pos_inner = pos_tag.strip("{}") if pos_tag else ""
+            ov_block  = _build_override_block(
+                pos_inner, anim, frame_w, frame_h,
+                int(sd.get("Alignment", 2)),
+                int(sd.get("MarginV",   10)),
+                margin_l, margin_r,
+            )
             t0 = _ass_time(s2sec(start_s))
             t1 = _ass_time(s2sec(end_s))
             events.append(
-                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{pos_tag}{anim_tag}{text}"
+                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{ov_block}{text}"
             )
             if has_text_outline:
                 # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
                 events.append(
-                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{pos_tag}{anim_tag}{text}"
+                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{ov_block}{text}"
                 )
         except Exception:
             continue

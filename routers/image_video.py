@@ -348,12 +348,27 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         y_pct   = float(sub.get("y", 88))
         px      = int(width  * x_pct / 100)
         py      = int(height * y_pct / 100)
-        tags = (
-            f"{{\\fn{font}\\fs{size}\\c{primary}"
-            f"\\b{bold}\\i{italic}"
-            f"\\bord{outline:.1f}\\shad{shadow:.1f}"
-            f"\\pos({px},{py})}}"
-        )
+        anim    = sub.get("animation", "none") or "none"
+
+        base = (f"\\fn{font}\\fs{size}\\c{primary}"
+                f"\\b{bold}\\i{italic}"
+                f"\\bord{outline:.1f}\\shad{shadow:.1f}")
+
+        if anim in ("slide-up", "slide-down"):
+            dy    = 30 if anim == "slide-up" else -30
+            tags  = ("{" + base
+                     + f"\\fad(300,300)"
+                     + f"\\move({px},{py + dy},{px},{py},0,600)"
+                     + "}")
+        elif anim == "fade-in":
+            tags  = "{" + base + f"\\pos({px},{py})\\fad(600,600)" + "}"
+        elif anim == "zoom-in":
+            tags  = "{" + base + f"\\pos({px},{py})\\fscx1\\fscy1\\t(0,600,\\fscx100\\fscy100)" + "}"
+        elif anim == "typewriter":
+            tags  = "{" + base + f"\\pos({px},{py})\\fad(400,0)" + "}"
+        else:
+            tags  = "{" + base + f"\\pos({px},{py})" + "}"
+
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{tags}{text}")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
