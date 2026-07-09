@@ -143,12 +143,33 @@
     line-height: 1.3;
     border-radius: 4px;
     transition: outline-color 0.15s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
 }
+.ive-sub-text-inner { display: block; width: 100%; }
 .ive-sub-overlay.selected {
     outline: 2px dashed rgba(255, 210, 0, 0.95);
     outline-offset: 8px;
     box-shadow: 0 0 0 10px rgba(255, 200, 0, 0.08);
 }
+
+/* Resize handles — visible only when subtitle is selected */
+.ive-sub-rh {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: #4a9eff;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    z-index: 10;
+    display: none;
+    pointer-events: all;
+}
+.ive-sub-overlay.selected .ive-sub-rh { display: block; }
+.ive-sub-rh-e  { right: -5px;  top: calc(50% - 5px); cursor: e-resize; }
+.ive-sub-rh-s  { bottom: -5px; left: calc(50% - 5px); cursor: s-resize; }
+.ive-sub-rh-se { right: -5px;  bottom: -5px; cursor: se-resize; }
 
 /* ── Professional Transport Bar ─────────────────────────────────────────── */
 .ive-transport-bar {
@@ -512,13 +533,26 @@
 }
 .ive-sub-item {
     background: var(--bg1); border: 1px solid var(--border);
-    border-radius: 5px; padding: 8px; margin-bottom: 8px;
-    display: flex; flex-direction: column; gap: 5px;
+    border-radius: 5px; margin-bottom: 6px;
 }
 .ive-sub-item.ive-sub-sel { border-color: var(--accent); }
+/* Accordion summary = header */
 .ive-sub-hdr {
     display: flex; align-items: center; justify-content: space-between;
     font-size: 11px; font-weight: 600; color: var(--text-dim);
+    padding: 7px 8px; cursor: pointer; user-select: none; list-style: none;
+    gap: 4px;
+}
+.ive-sub-hdr::-webkit-details-marker { display: none; }
+.ive-sub-hdr::marker { display: none; }
+.ive-sub-item[open] > .ive-sub-hdr { border-bottom: 1px solid var(--border); }
+.ive-sub-item:not([open]) > .ive-sub-hdr { border-bottom: none; }
+.ive-sub-preview-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: normal; color: var(--text-muted); flex: 1; min-width: 0;
+}
+.ive-sub-body {
+    padding: 8px; display: flex; flex-direction: column; gap: 5px;
 }
 
 .btn-xs {

@@ -3,7 +3,7 @@ import datetime
 import threading
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOGS_DIR = os.path.join(BASE_DIR, ".logs")
+LOGS_DIR = os.path.join(BASE_DIR, ".outputs", "logs")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 _lock = threading.Lock()

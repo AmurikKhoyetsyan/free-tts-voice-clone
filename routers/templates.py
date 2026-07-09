@@ -5,7 +5,7 @@ from core.log import app_log
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TMPL_DIR  = os.path.join(BASE_DIR, ".output", "templates")
+TMPL_DIR  = os.path.join(BASE_DIR, ".outputs", "templates")
 os.makedirs(TMPL_DIR, exist_ok=True)
 
 

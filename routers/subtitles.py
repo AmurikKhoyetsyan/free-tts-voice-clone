@@ -7,7 +7,7 @@ from core.log import app_log
 router = APIRouter(prefix="/api/subtitles", tags=["subtitles"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRT_DIR  = os.path.join(BASE_DIR, ".output", "subtitle")
+SRT_DIR  = os.path.join(BASE_DIR, ".outputs", "subtitle")
 os.makedirs(SRT_DIR, exist_ok=True)
 
 

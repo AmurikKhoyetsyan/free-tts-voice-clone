@@ -295,7 +295,101 @@ export async function init() {
     const transOverlayEl     = $('ive-trans-overlay');
     // .amur buttons
     const saveAmurBtn        = $('ive-save-amur-btn');
-    const openAmurInput      = $('ive-open-amur-input');
+    const openAmurBtn        = $('ive-open-amur-btn');
+    // .amur dialog elements (outside of tab section, use document.getElementById)
+    const amurModal          = document.getElementById('modal-amur');
+    const amurTitle          = document.getElementById('modal-amur-title');
+    const amurDirInput       = document.getElementById('modal-amur-dir');
+    const amurDirGo          = document.getElementById('modal-amur-dir-go');
+    const amurFilenameRow    = document.getElementById('modal-amur-filename-row');
+    const amurFilenameInput  = document.getElementById('modal-amur-filename');
+    const amurFilesEl        = document.getElementById('modal-amur-files');
+    const amurUploadRow      = document.getElementById('modal-amur-upload-row');
+    const amurUploadInput    = document.getElementById('modal-amur-upload-input');
+    const amurCancelBtn      = document.getElementById('modal-amur-cancel');
+    const amurOkBtn          = document.getElementById('modal-amur-ok');
+
+    let _amurMode = 'save';
+    let _amurResolve = null;
+
+    async function _amurBrowse(dir) {
+        const q = dir ? '?path=' + encodeURIComponent(dir) : '';
+        try {
+            const r = await fetch('/api/imgvid/amur/browse' + q);
+            const d = await r.json();
+            amurDirInput.value = d.dir;
+            const _esc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+            amurFilesEl.innerHTML = d.files.length
+                ? d.files.map(f =>
+                    `<div class="amur-file-row" data-path="${_esc(f.path)}" data-name="${_esc(f.name)}"
+                        style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px">
+                        <span>${_esc(f.name)}</span>
+                        <span style="color:var(--text-muted);font-size:11px">${(f.size/1024).toFixed(1)} KB</span>
+                    </div>`).join('')
+                : '<div style="padding:10px;text-align:center;color:var(--text-muted);font-size:12px">Нет .amur файлов</div>';
+            amurFilesEl.querySelectorAll('.amur-file-row').forEach(el => {
+                el.addEventListener('mouseenter', () => el.style.background = 'var(--surface-hover, rgba(0,0,0,0.05))');
+                el.addEventListener('mouseleave', () => { if (!el.classList.contains('selected')) el.style.background = ''; });
+                el.addEventListener('click', () => {
+                    if (_amurMode === 'load') {
+                        amurModal.hidden = true;
+                        _amurResolve?.({ type: 'path', path: el.dataset.path });
+                    } else {
+                        amurFilesEl.querySelectorAll('.amur-file-row').forEach(r => {
+                            r.classList.remove('selected'); r.style.background = '';
+                        });
+                        el.classList.add('selected');
+                        el.style.background = 'var(--primary-light, rgba(59,130,246,0.1))';
+                        amurFilenameInput.value = el.dataset.name;
+                    }
+                });
+            });
+        } catch (e) { toast('Ошибка обзора папки: ' + e.message, 'err'); }
+    }
+
+    async function _openSaveAmurDialog(projectName) {
+        _amurMode = 'save';
+        amurTitle.textContent = 'Сохранить проект как .amur';
+        amurFilenameRow.hidden = false;
+        amurUploadRow.hidden = true;
+        amurOkBtn.textContent = 'Сохранить';
+        amurUploadInput.value = '';
+        await _amurBrowse('');
+        amurFilenameInput.value = (projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
+        amurModal.hidden = false;
+        amurFilenameInput.focus();
+        return new Promise(resolve => { _amurResolve = resolve; });
+    }
+
+    async function _openLoadAmurDialog() {
+        _amurMode = 'load';
+        amurTitle.textContent = 'Открыть проект .amur';
+        amurFilenameRow.hidden = true;
+        amurUploadRow.hidden = false;
+        amurOkBtn.textContent = 'Открыть';
+        amurUploadInput.value = '';
+        await _amurBrowse('');
+        amurModal.hidden = false;
+        return new Promise(resolve => { _amurResolve = resolve; });
+    }
+
+    amurDirGo.addEventListener('click', () => _amurBrowse(amurDirInput.value));
+    amurDirInput.addEventListener('keydown', e => { if (e.key === 'Enter') _amurBrowse(amurDirInput.value); });
+    amurCancelBtn.addEventListener('click', () => { amurModal.hidden = true; _amurResolve?.(null); });
+    amurOkBtn.addEventListener('click', () => {
+        if (_amurMode === 'save') {
+            const fname = amurFilenameInput.value.trim();
+            if (!fname) { toast('Введите имя файла', 'err'); return; }
+            amurModal.hidden = true;
+            _amurResolve?.({ type: 'save', dir: amurDirInput.value, filename: fname });
+        } else {
+            toast('Нажмите на файл из списка или загрузите файл', 'warn');
+        }
+    });
+    amurUploadInput.addEventListener('change', () => {
+        const file = amurUploadInput.files[0];
+        if (file) { amurModal.hidden = true; _amurResolve?.({ type: 'file', file }); }
+    });
 
     // ── New project ───────────────────────────────────────────────────────────
     newBtn.addEventListener('click', async () => {
@@ -368,6 +462,83 @@ export async function init() {
         _applyZoom('custom', newPct);
         zoomMode.value = 'custom';
     }, { passive: false });
+
+    // ── Subtitle overlay: text element + resize handles (created once) ────────
+    const subTextEl = document.createElement('span');
+    subTextEl.className = 'ive-sub-text-inner';
+    subOverlay.appendChild(subTextEl);
+    subOverlay._textEl = subTextEl;
+
+    const subRhE  = document.createElement('div');
+    subRhE.className  = 'ive-sub-rh ive-sub-rh-e';
+    subRhE.title = 'Изменить ширину';
+    const subRhS  = document.createElement('div');
+    subRhS.className  = 'ive-sub-rh ive-sub-rh-s';
+    subRhS.title = 'Изменить высоту';
+    const subRhSE = document.createElement('div');
+    subRhSE.className = 'ive-sub-rh ive-sub-rh-se';
+    subRhSE.title = 'Изменить ширину и высоту';
+    subOverlay.appendChild(subRhE);
+    subOverlay.appendChild(subRhS);
+    subOverlay.appendChild(subRhSE);
+
+    subRhE.addEventListener('mousedown', e => {
+        const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
+        e.stopPropagation(); e.preventDefault();
+        const rect = previewContent.getBoundingClientRect();
+        const sx = e.clientX;
+        const w0 = sub.w > 0 ? sub.w : 50;
+        if (!(sub.w > 0)) sub.w = 50;
+        const onMove = ev => {
+            const dx = (ev.clientX - sx) / rect.width * 100;
+            sub.w = Math.max(5, Math.min(100, Math.round((w0 + 2 * dx) * 10) / 10));
+            S.dirty = true; renderPreview(); if (S.selSubIdx >= 0) renderProps();
+        };
+        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
+    subRhS.addEventListener('mousedown', e => {
+        const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
+        e.stopPropagation(); e.preventDefault();
+        const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
+        const sc = (previewContent.clientHeight || _resPH) / _resPH;
+        const sy = e.clientY;
+        const h0 = sub.h > 0 ? sub.h : 80;
+        if (!(sub.h > 0)) sub.h = 80;
+        const onMove = ev => {
+            const dy = (ev.clientY - sy) / sc;
+            sub.h = Math.max(10, Math.round(h0 + 2 * dy));
+            S.dirty = true; renderPreview(); if (S.selSubIdx >= 0) renderProps();
+        };
+        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
+    subRhSE.addEventListener('mousedown', e => {
+        const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
+        e.stopPropagation(); e.preventDefault();
+        const rect = previewContent.getBoundingClientRect();
+        const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
+        const sc = (previewContent.clientHeight || _resPH) / _resPH;
+        const sx = e.clientX, sy = e.clientY;
+        const w0 = sub.w > 0 ? sub.w : 50;
+        const h0 = sub.h > 0 ? sub.h : 80;
+        if (!(sub.w > 0)) sub.w = 50;
+        if (!(sub.h > 0)) sub.h = 80;
+        const onMove = ev => {
+            const dx = (ev.clientX - sx) / rect.width * 100;
+            const dy = (ev.clientY - sy) / sc;
+            sub.w = Math.max(5, Math.min(100, Math.round((w0 + 2 * dx) * 10) / 10));
+            sub.h = Math.max(10, Math.round(h0 + 2 * dy));
+            S.dirty = true; renderPreview(); if (S.selSubIdx >= 0) renderProps();
+        };
+        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
 
     // ── Subtitle overlay drag (move subtitle position with mouse) ─────────────
     let _subDragging = false, _subDx0 = 0, _subDy0 = 0, _subX0 = 0, _subY0 = 0;
@@ -462,27 +633,40 @@ export async function init() {
     saveAmurBtn?.addEventListener('click', async () => {
         if (!S.projectId) { await _saveProject(); }
         if (!S.projectId) { toast('Не удалось сохранить проект', 'err'); return; }
+        const result = await _openSaveAmurDialog(S.projectName);
+        if (!result) return;
         try {
-            const r = await fetch(`/api/imgvid/projects/${S.projectId}/pack`);
-            if (!r.ok) { toast('Ошибка упаковки', 'err'); return; }
-            const blob = await r.blob();
-            const fname = (S.projectName || 'project').replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
-            const url = URL.createObjectURL(blob);
-            const a = Object.assign(document.createElement('a'), { href: url, download: fname });
-            document.body.appendChild(a); a.click(); a.remove();
-            URL.revokeObjectURL(url);
-            toast('Проект скачан как .amur', 'ok');
+            const r = await fetch('/api/imgvid/amur/save-to-path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pid: S.projectId, dir: result.dir, filename: result.filename }),
+            });
+            const d = await r.json();
+            if (!r.ok) { toast(d.detail || 'Ошибка сохранения', 'err'); return; }
+            toast('Сохранено: ' + d.filename, 'ok');
         } catch (e) { toast(e.message, 'err'); }
     });
-    openAmurInput?.addEventListener('change', async () => {
-        const file = openAmurInput.files[0]; if (!file) return;
-        if (S.dirty && !confirm('Несохранённые изменения. Открыть .amur?')) { openAmurInput.value = ''; return; }
+    openAmurBtn?.addEventListener('click', async () => {
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть .amur?')) return;
+        const result = await _openLoadAmurDialog();
+        if (!result) return;
         toast('Открытие .amur…', 'info');
         try {
-            const fd = new FormData(); fd.append('file', file);
-            const r  = await fetch('/api/imgvid/amur/unpack', { method: 'POST', body: fd });
-            const d  = await r.json();
-            if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            let d;
+            if (result.type === 'file') {
+                const fd = new FormData(); fd.append('file', result.file);
+                const r = await fetch('/api/imgvid/amur/unpack', { method: 'POST', body: fd });
+                d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            } else {
+                const r = await fetch('/api/imgvid/amur/load-from-path', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_path: result.path }),
+                });
+                d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            }
             _stopPlayback();
             S.projectId = d.id; S.projectName = d.name;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
@@ -492,7 +676,6 @@ export async function init() {
             renderAll(); await loadProjectsList();
             toast('Проект загружен из .amur', 'ok');
         } catch (e) { toast(e.message, 'err'); }
-        openAmurInput.value = '';
     });
     // Listen for open-project event from History tab
     events?.addEventListener('imgvid-open-project', async (ev) => {
@@ -1273,6 +1456,8 @@ export async function init() {
             previewEmpty.style.display  = 'flex';
             subOverlay.style.display    = 'none';
             previewContent.style.filter = '';
+            previewImg.style.filter     = '';
+            previewVideo.style.filter   = '';
             _resetTransitionPreview();
             return;
         }
@@ -1286,7 +1471,23 @@ export async function init() {
         const transProgress = inTrans ? Math.max(0, Math.min(1, (local - (clipDur - transDur)) / transDur)) : 0;
 
         previewEmpty.style.display  = 'none';
-        previewContent.style.filter = inTrans ? '' : buildCSSFilter(clip.effects || []);
+
+        // Determine active subtitle early so we can route the CSS filter correctly
+        const _t = S.currentTime;
+        const _activeSub = S.subtitles.find(s => _t >= (s.start || 0) && _t <= (s.end ?? 3))
+            || (clip ? (clip.subtitles || []).find(s => local >= (s.start || 0) && local <= (s.end ?? clip.duration)) : null);
+
+        // Apply CSS effects filter: if aboveEffects, filter only the media elements
+        const _cssFilter = inTrans ? '' : buildCSSFilter(clip.effects || []);
+        if (_activeSub?.aboveEffects) {
+            previewContent.style.filter = '';
+            previewImg.style.filter   = _cssFilter;
+            previewVideo.style.filter = _cssFilter;
+        } else {
+            previewContent.style.filter = _cssFilter;
+            previewImg.style.filter   = '';
+            previewVideo.style.filter = '';
+        }
 
         // Show current clip
         if (clip.type === 'image') {
@@ -1347,14 +1548,9 @@ export async function init() {
             _resetTransitionPreview();
         }
 
-        // Find active subtitle
-        const t = S.currentTime;
-        let activeSub = S.subtitles.find(s => t >= (s.start || 0) && t <= (s.end ?? 3));
-        if (!activeSub && clip) {
-            activeSub = (clip.subtitles || []).find(s => local >= (s.start || 0) && local <= (s.end ?? clip.duration));
-        }
-        if (activeSub?.text) {
-            _renderSubOverlay(activeSub, activeSub.id || '');
+        // Render active subtitle (already resolved above)
+        if (_activeSub?.text) {
+            _renderSubOverlay(_activeSub, _activeSub.id || '');
         } else {
             subOverlay.style.display = 'none';
             _lastSubStart = null;
@@ -1364,7 +1560,8 @@ export async function init() {
     function _renderSubOverlay(sub, subKey) {
         subOverlay.style.display = 'block';
 
-        // Karaoke word highlight
+        // Update text content without touching resize handle children
+        const textEl = subOverlay._textEl || subOverlay;
         if (sub.karaokeEnable && sub.end > sub.start) {
             const karaokeColor = sub.karaokeColor || '#ffdd00';
             const wordArr  = sub.text.split(/\s+/);
@@ -1373,13 +1570,13 @@ export async function init() {
             const spoken   = Math.min(wordArr.length, Math.floor(wordArr.length * elapsed / subDur + 0.5));
             const tokens   = sub.text.split(/(\s+)/);
             let wi = 0;
-            subOverlay.innerHTML = tokens.map(tok => {
+            textEl.innerHTML = tokens.map(tok => {
                 if (/^\s+$/.test(tok)) return tok;
                 const color = wi++ < spoken ? karaokeColor : (sub.color || '#ffffff');
                 return `<span style="color:${color}">${eh(tok)}</span>`;
             }).join('');
         } else {
-            subOverlay.textContent = sub.text;
+            textEl.textContent = sub.text;
         }
 
         // Scale all pixel values to match the preview/export resolution ratio
@@ -1403,6 +1600,21 @@ export async function init() {
             (sub.outline ?? 2) * sc, sub.outlineColor || '#000000',
             (sub.shadow  ?? 1) * sc, sub.shadowColor  || '#000000'
         );
+
+        // Width / height override
+        if (sub.w > 0) {
+            subOverlay.style.width    = sub.w + '%';
+            subOverlay.style.maxWidth = sub.w + '%';
+        } else {
+            subOverlay.style.width    = '';
+            subOverlay.style.maxWidth = '90%';
+        }
+        if (sub.h > 0) {
+            subOverlay.style.minHeight = (sub.h * sc) + 'px';
+        } else {
+            subOverlay.style.minHeight = '';
+        }
+
         const bgOp = sub.bgOpacity ?? 0;
         if (bgOp > 0) {
             subOverlay.style.background   = hexToRgba(sub.bgColor || '#000000', bgOp);
@@ -1450,17 +1662,21 @@ export async function init() {
         <span style="font-size:10px;color:var(--text-dim)">Независимая дорожка</span>
     </div>
     <div id="pv-subs-list">${subs.map((sub, si) => `
-    <div class="ive-sub-item${si === S.selSubIdx ? ' ive-sub-sel' : ''}" data-subitem="${si}">
-        <div class="ive-sub-hdr">
-            <span>#${si + 1}</span>
-            <div style="display:flex;gap:2px;align-items:center">
+    <details class="ive-sub-item${si === S.selSubIdx ? ' ive-sub-sel' : ''}" data-subitem="${si}"${si === S.selSubIdx ? ' open' : ''}>
+        <summary class="ive-sub-hdr">
+            <div style="display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow:hidden">
+                <span style="flex-shrink:0;font-weight:700">#${si + 1}</span>
+                <span class="ive-sub-preview-text">${eh((sub.text || '—').slice(0, 28))}</span>
+            </div>
+            <div style="display:flex;gap:2px;align-items:center;flex-shrink:0" onclick="event.stopPropagation()">
                 <button class="ive-style-btn${sub.bold      ? ' active' : ''}" data-sbf="bold"      data-si="${si}"><b>B</b></button>
                 <button class="ive-style-btn${sub.italic    ? ' active' : ''}" data-sbf="italic"    data-si="${si}"><i>I</i></button>
                 <button class="ive-style-btn${sub.underline ? ' active' : ''}" data-sbf="underline" data-si="${si}"><u>U</u></button>
-                ${subs.length > 1 ? `<button class="btn btn-xs" data-apply-all="${si}" title="Применить стиль этого субтитра ко всем">→ все</button>` : ''}
+                ${subs.length > 1 ? `<button class="btn btn-xs" data-apply-all="${si}" title="Применить стиль ко всем">→ все</button>` : ''}
                 <button class="hist-btn danger" data-sdel="${si}">${ICONS.trash}</button>
             </div>
-        </div>
+        </summary>
+        <div class="ive-sub-body">
         <label class="ive-label">Текст<textarea class="ive-textarea" data-sf="text" data-si="${si}" rows="2">${eh(sub.text || '')}</textarea></label>
         <div class="ive-row2">
             <label class="ive-label">Нач.(с)<input class="ive-input" type="number" data-sf="start" data-si="${si}" min="0" step="0.1" value="${(sub.start ?? 0).toFixed(1)}"></label>
@@ -1469,6 +1685,10 @@ export async function init() {
         <div class="ive-row2">
             <label class="ive-label">X%<input class="ive-input" type="number" data-sf="x" data-si="${si}" min="0" max="100" value="${sub.x ?? 50}"></label>
             <label class="ive-label">Y%<input class="ive-input" type="number" data-sf="y" data-si="${si}" min="0" max="100" value="${sub.y ?? 88}"></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label" title="Ширина (0 = авто)">Width%<input class="ive-input" type="number" data-sf="w" data-si="${si}" min="0" max="100" step="1" value="${sub.w || 0}" placeholder="Авто"></label>
+            <label class="ive-label" title="Высота в пикселях (0 = авто)">Height px<input class="ive-input" type="number" data-sf="h" data-si="${si}" min="0" max="2000" step="10" value="${sub.h || 0}" placeholder="Авто"></label>
         </div>
         <div class="ive-row2">
             <label class="ive-label">Вращение°<input class="ive-input" type="number" data-sf="rotation" data-si="${si}" min="-180" max="180" step="1" value="${sub.rotation || 0}"></label>
@@ -1534,8 +1754,26 @@ export async function init() {
                     <span>Цвет подсветки</span>
                 </label>
             </div>
+            <label class="ive-label ive-sub-above-row" style="flex-direction:row;align-items:center;gap:6px;font-size:12px;margin-top:6px">
+                <input type="checkbox" data-sf="aboveEffects" data-si="${si}"${sub.aboveEffects ? ' checked' : ''}>
+                <span title="Субтитр отображается поверх фильтров и эффектов изображения">☑ Поверх эффектов (Always On Top)</span>
+            </label>
         </details>
-    </div>`).join('')}</div>`;
+        </div>
+    </details>`).join('')}</div>`;
+
+        // Accordion: open one → select it, close others
+        propsBody.querySelectorAll('[data-subitem]').forEach(details => {
+            details.addEventListener('toggle', () => {
+                if (details.open) {
+                    S.selSubIdx = +details.dataset.subitem;
+                    propsBody.querySelectorAll('[data-subitem]').forEach(other => {
+                        if (other !== details && other.open) other.open = false;
+                    });
+                    renderTimeline(); renderPreview();
+                }
+            });
+        });
 
         propsBody.querySelectorAll('[data-apply-all]').forEach(btn => {
             btn.addEventListener('click', e => {
@@ -1547,7 +1785,7 @@ export async function init() {
                               'bgColor','bgOpacity','bgPadX','bgPadY','bgRadius',
                               'animation','animDuration','align','lineHeight',
                               'karaokeEnable','karaokeColor',
-                              'x','y','rotation'];
+                              'x','y','rotation','w','h','aboveEffects'];
                 S.subtitles.forEach((sub, si) => {
                     if (si === srcIdx) return;
                     keys.forEach(k => { if (src[k] !== undefined) sub[k] = src[k]; });
@@ -1560,12 +1798,13 @@ export async function init() {
         $('pv-add-sub').addEventListener('click', () => {
             const t = S.currentTime;
             S.subtitles.push({ id: uid(), text: '', start: Math.round(t * 10) / 10, end: Math.round((t + 3) * 10) / 10,
-                x: 50, y: 88, fontFamily: 'Arial', fontSize: 40, color: '#ffffff',
+                x: 50, y: 88, w: 0, h: 0, fontFamily: 'Arial', fontSize: 40, color: '#ffffff',
                 outline: 2, outlineColor: '#000000', shadow: 1, shadowColor: '#000000',
                 bold: false, italic: false, underline: false,
                 align: 'center', bgColor: '#000000', bgOpacity: 0, bgPadX: 12, bgPadY: 6, bgRadius: 4,
                 animation: 'none', animDuration: 0.6, rotation: 0,
-                lineHeight: 1.35, karaokeEnable: false, karaokeColor: '#ffdd00' });
+                lineHeight: 1.35, karaokeEnable: false, karaokeColor: '#ffdd00',
+                aboveEffects: false });
             S.selSubIdx = S.subtitles.length - 1;
             S.dirty = true; renderProps(); renderPreview(); renderTimeline();
         });

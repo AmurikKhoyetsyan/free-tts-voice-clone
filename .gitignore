@@ -39,5 +39,4 @@ CLAUDE.md
 __pycache__/
 *.pyc
 *.pyo
-.output/
-.logs/
+.outputs/

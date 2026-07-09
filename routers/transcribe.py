@@ -6,8 +6,8 @@ from core.log import app_log
 
 router = APIRouter(prefix="/api/transcribe", tags=["transcribe"])
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VIDEO_IN  = os.path.join(BASE_DIR, ".output", "video", "src")
-TEMP_DIR  = os.path.join(BASE_DIR, ".output", "temp")
+VIDEO_IN  = os.path.join(BASE_DIR, ".outputs", "video", "src")
+TEMP_DIR  = os.path.join(BASE_DIR, ".outputs", "temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 FFMPEG = shutil.which("ffmpeg") or os.path.join(BASE_DIR, "ffmpeg", "ffmpeg.exe")

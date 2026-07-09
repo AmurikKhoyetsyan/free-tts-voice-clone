@@ -8,9 +8,9 @@ from core.log import app_log, print_progress
 router = APIRouter(prefix="/api/video", tags=["video"])
 
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRT_DIR   = os.path.join(BASE_DIR, ".output", "subtitle")
-VIDEO_IN  = os.path.join(BASE_DIR, ".output", "video", "src")
-VIDEO_OUT = os.path.join(BASE_DIR, ".output", "video")
+SRT_DIR   = os.path.join(BASE_DIR, ".outputs", "subtitle")
+VIDEO_IN  = os.path.join(BASE_DIR, ".outputs", "video", "src")
+VIDEO_OUT = os.path.join(BASE_DIR, ".outputs", "video")
 os.makedirs(VIDEO_IN,  exist_ok=True)
 os.makedirs(VIDEO_OUT, exist_ok=True)
 

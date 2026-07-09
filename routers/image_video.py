@@ -10,15 +10,16 @@ from core.log import app_log, print_progress
 router = APIRouter(prefix="/api/imgvid", tags=["imgvid"])
 
 BASE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IMGVID_DIR   = os.path.join(BASE_DIR, ".output", "imgvid")
+IMGVID_DIR   = os.path.join(BASE_DIR, ".outputs", "imgvid")
 IMAGES_DIR   = os.path.join(IMGVID_DIR, "images")
 AUDIO_DIR    = os.path.join(IMGVID_DIR, "audio")
 CLIPS_DIR    = os.path.join(IMGVID_DIR, "clips")
 THUMBS_DIR   = os.path.join(IMGVID_DIR, "thumbs")
 PROJECTS_DIR = os.path.join(IMGVID_DIR, "projects")
-OUTPUT_DIR   = os.path.join(IMGVID_DIR, "output")
+OUTPUT_DIR          = os.path.join(IMGVID_DIR, "output")
+SAVED_PROJECTS_DIR  = os.path.join(BASE_DIR, ".outputs", "saved_projects")
 
-for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, OUTPUT_DIR]:
+for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, OUTPUT_DIR, SAVED_PROJECTS_DIR]:
     os.makedirs(_d, exist_ok=True)
 
 ALLOWED_IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -292,15 +293,9 @@ async def delete_project(pid: str):
     app_log(f"Project deleted: {pid}", "INFO", "ImgVid")
     return {"ok": True}
 
-# ── .amur format (pack/unpack) ────────────────────────────────────────────────
+# ── .amur format helpers ──────────────────────────────────────────────────────
 
-@router.get("/projects/{pid}/pack")
-async def pack_project_amur(pid: str):
-    path = os.path.join(PROJECTS_DIR, f"{pid}.json")
-    if not os.path.exists(path):
-        raise HTTPException(404, "Проект не найден")
-    with open(path, encoding="utf-8") as f:
-        project = json.load(f)
+def _make_amur_buf(project: dict) -> io.BytesIO:
     files_to_pack = []
     for slide in project.get("slides", []):
         fn = slide.get("file") or slide.get("image", "")
@@ -329,6 +324,55 @@ async def pack_project_amur(pid: str):
         for arc_name, file_path in files_to_pack:
             zf.write(file_path, arc_name)
     buf.seek(0)
+    return buf
+
+
+def _extract_amur_zip(zf: zipfile.ZipFile) -> dict:
+    names = zf.namelist()
+    if "project.json" not in names:
+        raise HTTPException(400, "Неверный .amur: project.json не найден")
+    project = json.loads(zf.read("project.json").decode("utf-8"))
+    for arc_name in names:
+        if arc_name == "project.json":
+            continue
+        fname = os.path.basename(arc_name)
+        if not fname:
+            continue
+        data = zf.read(arc_name)
+        if arc_name.startswith("media/images/"):
+            file_dest = os.path.join(IMAGES_DIR, fname)
+        elif arc_name.startswith("media/clips/"):
+            file_dest = os.path.join(CLIPS_DIR, fname)
+        elif arc_name.startswith("media/audio/"):
+            file_dest = os.path.join(AUDIO_DIR, fname)
+        elif arc_name.startswith("media/thumbs/"):
+            file_dest = os.path.join(THUMBS_DIR, fname)
+        else:
+            continue
+        with open(file_dest, 'wb') as fh:
+            fh.write(data)
+    return project
+
+
+def _finalize_project(project: dict) -> dict:
+    pid = project.get("id") or uuid.uuid4().hex
+    project["id"] = pid
+    project["updated_at"] = datetime.datetime.now().isoformat()
+    ppath = os.path.join(PROJECTS_DIR, f"{pid}.json")
+    with open(ppath, "w", encoding="utf-8") as fh:
+        json.dump(project, fh, ensure_ascii=False, indent=2)
+    return project
+
+# ── .amur format (pack/unpack) ────────────────────────────────────────────────
+
+@router.get("/projects/{pid}/pack")
+async def pack_project_amur(pid: str):
+    path = os.path.join(PROJECTS_DIR, f"{pid}.json")
+    if not os.path.exists(path):
+        raise HTTPException(404, "Проект не найден")
+    with open(path, encoding="utf-8") as f:
+        project = json.load(f)
+    buf = _make_amur_buf(project)
     safe_name = re.sub(r'[^\w\-]', '_', project.get("name", "project"))
     app_log(f"Project packed as .amur: {pid}", "INFO", "ImgVid")
     return Response(
@@ -344,38 +388,92 @@ async def unpack_amur(file: UploadFile = File(...)):
     buf = io.BytesIO(content)
     try:
         with zipfile.ZipFile(buf, 'r') as zf:
-            names = zf.namelist()
-            if "project.json" not in names:
-                raise HTTPException(400, "Неверный .amur: project.json не найден")
-            project = json.loads(zf.read("project.json").decode("utf-8"))
-            for arc_name in names:
-                if arc_name == "project.json":
-                    continue
-                fname = os.path.basename(arc_name)
-                if not fname:
-                    continue
-                data = zf.read(arc_name)
-                if arc_name.startswith("media/images/"):
-                    dest = os.path.join(IMAGES_DIR, fname)
-                elif arc_name.startswith("media/clips/"):
-                    dest = os.path.join(CLIPS_DIR, fname)
-                elif arc_name.startswith("media/audio/"):
-                    dest = os.path.join(AUDIO_DIR, fname)
-                elif arc_name.startswith("media/thumbs/"):
-                    dest = os.path.join(THUMBS_DIR, fname)
-                else:
-                    continue
-                with open(dest, 'wb') as f2:
-                    f2.write(data)
+            project = _extract_amur_zip(zf)
     except zipfile.BadZipFile:
         raise HTTPException(400, "Повреждённый .amur файл")
-    pid = project.get("id") or uuid.uuid4().hex
-    project["id"] = pid
-    project["updated_at"] = datetime.datetime.now().isoformat()
-    ppath = os.path.join(PROJECTS_DIR, f"{pid}.json")
-    with open(ppath, "w", encoding="utf-8") as f3:
-        json.dump(project, f3, ensure_ascii=False, indent=2)
-    app_log(f"Project unpacked from .amur: {project.get('name', pid)}", "INFO", "ImgVid")
+    project = _finalize_project(project)
+    app_log(f"Project unpacked from .amur: {project.get('name', project['id'])}", "INFO", "ImgVid")
+    return project
+
+
+class AmurSaveBody(BaseModel):
+    pid: str
+    dir: str = ""
+    filename: str = ""
+
+@router.post("/amur/save-to-path")
+async def save_amur_to_path(body: AmurSaveBody):
+    proj_path = os.path.join(PROJECTS_DIR, f"{body.pid}.json")
+    if not os.path.exists(proj_path):
+        raise HTTPException(404, "Проект не найден")
+    with open(proj_path, encoding="utf-8") as f:
+        project = json.load(f)
+    target_dir = body.dir if body.dir else SAVED_PROJECTS_DIR
+    if not os.path.isabs(target_dir):
+        target_dir = os.path.join(BASE_DIR, target_dir)
+    os.makedirs(target_dir, exist_ok=True)
+    fname = body.filename or (re.sub(r'[^\w\-]', '_', project.get("name", "project")) + ".amur")
+    if not fname.lower().endswith('.amur'):
+        fname += '.amur'
+    dest = os.path.join(target_dir, fname)
+    buf = _make_amur_buf(project)
+    with open(dest, 'wb') as fh:
+        fh.write(buf.read())
+    app_log(f"Project saved as .amur: {dest}", "INFO", "ImgVid")
+    return {"ok": True, "path": dest, "filename": fname}
+
+
+@router.get("/amur/browse")
+async def browse_amur(path: str = ""):
+    if path and os.path.isabs(path):
+        target = path
+    elif path:
+        target = os.path.join(BASE_DIR, path)
+    else:
+        target = SAVED_PROJECTS_DIR
+    if not os.path.isdir(target):
+        target = SAVED_PROJECTS_DIR
+    files = []
+    try:
+        for fn in os.listdir(target):
+            fp = os.path.join(target, fn)
+            if os.path.isfile(fp) and fn.lower().endswith('.amur'):
+                files.append({
+                    "name": fn, "path": fp,
+                    "size": os.path.getsize(fp),
+                    "mtime": os.path.getmtime(fp),
+                })
+    except PermissionError:
+        pass
+    files.sort(key=lambda x: x["mtime"], reverse=True)
+    return {
+        "dir": target,
+        "parent": str(os.path.dirname(target)),
+        "default_dir": SAVED_PROJECTS_DIR,
+        "files": files,
+    }
+
+
+class AmurLoadBody(BaseModel):
+    file_path: str
+
+@router.post("/amur/load-from-path")
+async def load_amur_from_path(body: AmurLoadBody):
+    dest = body.file_path
+    if not os.path.isabs(dest):
+        dest = os.path.join(BASE_DIR, dest)
+    if not os.path.exists(dest):
+        raise HTTPException(404, "Файл не найден")
+    with open(dest, 'rb') as fh:
+        content = fh.read()
+    buf = io.BytesIO(content)
+    try:
+        with zipfile.ZipFile(buf, 'r') as zf:
+            project = _extract_amur_zip(zf)
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Повреждённый .amur файл")
+    project = _finalize_project(project)
+    app_log(f"Project loaded from path: {dest}", "INFO", "ImgVid")
     return project
 
 # ── Output ────────────────────────────────────────────────────────────────────

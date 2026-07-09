@@ -1,5 +1,14 @@
 import sys
 import asyncio
+import warnings
+
+# Suppress pkg_resources deprecation warning from librosa (imported by Whisper)
+# librosa uses pkg_resources internally; the warning is cosmetic and not actionable.
+warnings.filterwarnings(
+    "ignore",
+    message=".*pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

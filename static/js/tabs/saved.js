@@ -1,4 +1,4 @@
-import { getJSON, putJSON, del, synthesizeStream } from '../api.js';
+import { getJSON, putJSON, del, synthesizeStream, getXttsStatus } from '../api.js';
 import { AudioPlayer } from '../audio-player.js';
 import { audioManager } from '../audio-manager.js';
 import { log, progress } from '../logger.js';
@@ -92,7 +92,7 @@ export async function init() {
 
     withLoader(document.getElementById('saved-voice-mount'), () => refresh()).catch(() => {});
 
-    getJSON('/api/xtts/status').then(data => {
+    getXttsStatus().then(data => {
         langSel.setOptions(Object.keys(data.languages).map(k => ({ value: k, label: k })));
         if (data.languages['Русский']) langSel.setValue('Русский');
         else if (Object.keys(data.languages).length) langSel.setValue(Object.keys(data.languages)[0]);
