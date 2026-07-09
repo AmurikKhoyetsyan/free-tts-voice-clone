@@ -788,11 +788,13 @@
                                     <button class="btn btn-sm" id="ive-add-images-btn" title="Добавить фото">🖼</button>
                                     <button class="btn btn-sm" id="ive-add-video-btn"  title="Добавить видео">🎬</button>
                                     <button class="btn btn-sm" id="ive-add-audio-btn"  title="Добавить аудио">♪</button>
+                                    <button class="btn btn-sm" id="ive-add-pip-btn"   title="Добавить PIP слой">PIP</button>
                                 </div>
                             </div>
                             <input type="file" id="ive-image-input" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple hidden>
                             <input type="file" id="ive-video-input" accept=".mp4,.mov,.mkv,.webm,.avi" multiple hidden>
                             <input type="file" id="ive-audio-input" accept=".mp3,.wav,.aac,.flac,.ogg" hidden>
+                            <input type="file" id="ive-pip-input" accept=".jpg,.jpeg,.png,.webp,.bmp,.mp4,.mov,.mkv,.webm,.avi" hidden>
                             <div id="ive-media-list" class="ive-media-list"></div>
                             <div class="ive-global-dur-row">
                                 <label style="flex:1;font-size:11px">Длит. (с)</label>
@@ -821,6 +823,9 @@
                             <div id="ive-preview-content" class="ive-preview-content" style="position:relative;z-index:2">
                                 <img    id="ive-preview-img"   style="display:none" alt="">
                                 <video  id="ive-preview-video" style="display:none" muted playsinline></video>
+                            </div>
+                            <!-- Subtitle container — always above transitions, outside preview-content -->
+                            <div id="ive-sub-container" style="display:none;position:absolute;z-index:20;pointer-events:none">
                                 <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
                             </div>
                             <div class="ive-preview-empty" id="ive-preview-empty">
@@ -833,8 +838,7 @@
                             <div class="ive-transport-btns">
                                 <button class="ive-tb-btn" id="ive-go-start"   title="К началу (Home)"></button>
                                 <button class="ive-tb-btn" id="ive-rewind-btn" title="−5с (J)"></button>
-                                <button class="ive-tb-btn ive-tb-play"  id="ive-play-btn"  title="Воспроизведение (Space)"></button>
-                                <button class="ive-tb-btn ive-tb-pause" id="ive-pause-btn" title="Пауза (Space)"></button>
+                                <button class="ive-tb-btn ive-tb-play" id="ive-playpause-btn" title="Воспроизведение / Пауза (Space)"></button>
                                 <button class="ive-tb-btn ive-tb-stop"  id="ive-stop-btn"  title="Стоп"></button>
                                 <button class="ive-tb-btn" id="ive-fwd-btn"    title="+5с (L)"></button>
                                 <button class="ive-tb-btn" id="ive-go-end"     title="К концу (End)"></button>
@@ -874,6 +878,7 @@
                                 <div class="ive-track-lbl" id="ive-video-lbl">VIDEO</div>
                                 <div class="ive-track-lbl" id="ive-audio-lbl">AUDIO</div>
                                 <div class="ive-track-lbl" id="ive-subs-lbl">SUBS</div>
+                                <div class="ive-track-lbl" id="ive-pip-lbl">PIP</div>
                             </div>
                             <!-- Scrollable track area -->
                             <div class="ive-tracks-scroll" id="ive-tracks-scroll">
@@ -882,6 +887,7 @@
                                     <div class="ive-track-row ive-video-row" id="ive-video-track"></div>
                                     <div class="ive-audio-rows"  id="ive-audio-track"></div>
                                     <div class="ive-track-row ive-subs-row"  id="ive-subtitle-track"></div>
+                                    <div class="ive-track-row ive-pip-row"   id="ive-pip-track"></div>
                                     <div class="ive-playhead" id="ive-playhead" style="display:none"></div>
                                 </div>
                             </div>

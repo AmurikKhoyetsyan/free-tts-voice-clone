@@ -659,6 +659,7 @@ async def export_video(
         raise HTTPException(400, "Неверный JSON проекта")
 
     slides = project.get("slides", [])
+    pip_layers_raw = project.get("pip", project.get("pipLayers", []))
     if not slides:
         raise HTTPException(400, "Нет слайдов для экспорта")
 
@@ -675,6 +676,18 @@ async def export_video(
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 q.put(("progress", 0.03, "Подготовка…"))
+
+                # ── Resolve PIP layers ───────────────────────────────────────
+                valid_pip = []
+                for pip in pip_layers_raw:
+                    pip_type = pip.get("type", "image")
+                    fname = pip.get("file", "")
+                    if pip_type == "video":
+                        fp = os.path.join(CLIPS_DIR, fname)
+                    else:
+                        fp = os.path.join(IMAGES_DIR, fname)
+                    if os.path.exists(fp):
+                        valid_pip.append({**pip, "_path": fp})
 
                 # ── Inputs ───────────────────────────────────────────────────
                 cmd_inputs = []
@@ -704,6 +717,18 @@ async def export_video(
                     if os.path.exists(ap):
                         cmd_inputs += ["-i", ap]
                         valid_audio.append(track)
+
+                # Add PIP inputs after audio
+                _total_dur_approx = sum(float(s.get("duration", 3)) for s in slides)
+                pip_input_start = audio_start_idx + len(valid_audio)
+                for pip in valid_pip:
+                    pip_type = pip.get("type", "image")
+                    pip_path = pip["_path"]
+                    if pip_type == "video":
+                        cmd_inputs += ["-i", pip_path]
+                    else:
+                        # Loop image for entire duration
+                        cmd_inputs += ["-loop", "1", "-t", f"{_total_dur_approx:.3f}", "-i", pip_path]
 
                 # ── Per-slide filters ────────────────────────────────────────
                 q.put(("progress", 0.07, "Применение эффектов…"))
@@ -801,9 +826,58 @@ async def export_video(
                     last = prev
 
                 if sub_filter:
-                    filter_parts.append(f"[{last}]{sub_filter}[vout]")
+                    filter_parts.append(f"[{last}]{sub_filter}[vout_base]")
                 else:
-                    filter_parts.append(f"[{last}]null[vout]")
+                    filter_parts.append(f"[{last}]null[vout_base]")
+
+                # ── PIP overlays ─────────────────────────────────────────────
+                final_video_label = "vout_base"
+                for pi, pip in enumerate(valid_pip):
+                    pip_type    = pip.get("type", "image")
+                    px_pct      = float(pip.get("x", 5))
+                    py_pct      = float(pip.get("y", 5))
+                    pw_pct      = float(pip.get("w", 30))
+                    ph_pct      = float(pip.get("h", 20))
+                    pip_start   = float(pip.get("startTime", 0))
+                    pip_end     = float(pip.get("endTime", pip_start + 5))
+                    pip_opacity = float(pip.get("opacity", 1))
+                    pip_speed   = float(pip.get("speed", 1) or 1)
+                    pip_trimin  = float(pip.get("trimIn", 0) or 0)
+
+                    px = int(width  * px_pct / 100)
+                    py = int(height * py_pct / 100)
+                    pw = max(1, int(width  * pw_pct / 100))
+                    ph = max(1, int(height * ph_pct / 100))
+
+                    inp_idx = pip_input_start + pi
+                    pip_label_scaled = f"pip_s_{pi}"
+                    next_label       = f"vout_pip{pi}"
+
+                    # Build pip video filter chain
+                    pip_vf_parts = []
+                    if pip_type == "video":
+                        if pip_trimin > 0:
+                            pip_vf_parts.append(f"trim=start={pip_trimin:.3f},setpts=PTS-STARTPTS")
+                        if pip_speed != 1.0:
+                            pip_vf_parts.append(f"setpts={1.0/pip_speed:.6f}*PTS")
+                    pip_vf_parts.append(f"scale={pw}:{ph}")
+                    filter_parts.append(f"[{inp_idx}:v]{','.join(pip_vf_parts)}[{pip_label_scaled}]")
+
+                    # Opacity
+                    pip_label_in = pip_label_scaled
+                    if pip_opacity < 1.0:
+                        op_label = f"pip_op_{pi}"
+                        filter_parts.append(
+                            f"[{pip_label_in}]format=rgba,colorchannelmixer=aa={pip_opacity:.3f}[{op_label}]"
+                        )
+                        pip_label_in = op_label
+
+                    # Overlay with time enable
+                    enable = f"between(t\\,{pip_start:.3f}\\,{pip_end:.3f})"
+                    filter_parts.append(
+                        f"[{final_video_label}][{pip_label_in}]overlay={px}:{py}:enable='{enable}'[{next_label}]"
+                    )
+                    final_video_label = next_label
 
                 # ── Audio ────────────────────────────────────────────────────
                 audio_map = []
@@ -881,7 +955,7 @@ async def export_video(
                     [FFMPEG, "-y", "-nostdin"]
                     + cmd_inputs
                     + ["-filter_complex", filter_complex]
-                    + ["-map", "[vout]"]
+                    + ["-map", f"[{final_video_label}]"]
                     + audio_map
                     + vcodec + acodec
                     + [out_path]
