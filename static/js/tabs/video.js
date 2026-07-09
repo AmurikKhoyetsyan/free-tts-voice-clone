@@ -51,6 +51,7 @@ export async function init() {
 
     const karaokeColorEl = document.getElementById('vid-karaoke-color');
     const karaokeEnEl    = document.getElementById('vid-karaoke-enable');
+    const karaokeModeEl  = document.getElementById('vid-karaoke-mode');
     const lineHeightEl   = document.getElementById('vid-line-height');
     const maxWidthEl     = document.getElementById('vid-max-width');
     const marginVEl      = document.getElementById('vid-margin-v');
@@ -127,7 +128,7 @@ export async function init() {
 
     // Other controls → live preview
     [fontFamilyEl, colorEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
-     outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl,
+     outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl, karaokeModeEl,
      lineHeightEl, maxWidthEl, marginVEl, subWidthEl, subHeightEl]
         .forEach(el => el && el.addEventListener('change', applySubStyle));
 
@@ -518,6 +519,7 @@ export async function init() {
         fd.append('preview_width', String(Math.round(vidInner.offsetWidth)));
         fd.append('karaoke_enabled', String(karaokeEnEl ? karaokeEnEl.checked : false));
         fd.append('karaoke_color',   karaokeColorEl ? karaokeColorEl.value.replace('#', '') : 'ffdd00');
+        fd.append('karaoke_mode',    karaokeModeEl ? karaokeModeEl.value : 'word');
 
         // Per-subtitle animation data (index → animation type + duration)
         if (currentSubs && currentSubs.length > 0) {
@@ -857,18 +859,21 @@ export async function init() {
 
         const karaokeOn    = karaokeEnEl && karaokeEnEl.checked;
         const karaokeColor = karaokeColorEl ? karaokeColorEl.value : '#ffdd00';
+        const karaokeMode  = karaokeModeEl ? karaokeModeEl.value : 'word';
 
         if (karaokeOn && sub.end > sub.start) {
-            const wordArr = sub.text.split(/\s+/);
-            const elapsed = vidPreview.currentTime - sub.start;
-            const spoken  = Math.min(wordArr.length,
-                Math.floor(wordArr.length * elapsed / (sub.end - sub.start) + 0.5));
-            const tokens  = sub.text.split(/(\s+)/);
+            const wordArr  = sub.text.split(/\s+/).filter(Boolean);
+            const elapsed  = vidPreview.currentTime - sub.start;
+            const subDur   = sub.end - sub.start;
+            const wordIdx  = Math.min(wordArr.length - 1, Math.floor(wordArr.length * elapsed / subDur));
+            const tokens   = sub.text.split(/(\s+)/);
             let wi = 0;
             const html = tokens.map(tok => {
                 if (/^\s+$/.test(tok)) return tok;
+                const idx = wi++;
                 const esc = escHtml(tok);
-                return wi++ < spoken
+                const highlight = karaokeMode === 'cumulative' ? idx <= wordIdx : idx === wordIdx;
+                return highlight
                     ? `<span style="color:${karaokeColor}">${esc}</span>`
                     : esc;
             }).join('');
@@ -1304,6 +1309,7 @@ export async function init() {
             setVal('vid-margin-v',       s.marginV);
             setVal('vid-karaoke-color',  s.karaokeColor);
             setCheck('vid-karaoke-enable', s.karaokeEnabled);
+            setVal('vid-karaoke-mode',   s.karaokeMode);
             if (s.posX)      setVal('vid-pos-x',      s.posX);
             if (s.posY)      setVal('vid-pos-y',      s.posY);
             if (s.subWidth)  setVal('vid-sub-width',  s.subWidth);
@@ -1359,6 +1365,7 @@ export async function init() {
             marginV:        (g('vid-margin-v')       || {}).value   || '10',
             karaokeColor:   (g('vid-karaoke-color')  || {}).value   || '#ffdd00',
             karaokeEnabled: (g('vid-karaoke-enable') || {}).checked || false,
+            karaokeMode:    (g('vid-karaoke-mode')   || {}).value   || 'word',
         };
         try {
             await postJSON('/api/templates', { name: finalName, settings });

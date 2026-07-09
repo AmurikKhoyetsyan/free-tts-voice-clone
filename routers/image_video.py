@@ -592,18 +592,35 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         except: ass_kc = "&H0000DDFF"
 
         if karaoke_on and raw_text.strip() and abs_end > abs_start:
-            words = raw_text.split()
+            # Split on spaces and \\N (ASS line break)
+            words = [w for w in re.split(r'(?:\\N|\s)+', raw_text) if w]
             n = max(1, len(words))
             word_dur = (abs_end - abs_start) / n
+            kmode = sub.get("karaokeMode", "word")
             for stage in range(n):
                 t0 = abs_start + stage * word_dur
                 t1 = abs_start + (stage + 1) * word_dur if stage < n - 1 else abs_end
-                highlighted = " ".join(words[:stage + 1])
-                remaining   = " ".join(words[stage + 1:])
-                if remaining:
-                    ktext = "{\\1c" + ass_kc + "}" + highlighted + "{\\1c" + primary + "} " + remaining
+                if kmode == "cumulative":
+                    # All words up to and including current word highlighted
+                    highlighted = " ".join(words[:stage + 1])
+                    remaining   = " ".join(words[stage + 1:])
+                    if remaining:
+                        ktext = "{\\1c" + ass_kc + "}" + highlighted + "{\\1c" + primary + "} " + remaining
+                    else:
+                        ktext = "{\\1c" + ass_kc + "}" + highlighted
                 else:
-                    ktext = "{\\1c" + ass_kc + "}" + highlighted
+                    # Only the current word highlighted (default)
+                    before  = " ".join(words[:stage])
+                    current = words[stage]
+                    after   = " ".join(words[stage + 1:])
+                    if before and after:
+                        ktext = before + " {\\1c" + ass_kc + "}" + current + "{\\1c" + primary + "} " + after
+                    elif before:
+                        ktext = before + " {\\1c" + ass_kc + "}" + current
+                    elif after:
+                        ktext = "{\\1c" + ass_kc + "}" + current + "{\\1c" + primary + "} " + after
+                    else:
+                        ktext = "{\\1c" + ass_kc + "}" + current
                 tags = "{" + base + "}"
                 lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,0,0,0,,{tags}{ktext}")
 

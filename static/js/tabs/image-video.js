@@ -52,6 +52,8 @@ const S = {
     previewZoom: 1.0,     // actual CSS scale factor
     // PIP layers
     pipLayers: [],
+    // Preview dimensions (set by _updatePreviewSize, used for subtitle scaling)
+    previewH: 0, previewW: 0,
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -931,6 +933,7 @@ export async function init() {
         }
         previewContent.style.width  = w + 'px';
         previewContent.style.height = h + 'px';
+        S.previewH = h; S.previewW = w;
         if (previewContentNext) {
             const iW   = previewInner.clientWidth  || 640;
             const iH   = previewInner.clientHeight || 360;
@@ -1625,15 +1628,19 @@ export async function init() {
         const textEl = subOverlay._textEl || subOverlay;
         if (sub.karaokeEnable && sub.end > sub.start) {
             const karaokeColor = sub.karaokeColor || '#ffdd00';
-            const wordArr  = sub.text.split(/\s+/);
-            const elapsed  = S.currentTime - (sub.start || 0);
+            const normalColor  = sub.color || '#ffffff';
+            const wordArr  = sub.text.split(/\s+/).filter(Boolean);
+            const elapsed  = Math.max(0, S.currentTime - (sub.start || 0));
             const subDur   = (sub.end || 3) - (sub.start || 0);
-            const spoken   = Math.min(wordArr.length, Math.floor(wordArr.length * elapsed / subDur + 0.5));
+            const wordIdx  = Math.min(wordArr.length - 1, Math.floor(wordArr.length * elapsed / subDur));
+            const kmode    = sub.karaokeMode || 'word';
             const tokens   = sub.text.split(/(\s+)/);
             let wi = 0;
             textEl.innerHTML = tokens.map(tok => {
                 if (/^\s+$/.test(tok)) return tok;
-                const color = wi++ < spoken ? karaokeColor : (sub.color || '#ffffff');
+                const idx = wi++;
+                const color = kmode === 'cumulative' ? (idx <= wordIdx ? karaokeColor : normalColor)
+                                                     : (idx === wordIdx ? karaokeColor : normalColor);
                 return `<span style="color:${color}">${eh(tok)}</span>`;
             }).join('');
         } else {
@@ -1643,7 +1650,7 @@ export async function init() {
         // Scale all pixel values to match the preview/export resolution ratio
         const _resParts = _getResolution().split('x').map(Number);
         const _resH     = _resParts[1] || 1080;
-        const _pvH      = previewContent.clientHeight || _resH;
+        const _pvH      = S.previewH || _resH;
         const sc        = _pvH / _resH;
 
         subOverlay.style.left        = (sub.x ?? 50) + '%';
@@ -1816,10 +1823,13 @@ export async function init() {
                     <input type="checkbox" data-sf="karaokeEnable" data-si="${si}"${sub.karaokeEnable ? ' checked' : ''}>
                     <span>Подсветка слов</span>
                 </label>
-                <label class="ive-label" style="flex-direction:row;align-items:center;gap:6px;font-size:12px">
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px">
+                    <select class="ive-select" data-sf="karaokeMode" data-si="${si}" style="font-size:12px;padding:2px 4px">
+                        <option value="word"${(!sub.karaokeMode || sub.karaokeMode === 'word') ? ' selected' : ''}>Только слово</option>
+                        <option value="cumulative"${sub.karaokeMode === 'cumulative' ? ' selected' : ''}>Накопительно</option>
+                    </select>
                     <input class="ive-input" type="color" data-sf="karaokeColor" data-si="${si}" value="${sub.karaokeColor || '#ffdd00'}">
-                    <span>Цвет подсветки</span>
-                </label>
+                </div>
             </div>
             <label class="ive-label ive-sub-above-row" style="flex-direction:row;align-items:center;gap:6px;font-size:12px;margin-top:6px">
                 <input type="checkbox" data-sf="aboveEffects" data-si="${si}"${sub.aboveEffects ? ' checked' : ''}>
@@ -1851,7 +1861,7 @@ export async function init() {
                               'outline','outlineColor','shadow','shadowColor',
                               'bgColor','bgOpacity','bgPadX','bgPadY','bgRadius',
                               'animation','animDuration','align','lineHeight',
-                              'karaokeEnable','karaokeColor',
+                              'karaokeEnable','karaokeColor','karaokeMode',
                               'x','y','rotation','w','h','aboveEffects'];
                 S.subtitles.forEach((sub, si) => {
                     if (si === srcIdx) return;
@@ -1870,7 +1880,7 @@ export async function init() {
                 bold: false, italic: false, underline: false,
                 align: 'center', bgColor: '#000000', bgOpacity: 0, bgPadX: 12, bgPadY: 6, bgRadius: 4,
                 animation: 'none', animDuration: 0.6, rotation: 0,
-                lineHeight: 1.35, karaokeEnable: false, karaokeColor: '#ffdd00',
+                lineHeight: 1.35, karaokeEnable: false, karaokeColor: '#ffdd00', karaokeMode: 'word',
                 aboveEffects: false });
             S.selSubIdx = S.subtitles.length - 1;
             S.dirty = true; renderProps(); renderPreview(); renderTimeline();

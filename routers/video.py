@@ -269,9 +269,12 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         base_margin   = max(0, int((frame_w - text_wrap) / 2))
         margin_l = margin_r = base_margin + int(extra_h_margin)
 
-    karaoke_on = bool(sd.get("KaraokeEnabled", False))
-    if karaoke_on:
-        primary_c   = _hex_to_ass(str(sd.get("KaraokeColor", "ffdd00")))
+    karaoke_on   = bool(sd.get("KaraokeEnabled", False))
+    karaoke_mode = sd.get("KaraokeMode", "word")
+    karaoke_color_ass = _hex_to_ass(str(sd.get("KaraokeColor", "ffdd00")))
+    if karaoke_on and karaoke_mode == "cumulative":
+        # \k tag approach: primary = karaoke color, secondary = text color
+        primary_c   = karaoke_color_ass
         secondary_c = str(sd.get("PrimaryColour", "&H00FFFFFF"))
     else:
         primary_c   = str(sd.get("PrimaryColour", "&H00FFFFFF"))
@@ -370,12 +373,6 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                 sub_idx = 0
             start_s, end_s = lines[1].split(" --> ")
             text = "\\N".join(l for l in lines[2:] if l.strip())
-            if karaoke_on:
-                dur   = s2sec(end_s) - s2sec(start_s)
-                words = text.replace("\\N", " ").split()
-                if words:
-                    cs   = max(1, round(dur * 100 / len(words)))
-                    text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
             anim_entry = (anim_map or {}).get(sub_idx, "none")
             if isinstance(anim_entry, dict):
                 anim    = anim_entry.get("animation", "none")
@@ -391,16 +388,45 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                 margin_l, margin_r,
                 dur_ms=dur_ms,
             )
-            t0 = _ass_time(s2sec(start_s))
-            t1 = _ass_time(s2sec(end_s))
-            events.append(
-                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{ov_block}{text}"
-            )
-            if has_text_outline:
-                # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
-                events.append(
-                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{ov_block}{text}"
-                )
+            abs_start = s2sec(start_s)
+            abs_end   = s2sec(end_s)
+            if karaoke_on and karaoke_mode == "word":
+                words = [w for w in re.split(r'(?:\\N|\s)+', text) if w]
+                n = max(1, len(words))
+                word_dur = (abs_end - abs_start) / n
+                text_c = primary_c  # text color (no swap in word mode)
+                for stage in range(n):
+                    wt0 = abs_start + stage * word_dur
+                    wt1 = abs_start + (stage + 1) * word_dur if stage < n - 1 else abs_end
+                    before  = " ".join(words[:stage])
+                    current = words[stage]
+                    after   = " ".join(words[stage + 1:])
+                    if before and after:
+                        ktext = before + " {\\1c" + karaoke_color_ass + "}" + current + "{\\1c" + text_c + "} " + after
+                    elif before:
+                        ktext = before + " {\\1c" + karaoke_color_ass + "}" + current
+                    elif after:
+                        ktext = "{\\1c" + karaoke_color_ass + "}" + current + "{\\1c" + text_c + "} " + after
+                    else:
+                        ktext = "{\\1c" + karaoke_color_ass + "}" + current
+                    ws0 = _ass_time(wt0)
+                    ws1 = _ass_time(wt1)
+                    events.append(f"Dialogue: 0,{ws0},{ws1},Default,,0,0,0,,{ov_block}{ktext}")
+                    if has_text_outline:
+                        events.append(f"Dialogue: 1,{ws0},{ws1},TextOutline,,0,0,0,,{ov_block}{ktext}")
+            else:
+                if karaoke_on:  # cumulative: \k tags
+                    dur   = abs_end - abs_start
+                    words = text.replace("\\N", " ").split()
+                    if words:
+                        cs   = max(1, round(dur * 100 / len(words)))
+                        text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
+                t0 = _ass_time(abs_start)
+                t1 = _ass_time(abs_end)
+                events.append(f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{ov_block}{text}")
+                if has_text_outline:
+                    # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
+                    events.append(f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{ov_block}{text}")
         except Exception:
             continue
 
@@ -441,6 +467,7 @@ def burn_subtitles(
     preview_width:   int   = Form(0),
     karaoke_enabled: str   = Form("false"),
     karaoke_color:   str   = Form("ffdd00"),
+    karaoke_mode:    str   = Form("word"),
     text_align:      str   = Form("center"),
     subs_json:       str   = Form("[]"),
 ):
@@ -485,6 +512,7 @@ def burn_subtitles(
         "SubHeightPx":    sub_height_px,
         "KaraokeEnabled": karaoke_enabled.lower() in ("true", "1", "yes"),
         "KaraokeColor":   karaoke_color.lstrip("#"),
+        "KaraokeMode":    karaoke_mode,
     }
 
     if bg_opacity > 0:
