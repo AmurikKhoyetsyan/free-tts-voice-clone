@@ -582,7 +582,7 @@ async def export_video(
                 scale_f = (
                     f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                     f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,"
-                    f"setsar=1,fps={fps}"
+                    f"setsar=1,fps={fps},format=yuv420p"
                 )
                 filter_parts = []
                 for i, slide in enumerate(slides):
@@ -666,14 +666,16 @@ async def export_video(
                                 f"duration={tdur:.3f}:offset={max(0, offset):.3f}[{out}]"
                             )
                         else:
-                            filter_parts.append(f"[{prev}][v{i}]concat=n=2:v=1:a=0[{out}]")
+                            raw = f"{out}r"
+                            filter_parts.append(f"[{prev}][v{i}]concat=n=2:v=1:a=0[{raw}]")
+                            filter_parts.append(f"[{raw}]settb=1/{fps},setpts=PTS-STARTPTS[{out}]")
                         prev = out
                     last = prev
 
                 if sub_filter:
                     filter_parts.append(f"[{last}]{sub_filter}[vout]")
                 else:
-                    filter_parts.append(f"[{last}]copy[vout]")
+                    filter_parts.append(f"[{last}]null[vout]")
 
                 # ── Audio ────────────────────────────────────────────────────
                 audio_map = []
@@ -700,7 +702,7 @@ async def export_video(
                             af.append(f"afade=t=out:st={max(0, fade_start):.2f}:d={fo:.2f}")
                         if start_off > 0:
                             delay_ms = int(start_off * 1000)
-                            af.append(f"adelay={delay_ms}|{delay_ms}")
+                            af.append(f"adelay={delay_ms}:all=1")
                         af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
                         filter_parts.append(f"[{ai}:a]{','.join(af)}[aout]")
                         audio_map = ["-map", "[aout]"]
@@ -717,7 +719,7 @@ async def export_video(
                             af.append(f"volume={vol}")
                             if start_off > 0:
                                 delay_ms = int(start_off * 1000)
-                                af.append(f"adelay={delay_ms}|{delay_ms}")
+                                af.append(f"adelay={delay_ms}:all=1")
                             filter_parts.append(f"[{ai}:a]{','.join(af)}[a{j}]")
                         amix_in = "".join(f"[a{j}]" for j in range(len(valid_audio)))
                         filter_parts.append(
@@ -758,6 +760,7 @@ async def export_video(
                 )
 
                 app_log(f"Export start: {out_name} ({len(slides)} slides)", "INFO", "ImgVid")
+                app_log(f"filter_complex:\n{filter_complex}", "DEBUG", "ImgVid")
                 print(flush=True)
                 q.put(("progress", 0.15, "Запуск FFmpeg…"))
 
@@ -769,6 +772,7 @@ async def export_video(
                 )
 
                 buf = b""
+                all_ffmpeg_lines = []
                 while True:
                     chunk = proc.stdout.read(1024)
                     if not chunk: break
@@ -778,6 +782,7 @@ async def export_video(
                     for raw in parts2[:-1]:
                         line = raw.decode("utf-8", errors="replace").strip()
                         if not line: continue
+                        all_ffmpeg_lines.append(line)
                         if "time=" in line and total_dur > 0:
                             try:
                                 ts2 = line.split("time=")[1].split()[0]
@@ -793,6 +798,8 @@ async def export_video(
                 proc.wait()
                 if proc.returncode != 0:
                     print(flush=True)
+                    tail = "\n".join(all_ffmpeg_lines[-30:])
+                    app_log(f"FFmpeg exit {proc.returncode}:\n{tail}", "ERROR", "ImgVid")
                     q.put(("error", f"FFmpeg вернул код {proc.returncode}"))
                 elif not os.path.exists(out_path):
                     q.put(("error", "FFmpeg не создал файл"))
