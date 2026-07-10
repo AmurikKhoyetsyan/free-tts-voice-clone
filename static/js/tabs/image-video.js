@@ -465,15 +465,32 @@ export async function init() {
     });
 
     zoomPct.addEventListener('input', () => {
-        if (S.previewMode === 'custom') _applyZoom('custom', parseFloat(zoomPct.value) || 100);
+        if (S.previewMode === 'custom') {
+            previewContent.style.transformOrigin = '';  // center for manual input
+            _applyZoom('custom', parseFloat(zoomPct.value) || 100);
+        }
     });
 
-    // Ctrl+Scroll on preview = zoom
+    // Ctrl+Scroll on preview = cursor-relative zoom
     previewInner.addEventListener('wheel', e => {
         if (!e.ctrlKey) return;
         e.preventDefault();
-        const factor  = e.deltaY < 0 ? 1.1 : 0.9;
-        const newPct  = Math.round(Math.max(10, Math.min(800, (S.previewZoom * 100) * factor)));
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        const newPct = Math.round(Math.max(10, Math.min(800, (S.previewZoom * 100) * factor)));
+
+        // Determine cursor position in unscaled content space so we can pivot there
+        const rect     = previewContent.getBoundingClientRect();
+        const contentW = previewContent.offsetWidth  || 640;
+        const contentH = previewContent.offsetHeight || 360;
+        const screenX  = e.clientX - rect.left;
+        const screenY  = e.clientY - rect.top;
+        const logicalX = screenX / S.previewZoom;
+        const logicalY = screenY / S.previewZoom;
+        const pctX = Math.max(0, Math.min(100, (logicalX / contentW) * 100));
+        const pctY = Math.max(0, Math.min(100, (logicalY / contentH) * 100));
+
+        // Set pivot before scaling so the point under cursor stays fixed
+        previewContent.style.transformOrigin = `${pctX.toFixed(2)}% ${pctY.toFixed(2)}%`;
         _applyZoom('custom', newPct);
         zoomMode.value = 'custom';
     }, { passive: false });
@@ -610,8 +627,12 @@ export async function init() {
     tracksScroll.addEventListener('wheel', e => {
         if (!e.ctrlKey) return;
         e.preventDefault();
+        const rect = tracksScroll.getBoundingClientRect();
+        const cursorOffsetX = e.clientX - rect.left;
+        const timeAtCursor = (tracksScroll.scrollLeft + cursorOffsetX) / S.pxPerSec;
         S.pxPerSec = Math.max(20, Math.min(500, S.pxPerSec * (e.deltaY < 0 ? 1.15 : 0.87)));
         renderTimeline();
+        tracksScroll.scrollLeft = timeAtCursor * S.pxPerSec - cursorOffsetX;
     }, { passive: false });
 
     // ── Time ruler scrubbing (mousedown + drag) ───────────────────────────────
@@ -769,9 +790,28 @@ export async function init() {
         if (resHEl) resHEl.style.display = isCustom ? '' : 'none';
         if (resXEl) resXEl.style.display = isCustom ? '' : 'none';
     }
+
+    function _updateExportModePanels() {
+        const fmtVal = $('ive-exp-format')?.value || 'mp4';
+        const isAudio = fmtVal.startsWith('audio:');
+        const hide = isAudio ? 'none' : '';
+        const codecEl = $('ive-exp-codec');
+        if (codecEl) codecEl.style.display = hide;
+        if (resEl)   resEl.style.display   = hide;
+        if (resWEl)  resWEl.style.display  = isAudio ? 'none' : (resEl?.value === 'custom' ? '' : 'none');
+        if (resHEl)  resHEl.style.display  = isAudio ? 'none' : (resEl?.value === 'custom' ? '' : 'none');
+        if (resXEl)  resXEl.style.display  = isAudio ? 'none' : (resEl?.value === 'custom' ? '' : 'none');
+        const fpsEl = $('ive-exp-fps');
+        const qualEl = $('ive-exp-quality');
+        if (fpsEl)  fpsEl.style.display  = hide;
+        if (qualEl) qualEl.style.display = hide;
+    }
+
     _updateCustomResVis();
+    _updateExportModePanels();
     _updatePreviewSize();
     resEl?.addEventListener('change', () => { _updateCustomResVis(); _updatePreviewSize(); renderPreview(); });
+    $('ive-exp-format')?.addEventListener('change', _updateExportModePanels);
     resWEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
     resHEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
@@ -899,12 +939,14 @@ export async function init() {
         if (mode === 'fit') {
             S.previewZoom = 1;
             previewContent.style.transform = '';
+            previewContent.style.transformOrigin = '';
             zoomDisplay.textContent = 'Fit';
             zoomPct.style.display = 'none'; zoomSign.style.display = 'none';
             _updatePreviewSize();
         } else if (mode === 'original') {
             S.previewZoom = 1;
             previewContent.style.transform = '';
+            previewContent.style.transformOrigin = '';
             zoomDisplay.textContent = '100%';
             zoomPct.style.display = 'none'; zoomSign.style.display = 'none';
             _updatePreviewSize();
@@ -1656,14 +1698,17 @@ export async function init() {
     function _renderSubOverlay(sub, subKey) {
         subOverlay.style.display = 'block';
 
-        // Update text content without touching resize handle children
+        const animType   = sub.animation || 'none';
+        const animDurSec = sub.animDuration || 0.6;
+        const elapsed    = Math.max(0, S.currentTime - (sub.start || 0));
+        const subDur     = Math.max(0.001, (sub.end || 3) - (sub.start || 0));
+
+        // ── Text content ──────────────────────────────────────────────────────
         const textEl = subOverlay._textEl || subOverlay;
         if (sub.karaokeEnable && sub.end > sub.start) {
             const karaokeColor = sub.karaokeColor || '#ffdd00';
             const normalColor  = sub.color || '#ffffff';
             const wordArr  = sub.text.split(/\s+/).filter(Boolean);
-            const elapsed  = Math.max(0, S.currentTime - (sub.start || 0));
-            const subDur   = (sub.end || 3) - (sub.start || 0);
             const wordIdx  = Math.min(wordArr.length - 1, Math.floor(wordArr.length * elapsed / subDur));
             const kmode    = sub.karaokeMode || 'word';
             const tokens   = sub.text.split(/(\s+)/);
@@ -1675,11 +1720,21 @@ export async function init() {
                                                      : (idx === wordIdx ? karaokeColor : normalColor);
                 return `<span style="color:${color}">${eh(tok)}</span>`;
             }).join('');
+        } else if (animType === 'typewriter') {
+            // Character-by-character reveal — matches ASS export exactly.
+            // Shows floor(elapsed/animDurSec * n) chars, min 1, max all.
+            const text = sub.text || '';
+            const n = text.length;
+            if (elapsed >= animDurSec || n === 0) {
+                textEl.textContent = text;
+            } else {
+                textEl.textContent = text.slice(0, Math.max(1, Math.ceil(n * elapsed / animDurSec)));
+            }
         } else {
             textEl.textContent = sub.text;
         }
 
-        // Scale all pixel values to match the preview/export resolution ratio
+        // ── Scale pixel values to preview/export resolution ratio ─────────────
         const _resParts = _getResolution().split('x').map(Number);
         const _resH     = _resParts[1] || 1080;
         const _pvH      = S.previewH || _resH;
@@ -1701,7 +1756,6 @@ export async function init() {
             (sub.shadow  ?? 1) * sc, sub.shadowColor  || '#000000'
         );
 
-        // Width / height override
         if (sub.w > 0) {
             subOverlay.style.width    = sub.w + '%';
             subOverlay.style.maxWidth = sub.w + '%';
@@ -1725,15 +1779,53 @@ export async function init() {
             subOverlay.style.padding      = '0';
             subOverlay.style.borderRadius = '0';
         }
-        const animType = sub.animation || 'none';
-        const animDur  = (sub.animDuration || 0.6).toFixed(2) + 's';
+
+        // ── Animation ─────────────────────────────────────────────────────────
+        // Clear properties that time-based or CSS animations might have set previously.
+        subOverlay.style.clipPath = '';
+
         const key = subKey || ((sub.id || '') + ':' + (sub.start ?? 0));
-        if (key !== _lastSubStart) {
-            _lastSubStart = key;
-            subOverlay.style.animation = 'none';
-            void subOverlay.offsetWidth;
-            subOverlay.style.animation = animType !== 'none' ? `sub-${animType} ${animDur} ease forwards` : '';
+
+        if (animType === 'typewriter') {
+            // Text content already updated above; no CSS animation needed.
+            if (key !== _lastSubStart) {
+                _lastSubStart = key;
+                subOverlay.style.animation = 'none';
+                void subOverlay.offsetWidth;
+            }
+            subOverlay.style.animation = '';
+            subOverlay.style.opacity   = '';
+
+        } else if (animType === 'fade-out') {
+            // Fade out at the END of the subtitle — matches ASS \fad(0,anim_ms).
+            // (A CSS `sub-fade-out` animation would play at the *start*, which is wrong.)
+            const fadeStart = subDur - animDurSec;
+            if (elapsed >= fadeStart && fadeStart >= 0) {
+                subOverlay.style.opacity = String(Math.max(0, 1 - (elapsed - fadeStart) / Math.max(0.001, animDurSec)));
+            } else {
+                subOverlay.style.opacity = '1';
+            }
+            if (key !== _lastSubStart) {
+                _lastSubStart = key;
+                subOverlay.style.animation = 'none';
+                void subOverlay.offsetWidth;
+            }
+            subOverlay.style.animation = '';
+
+        } else {
+            // CSS animations for fade-in, zoom-in, slide-up, slide-down.
+            // These all play at the START of the subtitle, matching ASS behaviour.
+            subOverlay.style.opacity = '';
+            if (key !== _lastSubStart) {
+                _lastSubStart = key;
+                subOverlay.style.animation = 'none';
+                void subOverlay.offsetWidth;
+                subOverlay.style.animation = animType !== 'none'
+                    ? `sub-${animType} ${animDurSec.toFixed(2)}s ease forwards`
+                    : '';
+            }
         }
+
         subOverlay.style.cursor = 'grab';
         subOverlay._activeSub   = sub;
         const isSelected = S.selSubIdx >= 0 && S.subtitles[S.selSubIdx] === sub;
@@ -2966,15 +3058,58 @@ export async function init() {
     // ── Export ────────────────────────────────────────────────────────────────
     async function _startExport() {
         if (!S.clips.length) { toast('Нет клипов для экспорта', 'warn'); return; }
+
+        const fmtVal = $('ive-exp-format').value;
+        const isAudioOnly = fmtVal.startsWith('audio:');
+        const audioFmt    = isAudioOnly ? fmtVal.slice(6) : '';
+
         exportBtn.disabled = true;
         exportProg.hidden  = false;
         exportStatus.textContent = 'Подготовка…';
         exportStatus.className   = 'status busy';
         progFill.style.width = '2%';
         progPct.textContent  = '0%';
+
+        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers });
+
+        if (isAudioOnly) {
+            if (!S.audioTracks.length) { exportBtn.disabled = false; toast('Нет аудиодорожек для экспорта', 'warn'); return; }
+            const fd = new FormData();
+            fd.append('project_json', projectPayload);
+            fd.append('audio_format', audioFmt);
+            try {
+                await synthesizeStream('/api/imgvid/export-audio', { method: 'POST', body: fd }, {
+                    progress(val, desc) {
+                        if (val !== null && isFinite(val)) {
+                            const pct = Math.round(val * 100);
+                            progFill.style.width = pct + '%'; progPct.textContent = pct + '%';
+                        }
+                        exportStatus.textContent = typeof desc === 'string' && desc.length < 80 ? (desc || 'Обработка…') : 'Обработка…';
+                    },
+                    done(payload) {
+                        exportBtn.disabled = false;
+                        progFill.style.width = '100%'; progPct.textContent = '100%';
+                        exportStatus.textContent = '✓ Готово'; exportStatus.className = 'status ok';
+                        toast('Аудио экспортировано!', 'ok'); log('Аудио экспортировано: ' + payload.filename, 'done');
+                        const url = payload.audio_url || payload.video_url;
+                        const a = Object.assign(document.createElement('a'), { href: url, download: payload.filename });
+                        document.body.appendChild(a); a.click(); a.remove();
+                        setTimeout(() => { exportProg.hidden = true; }, 5000);
+                    },
+                    error(msg) {
+                        exportBtn.disabled = false;
+                        exportStatus.textContent = msg; exportStatus.className = 'status err';
+                        toast(msg, 'err'); log(msg, 'err');
+                    },
+                });
+            } catch (err) { exportBtn.disabled = false; toast(err.message, 'err'); }
+            return;
+        }
+
         const fd = new FormData();
-        fd.append('project_json',  JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers }));
-        fd.append('output_format', $('ive-exp-format').value);
+        fd.append('project_json',  projectPayload);
+        fd.append('output_format', fmtVal);
+        fd.append('codec',         $('ive-exp-codec')?.value || '');
         fd.append('resolution',    _getResolution());
         fd.append('fps',           $('ive-exp-fps').value);
         fd.append('quality',       $('ive-exp-quality').value);
@@ -3058,17 +3193,25 @@ export async function init() {
     }
 
     function _getExportSettings() {
-        return { format: $('ive-exp-format')?.value || 'mp4', resolution: _getResolution(), fps: $('ive-exp-fps')?.value || '30', quality: $('ive-exp-quality')?.value || 'medium' };
+        return {
+            format:     $('ive-exp-format')?.value  || 'mp4',
+            codec:      $('ive-exp-codec')?.value   || '',
+            resolution: _getResolution(),
+            fps:        $('ive-exp-fps')?.value      || '30',
+            quality:    $('ive-exp-quality')?.value  || 'medium',
+        };
     }
 
     function _applyExportSettings(s) {
         if (!s) return;
-        const fmtEl = $('ive-exp-format');
-        const fpsEl = $('ive-exp-fps');
-        const qualEl = $('ive-exp-quality');
-        if (s.format  && fmtEl)  fmtEl.value  = s.format;
-        if (s.fps     && fpsEl)  fpsEl.value  = String(s.fps);
-        if (s.quality && qualEl) qualEl.value = s.quality;
+        const fmtEl   = $('ive-exp-format');
+        const codecEl = $('ive-exp-codec');
+        const fpsEl   = $('ive-exp-fps');
+        const qualEl  = $('ive-exp-quality');
+        if (s.format  && fmtEl)   fmtEl.value   = s.format;
+        if (s.codec   && codecEl) codecEl.value = s.codec;
+        if (s.fps     && fpsEl)   fpsEl.value   = String(s.fps);
+        if (s.quality && qualEl)  qualEl.value  = s.quality;
         if (s.resolution && resEl) {
             const knownVals = [...resEl.options].map(o => o.value).filter(v => v !== 'custom');
             if (knownVals.includes(s.resolution)) {
