@@ -6,6 +6,14 @@ from pydantic import BaseModel
 from typing import Optional
 
 from core.log import app_log, print_progress
+from routers.imgvid.ffmpeg_utils import (
+    FFMPEG, FFPROBE,
+    _XFADE, _EFFECTS,
+    _find, _probe_duration_clip, _extract_thumb,
+    _compute_video_dur,
+)
+from routers.imgvid.ass_writer import _ass_time, _write_ass
+import routers.imgvid.project_ops as _proj_ops
 
 router = APIRouter(prefix="/api/imgvid", tags=["imgvid"])
 
@@ -22,60 +30,16 @@ SAVED_PROJECTS_DIR  = os.path.join(BASE_DIR, ".outputs", "saved_projects")
 for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, OUTPUT_DIR, SAVED_PROJECTS_DIR]:
     os.makedirs(_d, exist_ok=True)
 
+_proj_ops.IMAGES_DIR   = IMAGES_DIR
+_proj_ops.CLIPS_DIR    = CLIPS_DIR
+_proj_ops.AUDIO_DIR    = AUDIO_DIR
+_proj_ops.THUMBS_DIR   = THUMBS_DIR
+_proj_ops.PROJECTS_DIR = PROJECTS_DIR
+
 ALLOWED_IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 ALLOWED_AUDIO = {".mp3", ".wav", ".aac", ".flac", ".ogg"}
 ALLOWED_VIDEO = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
-
-def _find(name: str) -> str:
-    found = shutil.which(name)
-    if found:
-        return found
-    local = os.path.join(BASE_DIR, "ffmpeg", f"{name}.exe")
-    return local if os.path.exists(local) else name
-
-
-FFMPEG  = _find("ffmpeg")
-FFPROBE = _find("ffprobe")
-
-_XFADE = {
-    "fade":       "fade",
-    "crossfade":  "fade",
-    "dissolve":   "dissolve",
-    "fadeblack":  "fadeblack",
-    "fadewhite":  "fadewhite",
-    "slideleft":  "slideleft",
-    "slideright": "slideright",
-    "slideup":    "slideup",
-    "slidedown":  "slidedown",
-    "wipeleft":   "wipeleft",
-    "wiperight":  "wiperight",
-    "wipeup":     "wipeup",
-    "wipedown":   "wipedown",
-    "circlecrop": "circlecrop",
-    "pixelize":   "pixelize",
-    "zoomin":     "zoomin",
-    "hblur":      "hblur",
-    "fadegrays":  "fadegrays",
-    "radial":     "radial",
-    "hlslice":    "hlslice",
-    "hrslice":    "hrslice",
-    "vuslice":    "vuslice",
-    "vdslice":    "vdslice",
-}
-
-_EFFECTS = {
-    "brightness": lambda v: f"eq=brightness={float(v)/100:.3f}",
-    "contrast":   lambda v: f"eq=contrast={1+float(v)/100:.3f}",
-    "saturation": lambda v: f"eq=saturation={max(0,1+float(v)/100):.3f}",
-    "blur":       lambda v: f"gblur=sigma={max(0.1, float(v)):.1f}",
-    "sharpen":    lambda v: f"unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount={max(0,float(v)/10):.2f}",
-    "grayscale":  lambda v: "hue=s=0",
-    "sepia":      lambda v: "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
-    "vignette":   lambda v: "vignette=PI/4",
-    "filmgrain":  lambda v: f"noise=alls={max(1,int(float(v)))}:allf=t+u",
-    "invert":     lambda v: "negate",
-}
 
 # ── Images ────────────────────────────────────────────────────────────────────
 
@@ -107,35 +71,6 @@ async def delete_image(name: str):
     return {"ok": True}
 
 # ── Video clips ──────────────────────────────────────────────────────────────
-
-def _probe_duration_clip(path: str) -> float:
-    for entries in ("format=duration", "stream=duration"):
-        try:
-            r = subprocess.run(
-                [FFPROBE, "-v", "error", "-show_entries", entries,
-                 "-of", "csv=p=0", path],
-                capture_output=True, text=True, timeout=15,
-            )
-            val = r.stdout.strip().splitlines()[0]
-            dur = float(val)
-            if dur > 0:
-                return round(dur, 3)
-        except Exception:
-            pass
-    return 5.0
-
-
-def _extract_thumb(video_path: str, thumb_path: str) -> bool:
-    try:
-        subprocess.run(
-            [FFMPEG, "-y", "-ss", "0.5", "-i", video_path,
-             "-frames:v", "1", "-vf", "scale=160:-1", thumb_path],
-            capture_output=True, timeout=20,
-        )
-        return os.path.exists(thumb_path)
-    except Exception:
-        return False
-
 
 @router.post("/clips")
 async def upload_clip(file: UploadFile = File(...)):
@@ -208,6 +143,8 @@ async def list_projects():
         try:
             with open(os.path.join(PROJECTS_DIR, fn), encoding="utf-8") as f:
                 d = json.load(f)
+            if d.get("is_template"):
+                continue
             items.append({
                 "id":             d.get("id", fn[:-5]),
                 "name":           d.get("name", "Без названия"),
@@ -215,6 +152,7 @@ async def list_projects():
                 "updated_at":     d.get("updated_at", ""),
                 "slide_count":    len(d.get("slides", [])),
                 "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
+                "is_template":    False,
             })
         except Exception:
             pass
@@ -229,6 +167,7 @@ class ProjectBody(BaseModel):
     subtitles:       list = []
     pip:             list = []
     export_settings: dict = {}
+    is_template:     bool = False
 
 
 @router.post("/projects")
@@ -250,6 +189,7 @@ async def save_project(body: ProjectBody):
         "subtitles": body.subtitles,
         "pip": body.pip,
         "export_settings": body.export_settings,
+        "is_template": body.is_template,
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -295,75 +235,47 @@ async def delete_project(pid: str):
     app_log(f"Project deleted: {pid}", "INFO", "ImgVid")
     return {"ok": True}
 
-# ── .project format helpers ───────────────────────────────────────────────────
 
-def _make_project_buf(project: dict) -> io.BytesIO:
-    files_to_pack = []
-    for slide in project.get("slides", []):
-        fn = slide.get("file") or slide.get("image", "")
-        if fn:
-            for d in (IMAGES_DIR, CLIPS_DIR):
-                fp = os.path.join(d, fn)
-                if os.path.exists(fp):
-                    sub = "clips" if d == CLIPS_DIR else "images"
-                    files_to_pack.append((f"media/{sub}/{fn}", fp))
-                    break
-        thumb_url = slide.get("thumbUrl", "")
-        if thumb_url:
-            tname = thumb_url.split("/")[-1]
-            tp = os.path.join(THUMBS_DIR, tname)
-            if os.path.exists(tp):
-                files_to_pack.append((f"media/thumbs/{tname}", tp))
-    for track in project.get("audio", []):
-        fn = track.get("file", "")
-        if fn:
-            fp = os.path.join(AUDIO_DIR, fn)
-            if os.path.exists(fp):
-                files_to_pack.append((f"media/audio/{fn}", fp))
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("project.json", json.dumps(project, ensure_ascii=False, indent=2))
-        for arc_name, file_path in files_to_pack:
-            zf.write(file_path, arc_name)
-    buf.seek(0)
-    return buf
+@router.post("/projects/{pid}/save-as-template")
+async def save_project_as_template(pid: str):
+    src = os.path.join(PROJECTS_DIR, f"{pid}.json")
+    if not os.path.exists(src):
+        raise HTTPException(404, "Проект не найден")
+    with open(src, encoding="utf-8") as f:
+        data = json.load(f)
+    new_id = uuid.uuid4().hex
+    now = datetime.datetime.now().isoformat()
+    template = {**data, "id": new_id, "is_template": True,
+                "created_at": now, "updated_at": now,
+                "name": data.get("name", "Шаблон") + " (шаблон)"}
+    tpath = os.path.join(PROJECTS_DIR, f"{new_id}.json")
+    with open(tpath, "w", encoding="utf-8") as f:
+        json.dump(template, f, ensure_ascii=False, indent=2)
+    app_log(f"Project saved as template: {template['name']}", "INFO", "ImgVid")
+    return {"id": new_id, "name": template["name"]}
 
 
-def _extract_project_zip(zf: zipfile.ZipFile) -> dict:
-    names = zf.namelist()
-    if "project.json" not in names:
-        raise HTTPException(400, "Неверный .project: project.json не найден")
-    project = json.loads(zf.read("project.json").decode("utf-8"))
-    for arc_name in names:
-        if arc_name == "project.json":
+@router.get("/templates")
+async def list_templates():
+    items = []
+    for fn in sorted(os.listdir(PROJECTS_DIR), reverse=True):
+        if not fn.endswith(".json"):
             continue
-        fname = os.path.basename(arc_name)
-        if not fname:
-            continue
-        data = zf.read(arc_name)
-        if arc_name.startswith("media/images/"):
-            file_dest = os.path.join(IMAGES_DIR, fname)
-        elif arc_name.startswith("media/clips/"):
-            file_dest = os.path.join(CLIPS_DIR, fname)
-        elif arc_name.startswith("media/audio/"):
-            file_dest = os.path.join(AUDIO_DIR, fname)
-        elif arc_name.startswith("media/thumbs/"):
-            file_dest = os.path.join(THUMBS_DIR, fname)
-        else:
-            continue
-        with open(file_dest, 'wb') as fh:
-            fh.write(data)
-    return project
-
-
-def _finalize_project(project: dict) -> dict:
-    pid = project.get("id") or uuid.uuid4().hex
-    project["id"] = pid
-    project["updated_at"] = datetime.datetime.now().isoformat()
-    ppath = os.path.join(PROJECTS_DIR, f"{pid}.json")
-    with open(ppath, "w", encoding="utf-8") as fh:
-        json.dump(project, fh, ensure_ascii=False, indent=2)
-    return project
+        try:
+            with open(os.path.join(PROJECTS_DIR, fn), encoding="utf-8") as f:
+                d = json.load(f)
+            if not d.get("is_template"):
+                continue
+            items.append({
+                "id":             d.get("id", fn[:-5]),
+                "name":           d.get("name", "Шаблон"),
+                "updated_at":     d.get("updated_at", ""),
+                "slide_count":    len(d.get("slides", [])),
+                "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
+            })
+        except Exception:
+            pass
+    return {"templates": items}
 
 # ── .project format (pack/unpack) ─────────────────────────────────────────────
 
@@ -374,7 +286,7 @@ async def pack_project(pid: str):
         raise HTTPException(404, "Проект не найден")
     with open(path, encoding="utf-8") as f:
         project = json.load(f)
-    buf = _make_project_buf(project)
+    buf = _proj_ops._make_project_buf(project)
     safe_name = re.sub(r'[^\w\-]', '_', project.get("name", "project"))
     app_log(f"Project packed as .project: {pid}", "INFO", "ImgVid")
     return Response(
@@ -390,10 +302,10 @@ async def unpack_project(file: UploadFile = File(...)):
     buf = io.BytesIO(content)
     try:
         with zipfile.ZipFile(buf, 'r') as zf:
-            project = _extract_project_zip(zf)
+            project = _proj_ops._extract_project_zip(zf)
     except zipfile.BadZipFile:
         raise HTTPException(400, "Повреждённый .project файл")
-    project = _finalize_project(project)
+    project = _proj_ops._finalize_project(project)
     app_log(f"Project unpacked from .project: {project.get('name', project['id'])}", "INFO", "ImgVid")
     return project
 
@@ -420,7 +332,7 @@ async def save_project_to_path(body: ProjectSaveBody):
         if not fname.lower().endswith('.project'):
             fname += '.project'
         dest = os.path.join(target_dir, fname)
-        buf = _make_project_buf(project)
+        buf = _proj_ops._make_project_buf(project)
         with open(dest, 'wb') as fh:
             fh.write(buf.read())
         app_log(f"Project saved as .project: {dest}", "INFO", "ImgVid")
@@ -478,8 +390,8 @@ async def load_project_from_path(body: ProjectLoadBody):
             content = fh.read()
         buf = io.BytesIO(content)
         with zipfile.ZipFile(buf, 'r') as zf:
-            project = _extract_project_zip(zf)
-        project = _finalize_project(project)
+            project = _proj_ops._extract_project_zip(zf)
+        project = _proj_ops._finalize_project(project)
         app_log(f"Project loaded from path: {dest}", "INFO", "ImgVid")
         return project
     except zipfile.BadZipFile:
@@ -502,219 +414,6 @@ async def get_output(name: str):
 
 # ── Export SSE ────────────────────────────────────────────────────────────────
 
-def _compute_video_dur(slides: list) -> float:
-    """Exact video stream duration after xfade transitions shorten it."""
-    total = sum(float(s.get("duration", 3)) for s in slides)
-    for i in range(1, len(slides)):
-        trans = slides[i].get("transition", {})
-        if _XFADE.get(trans.get("type", "none")):
-            total -= float(trans.get("duration", 0.5))
-    return max(0.0, total)
-
-
-def _ass_time(sec: float) -> str:
-    sec      = max(0.0, sec)
-    total_cs = int(round(sec * 100))
-    cs       = total_cs % 100
-    total_s  = total_cs // 100
-    h        = total_s // 3600
-    m        = (total_s % 3600) // 60
-    s        = total_s % 60
-    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
-
-def _write_ass(subs: list, path: str, width: int, height: int) -> None:
-    head = "\n".join([
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        f"PlayResX: {width}",
-        f"PlayResY: {height}",
-        "ScaledBorderAndShadow: yes",
-        "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour,"
-        " Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle,"
-        " Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
-        "0,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1",
-        "",
-        "[Events]",
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ])
-    lines = [head]
-    for sub in subs:
-        raw_text = str(sub.get("text", "")).replace("\n", "\\N")
-        abs_start = float(sub.get("abs_start", 0))
-        abs_end   = float(sub.get("abs_end", 3))
-        font  = sub.get("fontFamily", "Arial")
-        size  = int(sub.get("fontSize", 40))
-        color = sub.get("color", "#ffffff").lstrip("#")
-        try:
-            r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
-            primary = f"&H00{b:02X}{g:02X}{r:02X}"
-        except Exception:
-            primary = "&H00FFFFFF"
-        bold      = 1 if sub.get("bold")   else 0
-        italic    = 1 if sub.get("italic") else 0
-        underline = 1 if sub.get("underline") else 0
-        outline   = float(sub.get("outline", 2))
-        shadow    = float(sub.get("shadow", 1))
-        x_pct     = float(sub.get("x", 50))
-        y_pct     = float(sub.get("y", 88))
-        px        = int(width  * x_pct / 100)
-        py        = int(height * y_pct / 100)
-        # Compute per-event margins to replicate the preview width constraint.
-        # Preview uses max-width:90% by default (w=0) or sub.w% when set.
-        # ASS wraps text at PlayResX - MarginL - MarginR, centered at \pos(px,py).
-        w_pct     = float(sub.get("w", 0))
-        half_w_px = (w_pct / 200.0 * width) if w_pct > 0 else (0.45 * width)
-        margin_l  = max(0, int(px - half_w_px))
-        margin_r  = max(0, int(width - px - half_w_px))
-        anim      = sub.get("animation", "none") or "none"
-        anim_dur  = float(sub.get("animDuration", 0.6))
-        anim_ms   = int(anim_dur * 1000)
-        half_ms   = anim_ms // 2
-        rotation  = float(sub.get("rotation", 0))
-
-        oc = sub.get("outlineColor", "#000000").lstrip("#")
-        try:    ass_oc = f"&H00{int(oc[4:6],16):02X}{int(oc[2:4],16):02X}{int(oc[0:2],16):02X}"
-        except: ass_oc = "&H00000000"
-        sc = sub.get("shadowColor", "#000000").lstrip("#")
-        try:    ass_sc = f"&H00{int(sc[4:6],16):02X}{int(sc[2:4],16):02X}{int(sc[0:2],16):02X}"
-        except: ass_sc = "&H00000000"
-
-        base = (f"\\fn{font}\\fs{size}\\c{primary}"
-                f"\\b{bold}\\i{italic}\\u{underline}"
-                f"\\bord{outline:.1f}\\shad{shadow:.1f}"
-                f"\\3c{ass_oc}\\4c{ass_sc}"
-                f"\\an5\\pos({px},{py})")
-        if rotation:
-            base += f"\\frz{rotation:.1f}"
-
-        # Background box via thick outline with matching color
-        bg_op = float(sub.get("bgOpacity", 0))
-        if bg_op > 0:
-            bg_hex = sub.get("bgColor", "#000000").lstrip("#")
-            try:
-                br, bg_c, bb = int(bg_hex[0:2],16), int(bg_hex[2:4],16), int(bg_hex[4:6],16)
-                aa = int((1.0 - bg_op) * 255)
-                back = f"&H{aa:02X}{bb:02X}{bg_c:02X}{br:02X}"
-            except Exception:
-                back = "&H80000000"
-            # \3c sets outline color; \bord enlarges border to create box effect
-            # Preserve original outline color then override with background color
-            base += f"\\3c{back}\\shad0\\bord{max(outline, 8):.1f}"
-
-        # Karaoke word-by-word highlight
-        karaoke_on = bool(sub.get("karaokeEnable", False))
-        kc = sub.get("karaokeColor", "#ffdd00").lstrip("#")
-        try:    ass_kc = f"&H00{int(kc[4:6],16):02X}{int(kc[2:4],16):02X}{int(kc[0:2],16):02X}"
-        except: ass_kc = "&H0000DDFF"
-
-        if karaoke_on and raw_text.strip() and abs_end > abs_start:
-            # Split on spaces and \\N (ASS line break)
-            words = [w for w in re.split(r'(?:\\N|\s)+', raw_text) if w]
-            n = max(1, len(words))
-            word_dur = (abs_end - abs_start) / n
-            kmode = sub.get("karaokeMode", "word")
-            # Work in integer centiseconds to avoid float rounding producing
-            # zero-duration events (which causes the last word to vanish).
-            abs_start_cs = int(round(abs_start * 100))
-            abs_end_cs   = int(round(abs_end   * 100))
-            for stage in range(n):
-                t0_cs = abs_start_cs + int(round(stage * word_dur * 100))
-                t1_cs = (abs_start_cs + int(round((stage + 1) * word_dur * 100))
-                         if stage < n - 1 else abs_end_cs)
-                # Clamp so the last word always ends at abs_end
-                t1_cs = min(t1_cs, abs_end_cs)
-                if t0_cs >= t1_cs:
-                    t0_cs = max(abs_start_cs, t1_cs - 1)
-                if t0_cs >= t1_cs:
-                    continue
-                t0 = t0_cs / 100.0
-                t1 = t1_cs / 100.0
-                # Rebuild the subtitle text preserving \\N line breaks and original
-                # spacing, injecting color tags around the appropriate word(s).
-                # Tokenise into alternating [word, separator, word, separator, …].
-                raw_tokens = re.split(r'((?:\\N|\s)+)', raw_text)
-                wi = 0
-                ktext_parts = []
-                for tok in raw_tokens:
-                    if not tok:
-                        continue
-                    if re.fullmatch(r'(?:\\N|\s)+', tok):
-                        ktext_parts.append(tok)
-                    else:
-                        if kmode == "cumulative":
-                            color = ass_kc if wi <= stage else primary
-                            ktext_parts.append(f"{{\\1c{color}}}{tok}")
-                        else:
-                            if wi == stage:
-                                ktext_parts.append(
-                                    f"{{\\1c{ass_kc}}}{tok}{{\\1c{primary}}}"
-                                )
-                            else:
-                                ktext_parts.append(tok)
-                        wi += 1
-                ktext = "".join(ktext_parts)
-                tags = "{" + base + "}"
-                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,{margin_l},{margin_r},0,,{tags}{ktext}")
-
-        elif anim == "fade-in":
-            tags = "{" + base + f"\\fad({anim_ms},0)" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
-
-        elif anim == "fade-out":
-            tags = "{" + base + f"\\fad(0,{anim_ms})" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
-
-        elif anim in ("slide-up", "slide-down"):
-            dy   = 30 if anim == "slide-up" else -30
-            tags = "{" + base.replace(f"\\pos({px},{py})", "") + f"\\fad({half_ms},{half_ms})\\move({px},{py + dy},{px},{py},0,{anim_ms})" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
-
-        elif anim == "zoom-in":
-            tags = "{" + base + f"\\fscx5\\fscy5\\t(0,{anim_ms},\\fscx100\\fscy100)" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
-
-        elif anim == "typewriter":
-            # Character-by-character reveal: generate one event per step
-            chars = list(raw_text)
-            # Count non-escape characters (skip \N newline sequences)
-            visible = []
-            idx = 0
-            while idx < len(chars):
-                if raw_text[idx:idx+2] == "\\N":
-                    visible.append("\\N")
-                    idx += 2
-                else:
-                    visible.append(raw_text[idx])
-                    idx += 1
-            n = max(1, len([c for c in visible if c != "\\N"]))
-            char_dur = anim_dur / n
-            tags_base = "{" + base + "}"
-            # Emit incremental events
-            shown = []
-            char_count = 0
-            for step, ch in enumerate(visible):
-                shown.append(ch)
-                if ch != "\\N":
-                    char_count += 1
-                t0 = abs_start + (char_count - 1) * char_dur if ch != "\\N" else abs_start
-                t1 = (abs_start + char_count * char_dur) if step < len(visible) - 1 else abs_end
-                partial = "".join(shown)
-                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(min(t1, abs_end))},Default,,{margin_l},{margin_r},0,,"
-                             f"{tags_base}{partial}")
-
-        else:
-            # No animation or unknown
-            tags = "{" + base + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
-
 @router.post("/export")
 async def export_video(
     project_json:  str = Form(...),
@@ -722,6 +421,8 @@ async def export_video(
     resolution:    str = Form("1920x1080"),
     fps:           int = Form(30),
     quality:       str = Form("medium"),
+    codec:         str = Form(""),   # "" means auto; or "h264","h265","vp9","vp8","av1","prores","mpeg4"
+    audio_only:    bool = Form(False),
 ):
     try:
         project = json.loads(project_json)
@@ -735,7 +436,7 @@ async def export_video(
     if not slides:
         app_log("Export aborted: no slides", "WARN", "ImgVid")
         raise HTTPException(400, "Нет клипов для экспорта")
-    if not output_format or output_format not in ("mp4", "mov", "mkv", "webm"):
+    if not output_format or output_format not in ("mp4", "mov", "mkv", "webm", "avi", "gif", "m4v", "flv", "wmv", "mpeg", "ogv"):
         app_log(f"Export aborted: invalid format '{output_format}'", "WARN", "ImgVid")
         raise HTTPException(400, f"Неверный формат: {output_format}")
     try:
@@ -768,6 +469,21 @@ async def export_video(
         width, height = 1920, 1080
 
     crf = {"low": 28, "medium": 22, "high": 18, "lossless": 0}.get(quality, 22)
+
+    # ── Extend last slide by total xfade duration (before defining worker) ──────
+    # Must live here (export_video scope) so slides is NOT treated as a local
+    # variable inside worker(), which would cause UnboundLocalError.
+    _total_trans_dur = sum(
+        float(slides[i].get("transition", {}).get("duration", 0.5))
+        for i in range(1, len(slides))
+        if _XFADE.get(slides[i].get("transition", {}).get("type", "none"))
+    )
+    if _total_trans_dur > 0 and len(slides) > 1:
+        slides = list(slides)
+        _last_slide = dict(slides[-1])
+        _last_slide["duration"] = float(_last_slide.get("duration", 3)) + _total_trans_dur
+        slides[-1] = _last_slide
+
     q: queue.Queue = queue.Queue()
     _NO_WIN = 0x08000000 if os.name == "nt" else 0
 
@@ -818,7 +534,7 @@ async def export_video(
                         valid_audio.append(track)
 
                 # Add PIP inputs after audio
-                _total_dur_approx = sum(float(s.get("duration", 3)) for s in slides)
+                _total_dur_approx = _compute_video_dur(slides)
                 pip_input_start = audio_start_idx + len(valid_audio)
                 for pip in valid_pip:
                     pip_type = pip.get("type", "image")
@@ -838,22 +554,47 @@ async def export_video(
                 )
                 filter_parts = []
                 for i, slide in enumerate(slides):
-                    parts = [scale_f]
                     clip_type = slide.get("type", "image")
                     speed = float(slide.get("speed", 1) or 1)
                     trim_in = float(slide.get("trimIn", 0) or 0)
                     dur = float(slide.get("duration", 3))
 
-                    # For video clips: apply trim and speed
+                    pre_parts = []
+                    cur_scale_f = scale_f
+
                     if clip_type == "video":
-                        trim_parts = []
                         if trim_in > 0:
-                            trim_parts.append(f"trim=start={trim_in:.3f}:duration={dur / max(0.01, speed):.3f},setpts=PTS-STARTPTS")
+                            pre_parts.append(f"trim=start={trim_in:.3f}:duration={dur / max(0.01, speed):.3f},setpts=PTS-STARTPTS")
                         if speed != 1.0:
-                            trim_parts.append(f"setpts={1.0/speed:.6f}*PTS")
-                        if trim_parts:
-                            parts = trim_parts + [scale_f]
-                        # else parts stays as [scale_f]
+                            pre_parts.append(f"setpts={1.0/speed:.6f}*PTS")
+                    else:
+                        # Image: apply crop, custom scale, and offset before standard resize
+                        crop = slide.get("crop") or {}
+                        img_scale_pct = float(slide.get("imgScale", 100) or 100)
+                        img_ox = float(slide.get("imgOffsetX", 0) or 0)
+                        img_oy = float(slide.get("imgOffsetY", 0) or 0)
+
+                        cx = float(crop.get("x", 0)) / 100
+                        cy = float(crop.get("y", 0)) / 100
+                        cw = max(0.01, float(crop.get("w", 100))) / 100
+                        ch = max(0.01, float(crop.get("h", 100))) / 100
+                        if cx > 0 or cy > 0 or cw < 1.0 or ch < 1.0:
+                            pre_parts.append(f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f}")
+
+                        if img_scale_pct != 100:
+                            s = max(0.1, img_scale_pct / 100)
+                            pre_parts.append(f"scale=iw*{s:.4f}:ih*{s:.4f}")
+
+                        if img_ox != 0 or img_oy != 0:
+                            ox_px = int(width * img_ox / 100)
+                            oy_px = int(height * img_oy / 100)
+                            cur_scale_f = (
+                                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                                f"pad={width}:{height}:(ow-iw)/2+{ox_px}:(oh-ih)/2+{oy_px}:black,"
+                                f"setsar=1,fps={fps},format=yuv420p"
+                            )
+
+                    parts = pre_parts + [cur_scale_f]
 
                     for ef in slide.get("effects", []):
                         et, ev = ef.get("type"), ef.get("value", 0)
@@ -867,8 +608,8 @@ async def export_video(
 
                 # Support independent subtitle track (top-level "subtitles" array)
                 top_subs  = project.get("subtitles", [])
-                # Actual video duration after transitions — subtitles must not exceed it
-                # or their last karaoke events fall outside the video and are never shown.
+                # After extending the last slide, video_dur equals the preview timeline
+                # duration so subtitles clamped here match exactly what the user set.
                 video_dur = _compute_video_dur(slides)
                 if top_subs:
                     for sub in top_subs:
@@ -982,48 +723,49 @@ async def export_video(
 
                 # ── Audio ────────────────────────────────────────────────────
                 audio_map = []
-                total_dur = sum(float(s.get("duration", 3)) for s in slides)
+                video_dur_for_audio = _compute_video_dur(slides)
+                total_dur = video_dur_for_audio
                 if valid_audio:
-                    if len(valid_audio) == 1:
-                        t           = valid_audio[0]
-                        ai          = audio_start_idx
+                    def _build_audio_filter(t, ai_idx, out_label, clip_to_total=True):
                         vol         = float(t.get("volume", 1.0))
-                        fi          = float(t.get("fadeIn", t.get("fade_in", 0)))
+                        fi          = float(t.get("fadeIn",  t.get("fade_in",  0)))
                         fo          = float(t.get("fadeOut", t.get("fade_out", 0)))
                         trim_in     = float(t.get("trimIn", 0))
                         start_off   = float(t.get("startOffset", 0))
                         track_dur   = t.get("duration")
                         track_dur_f = float(track_dur) if track_dur is not None else None
                         af = []
-                        if trim_in > 0:
-                            af.append(f"atrim=start={trim_in:.3f}")
+                        # Trim file start and/or limit segment duration
+                        if trim_in > 0 or track_dur_f is not None:
+                            atrim_args = []
+                            if trim_in > 0:
+                                atrim_args.append(f"start={trim_in:.3f}")
+                            if track_dur_f is not None:
+                                atrim_args.append(f"end={trim_in + track_dur_f:.3f}")
+                            af.append(f"atrim={':'.join(atrim_args)}")
                             af.append("asetpts=PTS-STARTPTS")
                         af.append(f"volume={vol}")
-                        if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
+                        if fi > 0:
+                            af.append(f"afade=t=in:ss=0:d={fi:.2f}")
                         if fo > 0:
                             fade_start = (track_dur_f - fo) if track_dur_f else max(0, total_dur - fo - start_off)
                             af.append(f"afade=t=out:st={max(0, fade_start):.2f}:d={fo:.2f}")
                         if start_off > 0:
-                            delay_ms = int(start_off * 1000)
-                            af.append(f"adelay={delay_ms}:all=1")
-                        af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
-                        filter_parts.append(f"[{ai}:a]{','.join(af)}[aout]")
+                            af.append(f"adelay={int(start_off * 1000)}:all=1")
+                        if clip_to_total:
+                            af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
+                        return f"[{ai_idx}:a]{','.join(af)}{out_label}"
+
+                    if len(valid_audio) == 1:
+                        filter_parts.append(
+                            _build_audio_filter(valid_audio[0], audio_start_idx, "[aout]", clip_to_total=True)
+                        )
                         audio_map = ["-map", "[aout]"]
                     else:
                         for j, t in enumerate(valid_audio):
-                            ai          = audio_start_idx + j
-                            vol         = float(t.get("volume", 1.0))
-                            trim_in     = float(t.get("trimIn", 0))
-                            start_off   = float(t.get("startOffset", 0))
-                            af = []
-                            if trim_in > 0:
-                                af.append(f"atrim=start={trim_in:.3f}")
-                                af.append("asetpts=PTS-STARTPTS")
-                            af.append(f"volume={vol}")
-                            if start_off > 0:
-                                delay_ms = int(start_off * 1000)
-                                af.append(f"adelay={delay_ms}:all=1")
-                            filter_parts.append(f"[{ai}:a]{','.join(af)}[a{j}]")
+                            filter_parts.append(
+                                _build_audio_filter(t, audio_start_idx + j, f"[a{j}]", clip_to_total=False)
+                            )
                         amix_in = "".join(f"[a{j}]" for j in range(len(valid_audio)))
                         filter_parts.append(
                             f"{amix_in}amix=inputs={len(valid_audio)}:duration=first,"
@@ -1031,22 +773,72 @@ async def export_video(
                         )
                         audio_map = ["-map", "[aout]"]
 
-                filter_complex = ";\n".join(filter_parts)
-
                 # ── Codec ────────────────────────────────────────────────────
                 ext = output_format.lower()
-                if ext in ("mp4", "mov"):
-                    vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
+                _codec_name = codec.lower() if codec else ""
+                _codec_map = {
+                    "h264": "libx264", "h265": "libx265", "hevc": "libx265",
+                    "vp9": "libvpx-vp9", "vp8": "libvpx",
+                    "av1": "libaom-av1", "prores": "prores_ks", "mpeg4": "mpeg4",
+                }
+                _resolved_codec = _codec_map.get(_codec_name, _codec_name)
+
+                _fmt_default_codec = {
+                    "mp4": "libx264", "mov": "libx264", "mkv": "libx264",
+                    "m4v": "libx264", "avi": "libx264", "flv": "libx264",
+                    "webm": "libvpx-vp9", "ogv": "libtheora",
+                    "wmv": "wmv2", "mpeg": "mpeg2video", "gif": "gif",
+                }
+                vcodec_name = _resolved_codec or _fmt_default_codec.get(ext, "libx264")
+
+                needs_gif_palette = (ext == "gif")
+
+                if needs_gif_palette:
+                    gif_fps = min(fps, 15)
+                    filter_parts.append(
+                        f"[{final_video_label}]fps={gif_fps},"
+                        f"scale={width}:-1:flags=lanczos,split[_pg1][_pg2]"
+                    )
+                    filter_parts.append("[_pg1]palettegen=max_colors=256[_pal]")
+                    filter_parts.append("[_pg2][_pal]paletteuse=dither=bayer:bayer_scale=5[gifout]")
+                    final_video_label = "gifout"
+                    vcodec = ["-c:v", "gif"]
+                    acodec = []
+                    audio_map = []  # GIF container does not support audio
+                elif vcodec_name in ("libx264", "libx265"):
+                    vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
-                elif ext == "mkv":
-                    vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
+                elif vcodec_name == "libvpx-vp9":
+                    vp9_crf = max(0, min(63, crf * 63 // 51))
+                    vcodec = ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", str(vp9_crf), "-pix_fmt", "yuv420p"]
+                    acodec = ["-c:a", "libopus", "-b:a", "192k"] if audio_map else []
+                elif vcodec_name == "libvpx":
+                    vcodec = ["-c:v", "libvpx", "-b:v", "2M", "-pix_fmt", "yuv420p"]
+                    acodec = ["-c:a", "libvorbis", "-q:a", "5"] if audio_map else []
+                elif vcodec_name == "libaom-av1":
+                    av1_crf = max(0, min(63, crf))
+                    vcodec = ["-c:v", "libaom-av1", "-crf", str(av1_crf), "-b:v", "0", "-pix_fmt", "yuv420p"]
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
-                elif ext == "webm":
-                    vcodec = ["-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0"]
-                    acodec = ["-c:a", "libopus"] if audio_map else []
+                elif vcodec_name == "prores_ks":
+                    vcodec = ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"]
+                    acodec = ["-c:a", "pcm_s16le"] if audio_map else []
+                elif vcodec_name == "libtheora":
+                    vcodec = ["-c:v", "libtheora", "-q:v", "7", "-pix_fmt", "yuv420p"]
+                    acodec = ["-c:a", "libvorbis", "-q:a", "5"] if audio_map else []
+                elif vcodec_name == "wmv2":
+                    vcodec = ["-c:v", "wmv2", "-b:v", "2M", "-pix_fmt", "yuv420p"]
+                    acodec = ["-c:a", "wmav2", "-b:a", "192k"] if audio_map else []
+                elif vcodec_name == "mpeg2video":
+                    vcodec = ["-c:v", "mpeg2video", "-b:v", "4M", "-pix_fmt", "yuv420p"]
+                    acodec = ["-c:a", "mp2", "-b:a", "192k"] if audio_map else []
+                elif vcodec_name == "mpeg4":
+                    vcodec = ["-c:v", "mpeg4", "-b:v", "2M", "-pix_fmt", "yuv420p"]
+                    acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
                 else:
                     vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
+
+                filter_complex = ";\n".join(filter_parts)
 
                 ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 out_name = f"imgvid_{ts}.{ext}"
@@ -1133,6 +925,142 @@ async def export_video(
                 break
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/export-audio")
+async def export_audio_track(
+    project_json:  str = Form(...),
+    audio_format:  str = Form("mp3"),
+):
+    try:
+        project = json.loads(project_json)
+    except Exception:
+        raise HTTPException(400, "Неверный JSON проекта")
+
+    audio_tracks = project.get("audio", [])
+    slides = project.get("slides", [])
+    total_dur = sum(float(s.get("duration", 3)) for s in slides) if slides else 0.0
+
+    valid_audio = []
+    for track in audio_tracks:
+        ap = os.path.join(AUDIO_DIR, track.get("file", ""))
+        if os.path.exists(ap):
+            valid_audio.append({**track, "_path": ap})
+
+    if not valid_audio:
+        raise HTTPException(400, "Аудиодорожки не найдены")
+
+    if audio_format not in ("mp3", "wav", "flac", "aac", "ogg", "m4a", "opus"):
+        audio_format = "mp3"
+
+    q: queue.Queue = queue.Queue()
+    _NO_WIN = 0x08000000 if os.name == "nt" else 0
+
+    def _audio_worker():
+        try:
+            cmd_inputs = []
+            for t in valid_audio:
+                cmd_inputs += ["-i", t["_path"]]
+
+            filter_parts_a = []
+            if len(valid_audio) == 1:
+                t = valid_audio[0]
+                vol = float(t.get("volume", 1.0))
+                fi = float(t.get("fadeIn", t.get("fade_in", 0)))
+                fo = float(t.get("fadeOut", t.get("fade_out", 0)))
+                trim_in = float(t.get("trimIn", 0))
+                start_off = float(t.get("startOffset", 0))
+                af = []
+                if trim_in > 0:
+                    af += [f"atrim=start={trim_in:.3f}", "asetpts=PTS-STARTPTS"]
+                af.append(f"volume={vol}")
+                if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
+                if fo > 0: af.append(f"afade=t=out:st={max(0, total_dur - fo):.2f}:d={fo:.2f}")
+                if start_off > 0: af.append(f"adelay={int(start_off * 1000)}:all=1")
+                if total_dur > 0: af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
+                filter_parts_a.append(f"[0:a]{','.join(af)}[aout]")
+                audio_map = ["-map", "[aout]"]
+            else:
+                for j, t in enumerate(valid_audio):
+                    vol = float(t.get("volume", 1.0))
+                    fi = float(t.get("fadeIn", t.get("fade_in", 0)))
+                    fo = float(t.get("fadeOut", t.get("fade_out", 0)))
+                    trim_in = float(t.get("trimIn", 0))
+                    start_off = float(t.get("startOffset", 0))
+                    af = []
+                    if trim_in > 0:
+                        af += [f"atrim=start={trim_in:.3f}", "asetpts=PTS-STARTPTS"]
+                    af.append(f"volume={vol}")
+                    if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
+                    if fo > 0: af.append(f"afade=t=out:st={max(0, total_dur - fo):.2f}:d={fo:.2f}")
+                    if start_off > 0: af.append(f"adelay={int(start_off * 1000)}:all=1")
+                    filter_parts_a.append(f"[{j}:a]{','.join(af)}[a{j}]")
+                amix = "".join(f"[a{j}]" for j in range(len(valid_audio)))
+                tail = f",atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS" if total_dur > 0 else ""
+                filter_parts_a.append(f"{amix}amix=inputs={len(valid_audio)}:duration=first{tail}[aout]")
+                audio_map = ["-map", "[aout]"]
+
+            _codec_map_a = {
+                "mp3":  ["-c:a", "libmp3lame", "-b:a", "320k"],
+                "wav":  ["-c:a", "pcm_s16le"],
+                "flac": ["-c:a", "flac"],
+                "aac":  ["-c:a", "aac", "-b:a", "256k"],
+                "ogg":  ["-c:a", "libvorbis", "-q:a", "6"],
+                "m4a":  ["-c:a", "aac", "-b:a", "256k"],
+                "opus": ["-c:a", "libopus", "-b:a", "192k"],
+            }
+            acodec_args = _codec_map_a.get(audio_format, ["-c:a", "libmp3lame", "-b:a", "320k"])
+            _ext_map = {"m4a": "m4a", "ogg": "ogg", "opus": "opus"}
+            out_ext = _ext_map.get(audio_format, audio_format)
+            ts2 = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_name = f"audio_{ts2}.{out_ext}"
+            out_path = os.path.join(OUTPUT_DIR, out_name)
+
+            cmd = (
+                [FFMPEG, "-y", "-nostdin"]
+                + cmd_inputs
+                + ["-filter_complex", ";\n".join(filter_parts_a)]
+                + audio_map + acodec_args
+                + [out_path]
+            )
+            q.put(("progress", 0.3, "Экспорт аудио…"))
+            app_log(f"Audio export: {out_name}", "INFO", "ImgVid")
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, bufsize=0, creationflags=_NO_WIN,
+            )
+            proc.wait()
+            if proc.returncode != 0:
+                tail_out = proc.stdout.read().decode("utf-8", errors="replace")
+                app_log(f"FFmpeg audio error:\n{tail_out}", "ERROR", "ImgVid")
+                q.put(("error", f"FFmpeg код {proc.returncode}"))
+            elif not os.path.exists(out_path):
+                q.put(("error", "FFmpeg не создал файл"))
+            else:
+                app_log(f"Audio export done: {out_name}", "INFO", "ImgVid")
+                q.put(("done", out_name))
+        except Exception as e:
+            import traceback
+            app_log(f"Audio export error: {traceback.format_exc()}", "ERROR", "ImgVid")
+            q.put(("error", str(e)))
+
+    threading.Thread(target=_audio_worker, daemon=True).start()
+
+    def _audio_stream():
+        yield f"event: progress\ndata: {json.dumps({'value': 0.01, 'desc': 'Инициализация…'})}\n\n"
+        while True:
+            item = q.get()
+            ev = item[0]
+            if ev == "progress":
+                yield f"event: progress\ndata: {json.dumps({'value': item[1], 'desc': item[2]})}\n\n"
+            elif ev == "done":
+                yield f"event: done\ndata: {json.dumps({'audio_url': f'/api/imgvid/output/{item[1]}', 'filename': item[1]})}\n\n"
+                break
+            elif ev == "error":
+                yield f"event: error\ndata: {json.dumps({'status': '❌ ' + item[1]})}\n\n"
+                break
+
+    return StreamingResponse(_audio_stream(), media_type="text/event-stream")
 
 
 @router.post("/extract-audio")
