@@ -502,6 +502,16 @@ async def get_output(name: str):
 
 # ── Export SSE ────────────────────────────────────────────────────────────────
 
+def _compute_video_dur(slides: list) -> float:
+    """Exact video stream duration after xfade transitions shorten it."""
+    total = sum(float(s.get("duration", 3)) for s in slides)
+    for i in range(1, len(slides)):
+        trans = slides[i].get("transition", {})
+        if _XFADE.get(trans.get("type", "none")):
+            total -= float(trans.get("duration", 0.5))
+    return max(0.0, total)
+
+
 def _ass_time(sec: float) -> str:
     sec      = max(0.0, sec)
     total_cs = int(round(sec * 100))
@@ -623,27 +633,30 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
                     continue
                 t0 = t0_cs / 100.0
                 t1 = t1_cs / 100.0
-                if kmode == "cumulative":
-                    # All words up to and including current word highlighted
-                    highlighted = " ".join(words[:stage + 1])
-                    remaining   = " ".join(words[stage + 1:])
-                    if remaining:
-                        ktext = "{\\1c" + ass_kc + "}" + highlighted + "{\\1c" + primary + "} " + remaining
+                # Rebuild the subtitle text preserving \\N line breaks and original
+                # spacing, injecting color tags around the appropriate word(s).
+                # Tokenise into alternating [word, separator, word, separator, …].
+                raw_tokens = re.split(r'((?:\\N|\s)+)', raw_text)
+                wi = 0
+                ktext_parts = []
+                for tok in raw_tokens:
+                    if not tok:
+                        continue
+                    if re.fullmatch(r'(?:\\N|\s)+', tok):
+                        ktext_parts.append(tok)
                     else:
-                        ktext = "{\\1c" + ass_kc + "}" + highlighted
-                else:
-                    # Only the current word highlighted (default)
-                    before  = " ".join(words[:stage])
-                    current = words[stage]
-                    after   = " ".join(words[stage + 1:])
-                    if before and after:
-                        ktext = before + " {\\1c" + ass_kc + "}" + current + "{\\1c" + primary + "} " + after
-                    elif before:
-                        ktext = before + " {\\1c" + ass_kc + "}" + current
-                    elif after:
-                        ktext = "{\\1c" + ass_kc + "}" + current + "{\\1c" + primary + "} " + after
-                    else:
-                        ktext = "{\\1c" + ass_kc + "}" + current
+                        if kmode == "cumulative":
+                            color = ass_kc if wi <= stage else primary
+                            ktext_parts.append(f"{{\\1c{color}}}{tok}")
+                        else:
+                            if wi == stage:
+                                ktext_parts.append(
+                                    f"{{\\1c{ass_kc}}}{tok}{{\\1c{primary}}}"
+                                )
+                            else:
+                                ktext_parts.append(tok)
+                        wi += 1
+                ktext = "".join(ktext_parts)
                 tags = "{" + base + "}"
                 lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,{margin_l},{margin_r},0,,{tags}{ktext}")
 
@@ -853,25 +866,27 @@ async def export_video(
                 all_subs = []
 
                 # Support independent subtitle track (top-level "subtitles" array)
-                top_subs = project.get("subtitles", [])
+                top_subs  = project.get("subtitles", [])
+                # Actual video duration after transitions — subtitles must not exceed it
+                # or their last karaoke events fall outside the video and are never shown.
+                video_dur = _compute_video_dur(slides)
                 if top_subs:
                     for sub in top_subs:
-                        all_subs.append({
-                            **sub,
-                            "abs_start": float(sub.get("start", 0)),
-                            "abs_end":   float(sub.get("end", 3)),
-                        })
+                        a_start = float(sub.get("start", 0))
+                        a_end   = min(float(sub.get("end", 3)), video_dur)
+                        if a_start >= a_end:
+                            continue
+                        all_subs.append({**sub, "abs_start": a_start, "abs_end": a_end})
                 else:
                     # Legacy: per-clip subtitles
                     t_cur = 0.0
                     for slide in slides:
                         dur = float(slide.get("duration", 3))
                         for sub in slide.get("subtitles", []):
-                            all_subs.append({
-                                **sub,
-                                "abs_start": t_cur + float(sub.get("start", 0)),
-                                "abs_end":   t_cur + float(sub.get("end", dur)),
-                            })
+                            a_start = t_cur + float(sub.get("start", 0))
+                            a_end   = min(t_cur + float(sub.get("end", dur)), video_dur)
+                            if a_start < a_end:
+                                all_subs.append({**sub, "abs_start": a_start, "abs_end": a_end})
                         t_cur += dur
 
                 sub_filter = ""
