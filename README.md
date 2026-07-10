@@ -102,7 +102,9 @@ A full-featured non-linear video editor running in the browser:
 - Resolutions: 1280×720, 1920×1080, 2560×1440, 3840×2160, custom
 - FPS: 24 / 25 / 30 / 60
 - Quality: Low / Medium / High / Lossless
-- Formats: MP4, MOV, MKV, WebM
+- Video formats: MP4, MOV, MKV, M4V, AVI, WebM (VP9), OGV (Theora), FLV, WMV, MPEG, GIF (animated, with palette optimisation)
+- Video codecs: H.264, H.265 (HEVC), VP9, VP8, AV1, ProRes, MPEG-4 (auto-detected from format by default)
+- Audio-only export: MP3, WAV, FLAC, AAC, OGG, M4A, OPUS — audio tracks mixed and trimmed with FFmpeg
 - SSE progress streaming during export
 
 **Projects**
@@ -111,6 +113,79 @@ A full-featured non-linear video editor running in the browser:
 - Load template into editor as a new unsaved project to use as a starting point
 - Browse and load `.project` files from the file system
 - Projects stored in `.outputs/imgvid/projects/`
+
+---
+
+## Architecture
+
+### Backend
+
+`app.py` starts Uvicorn, applies the no-cache ASGI middleware, then mounts 10 `APIRouter` modules:
+
+| Router | Prefix | Purpose |
+|--------|--------|---------|
+| `voices.py` | `/api/voices` | Windows SAPI voice list; saved voices CRUD + WAV serve |
+| `synthesis.py` | `/api/synthesize` | SSE synthesis streams (windows, xtts, saved) |
+| `xtts.py` | `/api/xtts` | XTTS install status + language map |
+| `history.py` | `/api/history` | Audio file browser (list/play/rename/delete) |
+| `subtitles.py` | `/api/subtitles` | SRT CRUD |
+| `video.py` | `/api/video` | Upload, subtitle-burn, video history |
+| `transcribe.py` | `/api/transcribe` | Whisper transcription |
+| `templates.py` | `/api/templates` | Style template CRUD |
+| `log_router.py` | `/api/logs` | Server log streaming |
+| `image_video.py` | `/api/imgvid` | Image-to-video processing |
+
+#### Image Video Editor backend package (`routers/imgvid/`)
+
+`image_video.py` contains only route handlers. All heavy logic lives in the service package:
+
+| Module | Contents |
+|--------|----------|
+| `ffmpeg_utils.py` | Locates `ffmpeg`/`ffprobe` binaries (PATH → project `ffmpeg/`), `_XFADE` transition map (22 types), `_EFFECTS` map, `_probe_duration_clip()`, `_extract_thumb()`, `_compute_video_dur()` |
+| `ass_writer.py` | `_ass_time()` centisecond formatter; `_write_ass()` — generates ASS subtitle files with per-subtitle karaoke, animation (fade/slide/zoom/typewriter), word-highlight timing |
+| `project_ops.py` | `_make_project_buf()` — packs project JSON + media into a `.project` zip; `_extract_project_zip()` — unpacks and rewrites media URLs; `_finalize_project()` — saves to disk |
+
+#### SSE synthesis pipeline
+
+`services/sse.py::run_synth_stream(core_fn, args)` runs synthesis in a worker thread. Progress is pushed through a `queue.Queue` and yielded as SSE frames:
+
+```
+event: progress
+data: {"value": 0.45, "desc": "Синтез слова 5/10"}
+
+event: done
+data: {"audio_url": "/api/history/<name>/audio", "filename": "<name>", "status": "✓ ..."}
+
+event: error
+data: {"status": "❌ ..."}
+```
+
+### Frontend
+
+Single HTML page (`static/index.html`) with eight tabs. No UI framework — plain ES modules loaded via `<script type="module">`.
+
+**Lazy initialisation** — `app.js` initialises only the Windows tab on page load. Each other tab initialises on first click and is tracked in a `ready` Set to prevent re-init.
+
+**Shared utilities**
+
+| Module | Role |
+|--------|------|
+| `api.js` | `apiFetch()` wrapper; `synthesizeStream()` SSE consumer |
+| `audio-manager.js` | Singleton — exactly one `AudioPlayer` plays at a time |
+| `events.js` | Cross-tab `EventTarget` bus (`voices-changed`, `history-changed`, `video-changed`) |
+| `modal.js` | Promise-based `openConfirm()` / `openPrompt()` |
+| `toast.js` | Transient notifications (info / ok / warn / err) |
+| `logger.js` | Floating draggable log panel + progress bar |
+
+#### Image Video Editor frontend modules (`static/js/imgvid/`)
+
+`tabs/image-video.js` imports shared logic from:
+
+| Module | Exports |
+|--------|---------|
+| `constants.js` | `TRANSITIONS` (22 types), `EFFECTS_DEF`, `FONTS`, `ANIMS` |
+| `utils.js` | `uid`, `eh`, `fmt`, `fmtShort`, `buildCSSFilter`, `hexToRgba`, `_makeTextShadow`, `getSnapTargets`, `snap`, `totalDur`, `clipAtTime` |
+| `waveform.js` | `drawWaveform(canvas, url)`, `probeAudioDuration(url)` with module-level LRU cache |
 
 ---
 
@@ -219,7 +294,13 @@ tts/
 │   ├── templates.py             # /api/templates/* — style templates
 │   ├── history.py               # /api/history/* — audio history
 │   ├── log_router.py            # /api/logs — log files
-│   └── image_video.py           # /api/imgvid/* — Image Video Editor
+│   ├── image_video.py           # /api/imgvid/* — Image Video Editor (routes only)
+│   └── imgvid/                  # Image Video Editor service package
+│       ├── __init__.py          # Package marker
+│       ├── ffmpeg_utils.py      # FFmpeg/FFprobe binary resolution, transition/effect maps,
+│       │                        #   _probe_duration_clip(), _extract_thumb(), _compute_video_dur()
+│       ├── ass_writer.py        # ASS subtitle file generator (_ass_time(), _write_ass())
+│       └── project_ops.py       # Project archive pack/unpack/finalize helpers
 │
 ├── core/
 │   ├── audio.py                 # WAV I/O, timestamped export
@@ -251,15 +332,22 @@ tts/
         ├── logger.js            # Floating activity log panel
         ├── modal.js             # Promise-based confirm / prompt modals
         ├── toast.js             # Toast notifications
-        └── tabs/
-            ├── windows.js       # Windows Voices tab
-            ├── cloning.js       # XTTS Voice Cloning tab
-            ├── saved.js         # My Voices tab
-            ├── subtitles.js     # Subtitles tab
-            ├── video.js         # Video tab
-            ├── history.js       # History tab
-            ├── logs.js          # Logs tab
-            └── image-video.js   # Image Video Editor tab
+        ├── tabs/
+        │   ├── windows.js       # Windows Voices tab
+        │   ├── cloning.js       # XTTS Voice Cloning tab
+        │   ├── saved.js         # My Voices tab
+        │   ├── subtitles.js     # Subtitles tab
+        │   ├── video.js         # Video tab
+        │   ├── history.js       # History tab
+        │   ├── logs.js          # Logs tab
+        │   └── image-video.js   # Image Video Editor tab (imports from imgvid/)
+        └── imgvid/              # Image Video Editor frontend modules
+            ├── constants.js     # TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS lookup tables
+            ├── utils.js         # Pure utility functions: uid, fmt, buildCSSFilter,
+            │                    #   hexToRgba, snap, totalDur, clipAtTime, getSnapTargets
+            ├── waveform.js      # drawWaveform(), probeAudioDuration() with module cache
+            ├── export.js        # Export helpers (stub — extraction in progress)
+            └── preview.js       # Preview zoom helpers (stub — extraction in progress)
 ```
 
 ---
@@ -367,13 +455,21 @@ Events: `progress { value, desc }` · `done { audio_url, filename, status }` · 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/imgvid/export` | Export video (SSE stream) |
-| `GET` | `/api/imgvid/output/{name}` | Download exported video |
+| `POST` | `/api/imgvid/export-audio` | Export audio-only mix (SSE stream) |
+| `GET` | `/api/imgvid/output/{name}` | Download exported file |
 
-Export request body (multipart form):
+Video export request body (multipart form):
 - `project_json` — JSON string: `{ slides, audio, subtitles, pip }`
-- `output_format` — `mp4` / `mov` / `mkv` / `webm`
+- `output_format` — `mp4` / `mov` / `mkv` / `m4v` / `avi` / `webm` / `ogv` / `flv` / `wmv` / `mpeg` / `gif`
+- `codec` — `h264` / `h265` / `vp9` / `vp8` / `av1` / `prores` / `mpeg4` / `` (empty = auto)
 - `resolution` — e.g. `1920x1080`
 - `fps` — `24` / `25` / `30` / `60`
+- `quality` — `low` / `medium` / `high` / `lossless`
+- `audio_only` — `false` (always false for this endpoint; use `/export-audio` for audio-only)
+
+Audio export request body (multipart form):
+- `project_json` — JSON string with `audio` array
+- `audio_format` — `mp3` / `wav` / `flac` / `aac` / `ogg` / `m4a` / `opus`
 - `quality` — `low` / `medium` / `high` / `lossless`
 
 **Slide object schema** (in `slides` array):
