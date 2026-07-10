@@ -1,5 +1,14 @@
 import sys
 import asyncio
+import warnings
+
+# Suppress pkg_resources deprecation warning from librosa (imported by Whisper)
+# librosa uses pkg_resources internally; the warning is cosmetic and not actionable.
+warnings.filterwarnings(
+    "ignore",
+    message=".*pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -30,7 +39,8 @@ from routers import video as video_router
 from routers import log_router
 from routers import templates as templates_router
 from routers import transcribe as transcribe_router
-from core.log import server_log
+from routers import image_video as imgvid_router
+from core.log import server_log, app_log
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -70,6 +80,7 @@ app.include_router(video_router.router)
 app.include_router(log_router.router)
 app.include_router(templates_router.router)
 app.include_router(transcribe_router.router)
+app.include_router(imgvid_router.router)
 
 
 @app.get("/")
@@ -89,6 +100,7 @@ if __name__ == "__main__":
 
     threading.Thread(target=_open_browser, daemon=True).start()
     server_log("Server started")
+    app_log("Application started", "INFO", "Server")
     try:
         uvicorn.run(app, host="127.0.0.1", port=7860, log_level="info", access_log=False)
     except KeyboardInterrupt:

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from core import history_manager as hm
+from core.log import app_log
 from core.schemas import RenameBody
 
 router = APIRouter(prefix="/api/history", tags=["history"])
@@ -27,6 +28,7 @@ async def delete_history(name: str):
     status, signal = hm.delete_file(name)
     if not signal:
         raise HTTPException(404, status)
+    app_log(f"Audio file deleted: {name}", "INFO", "History")
     return {"status": status}
 
 
@@ -36,4 +38,5 @@ async def rename_history(name: str, body: RenameBody):
     if not signal:
         raise HTTPException(400, status)
     old, new = json.loads(signal)
+    app_log(f"Audio file renamed: {old} → {new}", "INFO", "History")
     return {"status": status, "old_name": old, "new_name": new}

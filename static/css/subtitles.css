@@ -760,3 +760,54 @@ input[type="number"].vsp-num {
     align-self: flex-end;
     padding-bottom: 3px;
 }
+
+/* ── Per-subtitle inline style controls (Video tab subtitle editor) ─────────── */
+.sub-row-style {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    padding-top: 5px;
+    border-top: 1px solid var(--border);
+}
+
+.sub-style-btn {
+    padding: 2px 5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 22px;
+    text-align: center;
+    line-height: 1.4;
+    flex-shrink: 0;
+    transition: background .1s, color .1s, border-color .1s;
+}
+.sub-style-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.sub-style-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.sub-anim-sel {
+    font-size: 10px;
+    padding: 2px 3px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-dim);
+    height: 22px;
+    cursor: pointer;
+}
+.sub-anim-sel:hover { border-color: var(--border-strong); }
+
+.sub-pos-inp {
+    width: 48px;
+    font-size: 10px;
+    padding: 2px 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+}
+.sub-pos-inp::placeholder { color: var(--text-dim); font-size: 9px; }
+.sub-pos-inp:focus { outline: none; border-color: var(--accent); }

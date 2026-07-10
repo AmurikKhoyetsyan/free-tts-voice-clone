@@ -5,6 +5,7 @@ import { toast } from '../toast.js';
 import { events } from '../events.js';
 import { openConfirm, openPrompt } from '../modal.js';
 import { skeletonRows } from '../loader.js';
+import { log } from '../logger.js';
 
 export async function init() {
 
@@ -107,6 +108,7 @@ export async function init() {
             try {
                 const r = await putJSON(`/api/history/${encodeURIComponent(name)}`, { new_name: newName });
                 toast(r.status, 'ok');
+                log('Аудио переименовано: ' + name + ' → ' + r.new_name, 'done');
                 if (activeName === name) {
                     activeName = r.new_name;
                     player.setSource(`/api/history/${encodeURIComponent(r.new_name)}/audio`, r.new_name);
@@ -121,6 +123,7 @@ export async function init() {
             try {
                 const r = await del(`/api/history/${encodeURIComponent(name)}`);
                 toast(r.status, 'ok');
+                log('Аудио удалено: ' + name, 'done');
                 if (activeName === name) { activeName = null; isPlaying = false; player.setSource(null); }
                 await refreshAudio();
             } catch (e2) { toast(e2.message, 'err'); }
@@ -210,6 +213,7 @@ export async function init() {
             try {
                 const r = await putJSON(`/api/subtitles/${encodeURIComponent(name)}`, { new_name: newName });
                 toast(r.status, 'ok');
+                log('Субтитр переименован: ' + name + ' → ' + r.new_name, 'done');
                 await refreshSRT();
             } catch (e2) { toast(e2.message, 'err'); }
             return;
@@ -220,6 +224,7 @@ export async function init() {
             try {
                 const r = await del(`/api/subtitles/${encodeURIComponent(name)}`);
                 toast(r.status, 'ok');
+                log('Субтитр удалён: ' + name, 'done');
                 await refreshSRT();
             } catch (e2) { toast(e2.message, 'err'); }
             return;
@@ -295,6 +300,7 @@ export async function init() {
             try {
                 const r = await putJSON(`/api/video/history/${encodeURIComponent(name)}`, { new_name: newName });
                 toast(r.status, 'ok');
+                log('Видео переименовано: ' + name + ' → ' + r.new_name, 'done');
                 await refreshVid();
             } catch (e2) { toast(e2.message, 'err'); }
             return;
@@ -305,6 +311,7 @@ export async function init() {
             try {
                 const r = await del(`/api/video/history/${encodeURIComponent(name)}`);
                 toast(r.status, 'ok');
+                log('Видео удалено: ' + name, 'done');
                 if (vidPreview.src.includes(encodeURIComponent(name))) {
                     vidPreview.src = '';
                     vidPreview.style.display = 'none';
@@ -374,6 +381,7 @@ export async function init() {
             try {
                 const r = await del(`/api/templates/${encodeURIComponent(name)}`);
                 toast(r.status, 'ok');
+                log('Шаблон удалён: ' + name, 'done');
                 events.dispatchEvent(new CustomEvent('template-changed'));
                 if (tmplPreviewBlock && tmplPreviewLabel && tmplPreviewLabel.textContent.startsWith(name))
                     tmplPreviewBlock.hidden = true;
@@ -383,14 +391,106 @@ export async function init() {
         }
     });
 
+    // ── Projects ──────────────────────────────────────────────────────────────
+    const projListEl = document.getElementById('hist-proj-list');
+
+    function renderProjects(projects) {
+        if (!projListEl) return;
+        if (!projects.length) {
+            projListEl.innerHTML = '<div class="hist-empty">Нет проектов</div>';
+            return;
+        }
+        const eh2 = s => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        const ea2 = s => String(s || '').replace(/"/g, '&quot;');
+        projListEl.innerHTML = projects.map(p => `
+        <div class="hist-row" data-pid="${ea2(p.id)}">
+            <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
+                <span class="hist-name" title="${ea2(p.name)}">${eh2(p.name)}</span>
+                <span style="font-size:10px;color:var(--text-dim)">${p.slide_count || 0} клипов · ${p.total_duration || 0}с</span>
+            </div>
+            <div class="hist-btns">
+                <button class="hist-btn accent" data-paction="open"   title="Открыть в редакторе">${ICONS.edit}</button>
+                <button class="hist-btn"        data-paction="amur"   title="Скачать .amur">${ICONS.download}</button>
+                <button class="hist-btn"        data-paction="rename" title="Переименовать">${ICONS.edit}</button>
+                <button class="hist-btn danger" data-paction="delete" title="Удалить">${ICONS.trash}</button>
+            </div>
+        </div>`).join('');
+    }
+
+    async function refreshProjects() {
+        if (!projListEl) return;
+        skeletonRows(projListEl, 3);
+        try {
+            const data = await getJSON('/api/imgvid/projects');
+            renderProjects(data.projects || []);
+        } catch (_) {
+            if (projListEl) projListEl.innerHTML = '<div class="hist-empty">Ошибка загрузки</div>';
+        }
+    }
+
+    projListEl?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-paction]');
+        if (!btn) return;
+        const row    = btn.closest('.hist-row');
+        const pid    = row?.dataset.pid;
+        const action = btn.dataset.paction;
+        if (!pid) return;
+
+        if (action === 'open') {
+            document.querySelector('[data-tab="imgvid"]')?.click();
+            events.dispatchEvent(new CustomEvent('imgvid-open-project', { detail: { pid } }));
+            return;
+        }
+        if (action === 'amur') {
+            try {
+                const r = await fetch(`/api/imgvid/projects/${pid}/pack`);
+                if (!r.ok) { toast('Ошибка загрузки', 'err'); return; }
+                const blob = await r.blob();
+                const pName = row.querySelector('.hist-name')?.textContent || 'project';
+                const fname = pName.replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
+                const url = URL.createObjectURL(blob);
+                const a = Object.assign(document.createElement('a'), { href: url, download: fname });
+                document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(url);
+                toast('Проект скачан как .amur', 'ok');
+            } catch (e2) { toast(e2.message, 'err'); }
+            return;
+        }
+        if (action === 'rename') {
+            const pName = row.querySelector('.hist-name')?.textContent || '';
+            const newName = await openPrompt({ title: 'Переименовать проект', initial: pName });
+            if (!newName) return;
+            try {
+                await fetch(`/api/imgvid/projects/${pid}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName }),
+                });
+                toast('Проект переименован', 'ok'); log('Проект переименован: ' + newName, 'done');
+                await refreshProjects();
+            } catch (e2) { toast(e2.message, 'err'); }
+            return;
+        }
+        if (action === 'delete') {
+            const ok = await openConfirm({ title: 'Удалить проект', message: 'Удалить этот проект? Медиафайлы не будут удалены.', confirmLabel: 'Удалить' });
+            if (!ok) return;
+            try {
+                await fetch(`/api/imgvid/projects/${pid}`, { method: 'DELETE' });
+                toast('Проект удалён', 'ok'); log('Проект удалён: ' + pid, 'done');
+                await refreshProjects();
+            } catch (e2) { toast(e2.message, 'err'); }
+        }
+    });
+
     // ── Refresh button (обновляет активную секцию) ────────────────────────────
     refreshBtn.addEventListener('click', () => {
         const active = document.querySelector('.hist-type-btn.active');
         const type = active ? active.dataset.htype : 'audio';
-        if (type === 'audio')         refreshAudio();
+        if (type === 'audio')          refreshAudio();
         else if (type === 'subtitles') refreshSRT();
         else if (type === 'video')     refreshVid();
         else if (type === 'templates') refreshTemplates();
+        else if (type === 'projects')  refreshProjects();
     });
 
     events.addEventListener('history-changed',   refreshAudio);
@@ -398,7 +498,7 @@ export async function init() {
     events.addEventListener('video-changed',     refreshVid);
     events.addEventListener('template-changed',  refreshTemplates);
 
-    await Promise.all([refreshAudio(), refreshSRT(), refreshVid(), refreshTemplates()]);
+    await Promise.all([refreshAudio(), refreshSRT(), refreshVid(), refreshTemplates(), refreshProjects()]);
 }
 
 function _applyVisualPreview(el, s) {

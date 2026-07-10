@@ -1,4 +1,4 @@
-import { getJSON, uploadForm, synthesizeStream } from '../api.js';
+import { uploadForm, synthesizeStream, getXttsStatus } from '../api.js';
 import { AudioPlayer } from '../audio-player.js';
 import { audioManager } from '../audio-manager.js';
 import { log, progress } from '../logger.js';
@@ -34,7 +34,7 @@ export async function init() {
         placeholder: 'Выберите язык…',
     });
 
-    getJSON('/api/xtts/status').then(data => {
+    getXttsStatus().then(data => {
         info.textContent = data.status;
         langSel.setOptions(Object.keys(data.languages).map(k => ({ value: k, label: k })));
         if (data.languages['Русский']) langSel.setValue('Русский');

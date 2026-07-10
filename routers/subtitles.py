@@ -2,11 +2,12 @@ import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 from core.schemas import SaveSRTBody, RenameBody
+from core.log import app_log
 
 router = APIRouter(prefix="/api/subtitles", tags=["subtitles"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRT_DIR  = os.path.join(BASE_DIR, ".output", "subtitle")
+SRT_DIR  = os.path.join(BASE_DIR, ".outputs", "subtitle")
 os.makedirs(SRT_DIR, exist_ok=True)
 
 
@@ -30,6 +31,7 @@ def save_srt(body: SaveSRTBody):
         name += ".srt"
     with open(_safe_path(name), "w", encoding="utf-8") as f:
         f.write(body.content)
+    app_log(f"Subtitle file saved: {name}", "INFO", "Subtitles")
     return {"status": f"Сохранено: {name}", "name": name}
 
 
@@ -45,6 +47,7 @@ def rename_srt(name: str, body: RenameBody):
     if os.path.exists(new_path) and old_path != new_path:
         raise HTTPException(400, f"Имя занято: {new_name}")
     os.rename(old_path, new_path)
+    app_log(f"Subtitle renamed: {name} → {new_name}", "INFO", "Subtitles")
     return {"status": f"Переименовано: {name} → {new_name}", "name": new_name}
 
 
@@ -58,7 +61,6 @@ def download_srt(name: str):
 
 @router.get("/{name}/vtt")
 def get_vtt(name: str):
-    """Convert SRT → WebVTT for browser <track> soft-subtitle preview."""
     path = _safe_path(name)
     if not os.path.exists(path):
         raise HTTPException(404, "Файл не найден")
@@ -83,4 +85,5 @@ def delete_srt(name: str):
     if not os.path.exists(path):
         raise HTTPException(404, "Файл не найден")
     os.remove(path)
+    app_log(f"Subtitle deleted: {name}", "INFO", "Subtitles")
     return {"status": f"Удалено: {name}"}

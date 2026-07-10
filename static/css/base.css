@@ -200,3 +200,29 @@ h3 { font-size: 16px; }
     from { opacity: 0; transform: translateY(-6px); }
     to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Subtitle overlay animations */
+@keyframes sub-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+@keyframes sub-fade-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+@keyframes sub-slide-up {
+    from { opacity: 0; margin-top: 20px; }
+    to   { opacity: 1; margin-top: 0; }
+}
+@keyframes sub-slide-down {
+    from { opacity: 0; margin-top: -20px; }
+    to   { opacity: 1; margin-top: 0; }
+}
+@keyframes sub-zoom-in {
+    from { opacity: 0; scale: 0.5; }
+    to   { opacity: 1; scale: 1; }
+}
+@keyframes sub-typewriter {
+    from { clip-path: inset(0 100% 0 0); }
+    to   { clip-path: inset(0 0 0 0); }
+}
