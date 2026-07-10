@@ -116,10 +116,13 @@ def _hex_to_ass(hex_color: str, opacity: int = 100) -> str:
 
 
 def _ass_time(sec: float) -> str:
-    h  = int(sec // 3600)
-    m  = int((sec % 3600) // 60)
-    s  = int(sec % 60)
-    cs = int(round((sec % 1) * 100))
+    sec      = max(0.0, sec)
+    total_cs = int(round(sec * 100))   # avoid per-field rounding overflow
+    cs       = total_cs % 100
+    total_s  = total_cs // 100
+    h        = total_s // 3600
+    m        = (total_s % 3600) // 60
+    s        = total_s % 60
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
@@ -257,6 +260,7 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         extra_h_margin = 0
 
     # ── Width → text-wrap margins ─────────────────────────────────────────────
+    text_wrap = float(frame_w) if frame_w > 0 else 0.0
     margin_l = margin_r = 0
     if frame_w > 0:
         if sub_w_px > 0:
@@ -349,7 +353,7 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
     )
     header = (
-        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\n\n"
+        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\nWrapStyle: 0\n\n"
         f"[V4+ Styles]\n{fmt_line}\n"
         f"Style: {style_line}\n{extra_style}\n"
         "[Events]\n"
@@ -390,6 +394,15 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
             )
             abs_start = s2sec(start_s)
             abs_end   = s2sec(end_s)
+            # Per-event margins so libass respects text_wrap even when \pos is set
+            m_pos_ev = re.search(r'\\pos\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?)\)', ov_block)
+            if m_pos_ev and frame_w > 0 and text_wrap > 0:
+                epx     = float(m_pos_ev.group(1))
+                half_tw = text_wrap / 2
+                ev_ml   = max(0, int(epx - half_tw)) + int(extra_h_margin)
+                ev_mr   = max(0, int(frame_w - epx - half_tw)) + int(extra_h_margin)
+            else:
+                ev_ml, ev_mr = margin_l, margin_r
             if karaoke_on and karaoke_mode == "word":
                 words = [w for w in re.split(r'(?:\\N|\s)+', text) if w]
                 n = max(1, len(words))
@@ -411,9 +424,9 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                         ktext = "{\\1c" + karaoke_color_ass + "}" + current
                     ws0 = _ass_time(wt0)
                     ws1 = _ass_time(wt1)
-                    events.append(f"Dialogue: 0,{ws0},{ws1},Default,,0,0,0,,{ov_block}{ktext}")
+                    events.append(f"Dialogue: 0,{ws0},{ws1},Default,,{ev_ml},{ev_mr},0,,{ov_block}{ktext}")
                     if has_text_outline:
-                        events.append(f"Dialogue: 1,{ws0},{ws1},TextOutline,,0,0,0,,{ov_block}{ktext}")
+                        events.append(f"Dialogue: 1,{ws0},{ws1},TextOutline,,{ev_ml},{ev_mr},0,,{ov_block}{ktext}")
             else:
                 if karaoke_on:  # cumulative: \k tags
                     dur   = abs_end - abs_start
@@ -423,10 +436,10 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
                         text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
                 t0 = _ass_time(abs_start)
                 t1 = _ass_time(abs_end)
-                events.append(f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{ov_block}{text}")
+                events.append(f"Dialogue: 0,{t0},{t1},Default,,{ev_ml},{ev_mr},0,,{ov_block}{text}")
                 if has_text_outline:
                     # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
-                    events.append(f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{ov_block}{text}")
+                    events.append(f"Dialogue: 1,{t0},{t1},TextOutline,,{ev_ml},{ev_mr},0,,{ov_block}{text}")
         except Exception:
             continue
 
@@ -578,14 +591,6 @@ def burn_subtitles(
                 q.put(("progress", 0.08, "Анализ видео…"))
                 fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
                          else _probe_dimensions(tmp_in)
-
-                # Scale CSS-pixel UI values → video-space pixels so sizes match the preview
-                if preview_width > 0 and fw > 0:
-                    px_scale = fw / preview_width
-                    style_dict["FontSize"] = max(1, round(float(style_dict["FontSize"]) * px_scale))
-                    for _k in ("PadX", "PadY", "Outline", "Shadow", "TextOutlineSize"):
-                        if _k in style_dict:
-                            style_dict[_k] = float(style_dict[_k]) * px_scale
 
                 # Build optional position override tag
                 pos_tag = ""

@@ -503,10 +503,13 @@ async def get_output(name: str):
 # ── Export SSE ────────────────────────────────────────────────────────────────
 
 def _ass_time(sec: float) -> str:
-    h  = int(sec // 3600)
-    m  = int((sec % 3600) // 60)
-    s  = int(sec % 60)
-    cs = int((sec % 1) * 100)
+    sec      = max(0.0, sec)
+    total_cs = int(round(sec * 100))
+    cs       = total_cs % 100
+    total_s  = total_cs // 100
+    h        = total_s // 3600
+    m        = (total_s % 3600) // 60
+    s        = total_s % 60
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
@@ -550,6 +553,13 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         y_pct     = float(sub.get("y", 88))
         px        = int(width  * x_pct / 100)
         py        = int(height * y_pct / 100)
+        # Compute per-event margins to replicate the preview width constraint.
+        # Preview uses max-width:90% by default (w=0) or sub.w% when set.
+        # ASS wraps text at PlayResX - MarginL - MarginR, centered at \pos(px,py).
+        w_pct     = float(sub.get("w", 0))
+        half_w_px = (w_pct / 200.0 * width) if w_pct > 0 else (0.45 * width)
+        margin_l  = max(0, int(px - half_w_px))
+        margin_r  = max(0, int(width - px - half_w_px))
         anim      = sub.get("animation", "none") or "none"
         anim_dur  = float(sub.get("animDuration", 0.6))
         anim_ms   = int(anim_dur * 1000)
@@ -597,9 +607,22 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
             n = max(1, len(words))
             word_dur = (abs_end - abs_start) / n
             kmode = sub.get("karaokeMode", "word")
+            # Work in integer centiseconds to avoid float rounding producing
+            # zero-duration events (which causes the last word to vanish).
+            abs_start_cs = int(round(abs_start * 100))
+            abs_end_cs   = int(round(abs_end   * 100))
             for stage in range(n):
-                t0 = abs_start + stage * word_dur
-                t1 = abs_start + (stage + 1) * word_dur if stage < n - 1 else abs_end
+                t0_cs = abs_start_cs + int(round(stage * word_dur * 100))
+                t1_cs = (abs_start_cs + int(round((stage + 1) * word_dur * 100))
+                         if stage < n - 1 else abs_end_cs)
+                # Clamp so the last word always ends at abs_end
+                t1_cs = min(t1_cs, abs_end_cs)
+                if t0_cs >= t1_cs:
+                    t0_cs = max(abs_start_cs, t1_cs - 1)
+                if t0_cs >= t1_cs:
+                    continue
+                t0 = t0_cs / 100.0
+                t1 = t1_cs / 100.0
                 if kmode == "cumulative":
                     # All words up to and including current word highlighted
                     highlighted = " ".join(words[:stage + 1])
@@ -622,24 +645,24 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
                     else:
                         ktext = "{\\1c" + ass_kc + "}" + current
                 tags = "{" + base + "}"
-                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,0,0,0,,{tags}{ktext}")
+                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(t1)},Default,,{margin_l},{margin_r},0,,{tags}{ktext}")
 
         elif anim == "fade-in":
             tags = "{" + base + f"\\fad({anim_ms},0)" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
 
         elif anim == "fade-out":
             tags = "{" + base + f"\\fad(0,{anim_ms})" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
 
         elif anim in ("slide-up", "slide-down"):
             dy   = 30 if anim == "slide-up" else -30
             tags = "{" + base.replace(f"\\pos({px},{py})", "") + f"\\fad({half_ms},{half_ms})\\move({px},{py + dy},{px},{py},0,{anim_ms})" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
 
         elif anim == "zoom-in":
             tags = "{" + base + f"\\fscx5\\fscy5\\t(0,{anim_ms},\\fscx100\\fscy100)" + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
 
         elif anim == "typewriter":
             # Character-by-character reveal: generate one event per step
@@ -667,13 +690,13 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
                 t0 = abs_start + (char_count - 1) * char_dur if ch != "\\N" else abs_start
                 t1 = (abs_start + char_count * char_dur) if step < len(visible) - 1 else abs_end
                 partial = "".join(shown)
-                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(min(t1, abs_end))},Default,,0,0,0,,"
+                lines.append(f"Dialogue: 0,{_ass_time(t0)},{_ass_time(min(t1, abs_end))},Default,,{margin_l},{margin_r},0,,"
                              f"{tags_base}{partial}")
 
         else:
             # No animation or unknown
             tags = "{" + base + "}"
-            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,0,0,0,,{tags}{raw_text}")
+            lines.append(f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},Default,,{margin_l},{margin_r},0,,{tags}{raw_text}")
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

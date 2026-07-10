@@ -910,6 +910,12 @@ export async function init() {
 
     // ── Style application ─────────────────────────────────────────────────────
     function applySubStyle(sub = null) {
+        // All size inputs are in video-native pixels (same coordinate space as the ASS export).
+        // Scale them down to CSS px so the preview matches the exported video exactly.
+        const scale = (videoNatH > 0 && vidInner.clientHeight > 0)
+            ? vidInner.clientHeight / videoNatH
+            : 1;
+
         const fontSize     = parseFloat(fontSizeN ? fontSizeN.value : fontSizeR.value) || 24;
         const fontFamily   = fontFamilyEl.value;
         const textColor    = colorEl.value;
@@ -920,9 +926,9 @@ export async function init() {
         const textAlign    = sub?.align ?? (activeAlign?.dataset.align || 'center');
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
-        const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
-        const padY         = parseFloat(bgPadYEl ? bgPadYEl.value : 6)  || 0;
-        const bgRadius     = parseFloat(bgRadiusEl ? bgRadiusEl.value : 4) || 4;
+        const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 30) || 0;
+        const padY         = parseFloat(bgPadYEl ? bgPadYEl.value : 15) || 0;
+        const bgRadius     = parseFloat(bgRadiusEl ? bgRadiusEl.value : 10) || 10;
         const outlineSize  = parseFloat(outlineSizeN ? outlineSizeN.value : outlineSizeR.value) || 0;
         const outlineColor = outlineColorEl.value;
         const shadowSize   = parseFloat(shadowSizeN ? shadowSizeN.value : shadowSizeR.value) || 0;
@@ -933,7 +939,7 @@ export async function init() {
         const subW         = parseFloat(subWidthEl ? subWidthEl.value : 0) || 0;
         const subH         = parseFloat(subHeightEl ? subHeightEl.value : 0) || 0;
 
-        overlay.style.fontSize        = fontSize + 'px';
+        overlay.style.fontSize        = (fontSize * scale) + 'px';
         overlay.style.fontFamily      = `"${fontFamily}", sans-serif`;
         overlay.style.color           = textColor;
         overlay.style.fontWeight      = bold      ? '700'       : '400';
@@ -942,7 +948,7 @@ export async function init() {
         overlay.style.textAlign       = textAlign;
         overlay.style.lineHeight      = lineH;
         overlay.style.wordSpacing     = '0.4em';
-        overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
+        overlay.style.textShadow      = makeTextShadow(outlineSize * scale, outlineColor, shadowSize * scale, shadowColor);
         const hasText = overlay.textContent.trim() !== '';
         overlay.style.cursor          = hasText ? 'move' : 'default';
         overlay.style.pointerEvents   = hasText ? 'auto' : 'none';
@@ -972,8 +978,8 @@ export async function init() {
         // Background — only visible when overlay has text
         const hasContent = overlay.textContent.trim() !== '';
         overlay.style.backgroundColor = (bgOpacity > 0 && hasContent) ? hexToRgba(bgColor, bgOpacity) : 'transparent';
-        overlay.style.padding         = (bgOpacity > 0 && hasContent) ? `${padY}px ${padX}px` : '0';
-        overlay.style.borderRadius    = (bgOpacity > 0 && hasContent) ? bgRadius + 'px' : '0';
+        overlay.style.padding         = (bgOpacity > 0 && hasContent) ? `${padY * scale}px ${padX * scale}px` : '0';
+        overlay.style.borderRadius    = (bgOpacity > 0 && hasContent) ? (bgRadius * scale) + 'px' : '0';
 
         // Translate marginV (video px) → overlay % for preview approximation
         const marginVPct = videoNatH > 0 ? (marginV / videoNatH * 100) : 2;
@@ -1340,7 +1346,7 @@ export async function init() {
         const g = id => document.getElementById(id);
         const settings = {
             fontFamily:     (g('vid-font-family')    || {}).value   || 'Arial',
-            fontSize:       (g('vid-font-size-n')    || {}).value   || '24',
+            fontSize:       (g('vid-font-size-n')    || {}).value   || '52',
             fontColor:      (g('vid-font-color')     || {}).value   || '#ffffff',
             bold:           g('vid-bold')?.classList.contains('active')       || false,
             italic:         g('vid-italic')?.classList.contains('active')     || false,
@@ -1353,16 +1359,16 @@ export async function init() {
             subHeight:      (g('vid-sub-height')     || {}).value   || '',
             bgOpacity:      (g('vid-bg-opacity-n')   || {}).value   || '50',
             bgColor:        (g('vid-bg-color')       || {}).value   || '#000000',
-            bgPadX:         (g('vid-bg-pad-x')       || {}).value   || '12',
-            bgPadY:         (g('vid-bg-pad-y')       || {}).value   || '6',
-            bgRadius:       (g('vid-bg-radius')      || {}).value   || '4',
-            outlineSize:    (g('vid-outline-size-n') || {}).value   || '1',
+            bgPadX:         (g('vid-bg-pad-x')       || {}).value   || '30',
+            bgPadY:         (g('vid-bg-pad-y')       || {}).value   || '15',
+            bgRadius:       (g('vid-bg-radius')      || {}).value   || '10',
+            outlineSize:    (g('vid-outline-size-n') || {}).value   || '3',
             outlineColor:   (g('vid-outline-color')  || {}).value   || '#000000',
             shadowSize:     (g('vid-shadow-size-n')  || {}).value   || '0',
             shadowColor:    (g('vid-shadow-color')   || {}).value   || '#000000',
             lineHeight:     (g('vid-line-height')    || {}).value   || '1.35',
             maxWidth:       (g('vid-max-width')      || {}).value   || '90',
-            marginV:        (g('vid-margin-v')       || {}).value   || '10',
+            marginV:        (g('vid-margin-v')       || {}).value   || '30',
             karaokeColor:   (g('vid-karaoke-color')  || {}).value   || '#ffdd00',
             karaokeEnabled: (g('vid-karaoke-enable') || {}).checked || false,
             karaokeMode:    (g('vid-karaoke-mode')   || {}).value   || 'word',
