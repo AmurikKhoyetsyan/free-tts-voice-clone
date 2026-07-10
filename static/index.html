@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="/static/css/file-upload.css">
     <link rel="stylesheet" href="/static/css/loader.css">
     <link rel="stylesheet" href="/static/css/subtitles.css">
+    <link rel="stylesheet" href="/static/css/image-video.css">
     <style>
         .logs-layout {
             display: flex;
@@ -95,6 +96,7 @@
         <button class="tab" data-tab="subtitles">Субтитры</button>
         <button class="tab" data-tab="video">Видео</button>
         <button class="tab" data-tab="logs">Логи</button>
+        <button class="tab" data-tab="imgvid">Image Video</button>
     </nav>
 
     <main class="app-main">
@@ -230,6 +232,7 @@
                     <button class="hist-type-btn" data-htype="subtitles">Субтитры</button>
                     <button class="hist-type-btn" data-htype="video">Видео</button>
                     <button class="hist-type-btn" data-htype="templates">Шаблоны</button>
+                    <button class="hist-type-btn" data-htype="projects">Проекты</button>
                 </div>
                 <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
             </div>
@@ -305,6 +308,11 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Projects (.amur) -->
+            <div class="hist-section" id="hist-section-projects" hidden>
+                <div id="hist-proj-list" class="hist-list"></div>
             </div>
         </section>
 
@@ -459,8 +467,8 @@
                                 <label class="vsp-field">
                                     <span>Размер, px</span>
                                     <div class="rn-combo">
-                                        <input type="range" id="vid-font-size" min="8" max="96" step="1" value="24">
-                                        <input type="number" id="vid-font-size-n" value="24" min="1" class="vsp-num">
+                                        <input type="range" id="vid-font-size" min="8" max="200" step="1" value="52">
+                                        <input type="number" id="vid-font-size-n" value="52" min="1" class="vsp-num">
                                     </div>
                                 </label>
                                 <label class="vsp-field vsp-inline">
@@ -555,15 +563,15 @@
                                 </label>
                                 <label class="vsp-field">
                                     <span>Отступ гориз., px</span>
-                                    <input type="number" id="vid-bg-pad-x" value="12" min="0" class="vsp-num">
+                                    <input type="number" id="vid-bg-pad-x" value="30" min="0" class="vsp-num">
                                 </label>
                                 <label class="vsp-field">
                                     <span>Отступ верт., px</span>
-                                    <input type="number" id="vid-bg-pad-y" value="6" min="0" class="vsp-num">
+                                    <input type="number" id="vid-bg-pad-y" value="15" min="0" class="vsp-num">
                                 </label>
                                 <label class="vsp-field">
                                     <span>Радиус, px</span>
-                                    <input type="number" id="vid-bg-radius" value="4" min="0" class="vsp-num">
+                                    <input type="number" id="vid-bg-radius" value="10" min="0" class="vsp-num">
                                 </label>
                             </div>
                         </div>
@@ -574,8 +582,8 @@
                                 <label class="vsp-field">
                                     <span>Обводка, px</span>
                                     <div class="rn-combo">
-                                        <input type="range" id="vid-outline-size" min="0" max="10" step="0.5" value="1">
-                                        <input type="number" id="vid-outline-size-n" value="1" min="0" step="0.5"
+                                        <input type="range" id="vid-outline-size" min="0" max="30" step="1" value="3">
+                                        <input type="number" id="vid-outline-size-n" value="3" min="0" step="1"
                                                class="vsp-num">
                                     </div>
                                 </label>
@@ -586,8 +594,8 @@
                                 <label class="vsp-field">
                                     <span>Тень, px</span>
                                     <div class="rn-combo">
-                                        <input type="range" id="vid-shadow-size" min="0" max="15" step="0.5" value="0">
-                                        <input type="number" id="vid-shadow-size-n" value="0" min="0" step="0.5"
+                                        <input type="range" id="vid-shadow-size" min="0" max="50" step="1" value="0">
+                                        <input type="number" id="vid-shadow-size-n" value="0" min="0" step="1"
                                                class="vsp-num">
                                     </div>
                                 </label>
@@ -630,13 +638,20 @@
                                     <span>Подсветка</span>
                                 </label>
                                 <label class="vsp-field">
+                                    <span>Режим подсветки</span>
+                                    <select id="vid-karaoke-mode" style="font-size:12px">
+                                        <option value="word">Только слово</option>
+                                        <option value="cumulative">Накопительно</option>
+                                    </select>
+                                </label>
+                                <label class="vsp-field">
                                     <span>Межстрочный</span>
                                     <input type="number" id="vid-line-height" value="1.35" min="0.5" step="0.05"
                                            class="vsp-num">
                                 </label>
                                 <label class="vsp-field">
                                     <span>Отступ от края, px</span>
-                                    <input type="number" id="vid-margin-v" value="10" min="0" class="vsp-num">
+                                    <input type="number" id="vid-margin-v" value="30" min="0" class="vsp-num">
                                 </label>
                             </div>
                         </div>
@@ -755,6 +770,203 @@
             </div>
         </section>
 
+        <!-- ══════════════ Image Video Editor ══════════════ -->
+        <section class="tab-panel" data-panel="imgvid">
+            <div class="ive-layout">
+
+                <!-- Left sidebar -->
+                <aside class="ive-sidebar">
+                    <div class="ive-sidebar-inner">
+
+                        <!-- Projects -->
+                        <div class="ive-panel">
+                            <div class="ive-panel-hdr">
+                                <span>Проекты</span>
+                                <button class="btn btn-sm" id="ive-new-btn">+ Новый</button>
+                            </div>
+                            <div id="ive-projects-list" class="ive-projects-list"></div>
+                        </div>
+
+                        <!-- Media library -->
+                        <div class="ive-panel">
+                            <div class="ive-panel-hdr">
+                                <span>Медиа</span>
+                                <div style="display:flex;gap:3px">
+                                    <button class="btn btn-sm" id="ive-add-images-btn" title="Добавить фото">🖼</button>
+                                    <button class="btn btn-sm" id="ive-add-video-btn"  title="Добавить видео">🎬</button>
+                                    <button class="btn btn-sm" id="ive-add-audio-btn"  title="Добавить аудио">♪</button>
+                                    <button class="btn btn-sm" id="ive-add-pip-btn"   title="Добавить PIP слой">PIP</button>
+                                </div>
+                            </div>
+                            <input type="file" id="ive-image-input" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple hidden>
+                            <input type="file" id="ive-video-input" accept=".mp4,.mov,.mkv,.webm,.avi" multiple hidden>
+                            <input type="file" id="ive-audio-input" accept=".mp3,.wav,.aac,.flac,.ogg" hidden>
+                            <input type="file" id="ive-pip-input" accept=".jpg,.jpeg,.png,.webp,.bmp,.mp4,.mov,.mkv,.webm,.avi" hidden>
+                            <div id="ive-media-list" class="ive-media-list"></div>
+                            <div class="ive-global-dur-row">
+                                <label style="flex:1;font-size:11px">Длит. (с)</label>
+                                <input class="ive-input" type="number" id="ive-global-dur" min="0.5" max="60" step="0.5" value="3" style="width:52px">
+                                <button class="btn btn-sm" id="ive-apply-dur-btn">↻</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </aside>
+
+                <!-- Center: preview + timeline + export -->
+                <div class="ive-main">
+
+                    <!-- Preview -->
+                    <div class="ive-preview-wrap">
+                        <div class="ive-preview-inner" id="ive-preview-inner">
+                            <!-- Next-clip layer for CSS transition preview (behind main layer) -->
+                            <div id="ive-preview-content-next" class="ive-preview-content" style="display:none;position:absolute;z-index:1">
+                                <img   id="ive-preview-img-next"   style="display:none" alt="">
+                                <video id="ive-preview-video-next" style="display:none" muted playsinline></video>
+                            </div>
+                            <!-- Solid-color overlay for fadeblack/fadewhite transitions -->
+                            <div id="ive-trans-overlay" style="display:none;position:absolute;z-index:9;pointer-events:none;background:#000;"></div>
+                            <!-- Zoom-able content layer -->
+                            <div id="ive-preview-content" class="ive-preview-content" style="position:relative;z-index:2">
+                                <img    id="ive-preview-img"   style="display:none" alt="">
+                                <video  id="ive-preview-video" style="display:none" muted playsinline></video>
+                            </div>
+                            <!-- Subtitle container — always above transitions, outside preview-content -->
+                            <div id="ive-sub-container" style="display:none;position:absolute;z-index:20;pointer-events:none">
+                                <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
+                            </div>
+                            <div class="ive-preview-empty" id="ive-preview-empty">
+                                <div>Добавьте медиафайлы</div>
+                                <div style="font-size:11px;opacity:.45;margin-top:4px">или перетащите сюда</div>
+                            </div>
+                        </div>
+                        <!-- Professional transport bar -->
+                        <div class="ive-transport-bar">
+                            <div class="ive-transport-btns">
+                                <button class="ive-tb-btn" id="ive-go-start"   title="К началу (Home)"></button>
+                                <button class="ive-tb-btn" id="ive-rewind-btn" title="−5с (J)"></button>
+                                <button class="ive-tb-btn ive-tb-play" id="ive-playpause-btn" title="Воспроизведение / Пауза (Space)"></button>
+                                <button class="ive-tb-btn ive-tb-stop"  id="ive-stop-btn"  title="Стоп"></button>
+                                <button class="ive-tb-btn" id="ive-fwd-btn"    title="+5с (L)"></button>
+                                <button class="ive-tb-btn" id="ive-go-end"     title="К концу (End)"></button>
+                            </div>
+                            <input type="range" class="ive-seek-bar" id="ive-seek-bar" min="0" max="10000" step="1" value="0">
+                            <div class="ive-time-group">
+                                <span class="ive-cur-time" id="ive-cur-time">0:00.0</span>
+                                <span class="ive-time-sep">/</span>
+                                <span class="ive-tot-time" id="ive-tot-time">0:00.0</span>
+                            </div>
+                            <div class="ive-zoom-group">
+                                <select class="ive-zoom-mode-sel" id="ive-zoom-mode">
+                                    <option value="fit">Fit</option>
+                                    <option value="original">100%</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <span class="ive-zoom-display" id="ive-zoom-display">Fit</span>
+                                <input type="number" class="ive-zoom-pct-input" id="ive-zoom-pct" min="10" max="800" step="5" value="100" style="display:none">
+                                <span class="ive-zoom-pct-sign" id="ive-zoom-sign" style="display:none">%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Multi-track Timeline -->
+                    <div class="ive-timeline-wrap">
+                        <div class="ive-timeline-hdr">
+                            <span style="font-size:11px;color:var(--text-dim)">Timeline</span>
+                            <div style="display:flex;align-items:center;gap:8px">
+                                <span style="font-size:10px;color:var(--text-dim)">Ctrl+↕ = зум</span>
+                                <span id="ive-total-dur" style="color:var(--accent);font-size:11px">0.0с</span>
+                            </div>
+                        </div>
+                        <div class="ive-timeline-outer">
+                            <!-- Fixed labels column -->
+                            <div class="ive-track-labels-col" id="ive-track-labels-col">
+                                <div class="ive-ruler-lbl-space"></div>
+                                <div class="ive-track-lbl" id="ive-video-lbl">VIDEO</div>
+                                <div class="ive-track-lbl" id="ive-audio-lbl">AUDIO</div>
+                                <div class="ive-track-lbl" id="ive-subs-lbl">SUBS</div>
+                                <div class="ive-track-lbl" id="ive-pip-lbl">PIP</div>
+                            </div>
+                            <!-- Scrollable track area -->
+                            <div class="ive-tracks-scroll" id="ive-tracks-scroll">
+                                <div class="ive-tracks-inner" id="ive-tracks-inner">
+                                    <div class="ive-time-ruler" id="ive-time-ruler"></div>
+                                    <div class="ive-track-row ive-video-row" id="ive-video-track"></div>
+                                    <div class="ive-audio-rows"  id="ive-audio-track"></div>
+                                    <div class="ive-track-row ive-subs-row"  id="ive-subtitle-track"></div>
+                                    <div class="ive-track-row ive-pip-row"   id="ive-pip-track"></div>
+                                    <div class="ive-playhead" id="ive-playhead" style="display:none"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Export bar -->
+                    <div class="ive-export-bar">
+                        <div class="ive-project-name-wrap">
+                            <input class="ive-input" type="text" id="ive-project-name" placeholder="Название проекта" value="Новый проект">
+                            <button class="btn" id="ive-save-btn">Сохранить</button>
+                            <button class="btn btn-sm" id="ive-save-amur-btn" title="Сохранить проект как .project">⬇ .project</button>
+                            <button class="btn btn-sm" id="ive-open-amur-btn" title="Открыть .project проект">↑ .project</button>
+                        </div>
+                        <div class="ive-export-settings">
+                            <select class="ive-select" id="ive-exp-format">
+                                <option value="mp4">MP4 (H.264)</option>
+                                <option value="mov">MOV</option>
+                                <option value="mkv">MKV</option>
+                                <option value="webm">WebM</option>
+                            </select>
+                            <select class="ive-select" id="ive-exp-res">
+                                <option value="1920x1080">YouTube (1920×1080)</option>
+                                <option value="1280x720">HD (1280×720)</option>
+                                <option value="1080x1920">TikTok / Reels / Shorts (1080×1920)</option>
+                                <option value="1080x1080">Instagram Post (1080×1080)</option>
+                                <option value="3840x2160">4K (3840×2160)</option>
+                                <option value="custom">Своё разрешение…</option>
+                            </select>
+                            <input class="ive-input" type="number" id="ive-exp-res-w" placeholder="Ш" title="Ширина" style="display:none;width:64px" min="1" max="7680">
+                            <span id="ive-exp-res-x" style="display:none;color:var(--text-dim)">×</span>
+                            <input class="ive-input" type="number" id="ive-exp-res-h" placeholder="В" title="Высота" style="display:none;width:64px" min="1" max="7680">
+                            <select class="ive-select" id="ive-exp-fps">
+                                <option value="24">24 fps</option>
+                                <option value="30" selected>30 fps</option>
+                                <option value="60">60 fps</option>
+                            </select>
+                            <select class="ive-select" id="ive-exp-quality">
+                                <option value="low">Низкое</option>
+                                <option value="medium" selected>Среднее</option>
+                                <option value="high">Высокое</option>
+                            </select>
+                            <button class="btn accent" id="ive-export-btn">▶ Экспорт</button>
+                        </div>
+                        <div id="ive-export-progress" hidden>
+                            <div class="ive-export-progress">
+                                <div class="vid-progress-bar" style="position:relative;flex:1">
+                                    <div class="vid-progress-fill" id="ive-prog-fill"></div>
+                                    <span id="ive-prog-pct" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-dim)">0%</span>
+                                </div>
+                                <span class="status" id="ive-export-status"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Right: properties -->
+                <aside class="ive-props" id="ive-props">
+                    <div class="ive-props-tabs">
+                        <button class="ive-ptab active" data-ptab="slide">Клип</button>
+                        <button class="ive-ptab" data-ptab="subs">Субтитры</button>
+                        <button class="ive-ptab" data-ptab="effects">Эффекты</button>
+                    </div>
+                    <div id="ive-props-body" class="ive-props-body">
+                        <div class="ive-props-placeholder">Выберите клип</div>
+                    </div>
+                </aside>
+
+            </div>
+        </section>
+
     </main>
 
 </div><!-- /.app-body -->
@@ -780,6 +992,28 @@
         <div class="modal-actions">
             <button class="btn" data-modal-close>Отмена</button>
             <button class="btn btn-primary" id="modal-rename-confirm">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="modal-amur" hidden>
+    <div class="modal-box" style="max-width:520px">
+        <h3 id="modal-amur-title">Файл .project</h3>
+        <div style="display:flex;gap:6px;margin-top:14px;align-items:center">
+            <input type="text" id="modal-amur-dir" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px" placeholder="Папка">
+            <button class="btn btn-sm" id="modal-amur-dir-go" title="Перейти в папку">→</button>
+        </div>
+        <div id="modal-amur-filename-row" style="margin-top:8px">
+            <input type="text" id="modal-amur-filename" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box" placeholder="Имя файла (.project)">
+        </div>
+        <div id="modal-amur-files" style="margin-top:8px;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)"></div>
+        <div id="modal-amur-upload-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Или загрузить с компьютера:</div>
+            <input type="file" id="modal-amur-upload-input" accept=".project">
+        </div>
+        <div class="modal-actions">
+            <button class="btn" id="modal-amur-cancel">Отмена</button>
+            <button class="btn btn-primary" id="modal-amur-ok">Сохранить</button>
         </div>
     </div>
 </div>

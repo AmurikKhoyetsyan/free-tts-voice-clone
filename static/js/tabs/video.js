@@ -51,6 +51,7 @@ export async function init() {
 
     const karaokeColorEl = document.getElementById('vid-karaoke-color');
     const karaokeEnEl    = document.getElementById('vid-karaoke-enable');
+    const karaokeModeEl  = document.getElementById('vid-karaoke-mode');
     const lineHeightEl   = document.getElementById('vid-line-height');
     const maxWidthEl     = document.getElementById('vid-max-width');
     const marginVEl      = document.getElementById('vid-margin-v');
@@ -95,6 +96,7 @@ export async function init() {
     let processedVideoUrl  = null;
     let processedVideoName = null;
     let _processing        = false;
+    let _lastSubStart      = -1;
 
     // ── FFmpeg check ──────────────────────────────────────────────────────────
     try {
@@ -126,7 +128,7 @@ export async function init() {
 
     // Other controls → live preview
     [fontFamilyEl, colorEl, bgColorEl, bgPadXEl, bgPadYEl, bgRadiusEl,
-     outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl,
+     outlineColorEl, shadowColorEl, karaokeColorEl, karaokeEnEl, karaokeModeEl,
      lineHeightEl, maxWidthEl, marginVEl, subWidthEl, subHeightEl]
         .forEach(el => el && el.addEventListener('change', applySubStyle));
 
@@ -517,6 +519,17 @@ export async function init() {
         fd.append('preview_width', String(Math.round(vidInner.offsetWidth)));
         fd.append('karaoke_enabled', String(karaokeEnEl ? karaokeEnEl.checked : false));
         fd.append('karaoke_color',   karaokeColorEl ? karaokeColorEl.value.replace('#', '') : 'ffdd00');
+        fd.append('karaoke_mode',    karaokeModeEl ? karaokeModeEl.value : 'word');
+
+        // Per-subtitle animation data (index → animation type + duration)
+        if (currentSubs && currentSubs.length > 0) {
+            const animData = currentSubs.map((s, i) => ({
+                index: i + 1,
+                animation: s.animation || 'none',
+                animDuration: s.animDuration || 0.6,
+            }));
+            fd.append('subs_json', JSON.stringify(animData));
+        }
 
         await synthesizeStream(
             '/api/video/burn',
@@ -642,6 +655,8 @@ export async function init() {
             return;
         }
 
+        const animOpts = ['none','fade-in','slide-up','slide-down','typewriter','zoom-in'];
+
         subEditorEl.innerHTML = mkAdd(-1) + subs.map((s, i) => `
             <div class="sub-row${selectedSubIdx === i ? ' sub-row-selected' : ''}" data-index="${i}">
                 <div>
@@ -657,6 +672,17 @@ export async function init() {
                     <button class="sub-del-btn" title="Удалить">${ICONS.trash}</button>
                 </div>
                 <textarea class="sub-row-text" rows="2">${escHtml(s.text)}</textarea>
+                <div class="sub-row-style">
+                    <button class="sub-style-btn${s.bold      ? ' active':''}" data-sub-style="bold"      data-si="${i}" title="Жирный"><b>B</b></button>
+                    <button class="sub-style-btn${s.italic    ? ' active':''}" data-sub-style="italic"    data-si="${i}" title="Курсив"><i>I</i></button>
+                    <button class="sub-style-btn${s.underline ? ' active':''}" data-sub-style="underline" data-si="${i}" title="Подчёркнутый"><u>U</u></button>
+                    <select class="sub-anim-sel" data-sub-field="animation" data-si="${i}" title="Анимация">
+                        ${animOpts.map(a => `<option value="${a}"${(s.animation||'none')===a?' selected':''}>${a}</option>`).join('')}
+                    </select>
+                    <input class="sub-pos-inp" type="number" data-sub-field="animDuration" data-si="${i}" placeholder="Длит. аним. (с)" title="Длительность анимации (с)" min="0.1" max="10" step="0.1" value="${(s.animDuration || 0.6).toFixed(1)}" style="width:70px">
+                    <input class="sub-pos-inp" type="number" data-sub-field="posX" data-si="${i}" placeholder="X px" title="X позиция (пкс, пусто=авто)" value="${s.posX != null ? s.posX : ''}">
+                    <input class="sub-pos-inp" type="number" data-sub-field="posY" data-si="${i}" placeholder="Y px" title="Y позиция (пкс, пусто=авто)" value="${s.posY != null ? s.posY : ''}">
+                </div>
             </div>
             ${mkAdd(i)}
         `).join('');
@@ -750,7 +776,35 @@ export async function init() {
     }
 
     // ── Video sub editor delegation (set up once) ─────────────────────────────
+    subEditorEl.addEventListener('change', e => {
+        const el = e.target;
+        const si = el.dataset.si != null ? parseInt(el.dataset.si) : -1;
+        if (si < 0 || !currentSubs?.[si]) return;
+        const field = el.dataset.subField;
+        if (!field) return;
+        if (el.type === 'number') {
+            const v = el.value.trim();
+            currentSubs[si][field] = v === '' ? null : (parseFloat(v) || 0);
+        } else {
+            currentSubs[si][field] = el.value;
+        }
+        updateOverlay();
+        processedVideoUrl = null; updateDownloadBtn();
+    });
+
     subEditorEl.addEventListener('click', e => {
+        const styleBtn = e.target.closest('.sub-style-btn[data-sub-style]');
+        if (styleBtn) {
+            const si  = parseInt(styleBtn.dataset.si);
+            const key = styleBtn.dataset.subStyle;
+            if (!currentSubs?.[si]) return;
+            currentSubs[si][key] = !currentSubs[si][key];
+            styleBtn.classList.toggle('active', currentSubs[si][key]);
+            updateOverlay();
+            processedVideoUrl = null; updateDownloadBtn();
+            return;
+        }
+
         const delBtn = e.target.closest('.sub-del-btn');
         if (delBtn) {
             const row = delBtn.closest('.sub-row');
@@ -774,7 +828,7 @@ export async function init() {
                 ? Math.max(newStart + 0.1, Math.min(newStart + 2, next.start - 0.05))
                 : newStart + 2;
             currentSubs.splice(afterIdx + 1, 0, {
-                index: 0, start: newStart, end: Math.max(newStart + 0.1, newEnd), text: '',
+                index: 0, start: newStart, end: Math.max(newStart + 0.1, newEnd), text: '', animation: 'none', animDuration: 0.6,
             });
             currentSubs.forEach((s, j) => { s.index = j + 1; });
             selectedSubIdx = afterIdx + 1;
@@ -805,18 +859,21 @@ export async function init() {
 
         const karaokeOn    = karaokeEnEl && karaokeEnEl.checked;
         const karaokeColor = karaokeColorEl ? karaokeColorEl.value : '#ffdd00';
+        const karaokeMode  = karaokeModeEl ? karaokeModeEl.value : 'word';
 
         if (karaokeOn && sub.end > sub.start) {
-            const wordArr = sub.text.split(/\s+/);
-            const elapsed = vidPreview.currentTime - sub.start;
-            const spoken  = Math.min(wordArr.length,
-                Math.floor(wordArr.length * elapsed / (sub.end - sub.start) + 0.5));
-            const tokens  = sub.text.split(/(\s+)/);
+            const wordArr  = sub.text.split(/\s+/).filter(Boolean);
+            const elapsed  = vidPreview.currentTime - sub.start;
+            const subDur   = sub.end - sub.start;
+            const wordIdx  = Math.min(wordArr.length - 1, Math.floor(wordArr.length * elapsed / subDur));
+            const tokens   = sub.text.split(/(\s+)/);
             let wi = 0;
             const html = tokens.map(tok => {
                 if (/^\s+$/.test(tok)) return tok;
+                const idx = wi++;
                 const esc = escHtml(tok);
-                return wi++ < spoken
+                const highlight = karaokeMode === 'cumulative' ? idx <= wordIdx : idx === wordIdx;
+                return highlight
                     ? `<span style="color:${karaokeColor}">${esc}</span>`
                     : esc;
             }).join('');
@@ -824,7 +881,7 @@ export async function init() {
         } else {
             overlay.textContent = sub.text;
         }
-        applySubStyle();
+        applySubStyle(sub);
     }
 
     function formatTimestamp(t) {
@@ -852,20 +909,26 @@ export async function init() {
     }
 
     // ── Style application ─────────────────────────────────────────────────────
-    function applySubStyle() {
+    function applySubStyle(sub = null) {
+        // All size inputs are in video-native pixels (same coordinate space as the ASS export).
+        // Scale them down to CSS px so the preview matches the exported video exactly.
+        const scale = (videoNatH > 0 && vidInner.clientHeight > 0)
+            ? vidInner.clientHeight / videoNatH
+            : 1;
+
         const fontSize     = parseFloat(fontSizeN ? fontSizeN.value : fontSizeR.value) || 24;
         const fontFamily   = fontFamilyEl.value;
         const textColor    = colorEl.value;
-        const bold         = boldEl.classList.contains('active');
-        const italic       = italicEl?.classList.contains('active')    ?? false;
-        const underline    = underlineEl?.classList.contains('active') ?? false;
+        const bold         = sub?.bold     ?? boldEl.classList.contains('active');
+        const italic       = sub?.italic   ?? (italicEl?.classList.contains('active')    ?? false);
+        const underline    = sub?.underline ?? (underlineEl?.classList.contains('active') ?? false);
         const activeAlign  = [...alignBtns].find(b => b.classList.contains('active'));
-        const textAlign    = activeAlign?.dataset.align || 'center';
+        const textAlign    = sub?.align ?? (activeAlign?.dataset.align || 'center');
         const bgOpacity    = parseFloat(bgOpacityN ? bgOpacityN.value : bgOpacityR.value) || 0;
         const bgColor      = bgColorEl.value;
-        const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 12) || 0;
-        const padY         = parseFloat(bgPadYEl ? bgPadYEl.value : 6)  || 0;
-        const bgRadius     = parseFloat(bgRadiusEl ? bgRadiusEl.value : 4) || 4;
+        const padX         = parseFloat(bgPadXEl ? bgPadXEl.value : 30) || 0;
+        const padY         = parseFloat(bgPadYEl ? bgPadYEl.value : 15) || 0;
+        const bgRadius     = parseFloat(bgRadiusEl ? bgRadiusEl.value : 10) || 10;
         const outlineSize  = parseFloat(outlineSizeN ? outlineSizeN.value : outlineSizeR.value) || 0;
         const outlineColor = outlineColorEl.value;
         const shadowSize   = parseFloat(shadowSizeN ? shadowSizeN.value : shadowSizeR.value) || 0;
@@ -876,7 +939,7 @@ export async function init() {
         const subW         = parseFloat(subWidthEl ? subWidthEl.value : 0) || 0;
         const subH         = parseFloat(subHeightEl ? subHeightEl.value : 0) || 0;
 
-        overlay.style.fontSize        = fontSize + 'px';
+        overlay.style.fontSize        = (fontSize * scale) + 'px';
         overlay.style.fontFamily      = `"${fontFamily}", sans-serif`;
         overlay.style.color           = textColor;
         overlay.style.fontWeight      = bold      ? '700'       : '400';
@@ -885,7 +948,7 @@ export async function init() {
         overlay.style.textAlign       = textAlign;
         overlay.style.lineHeight      = lineH;
         overlay.style.wordSpacing     = '0.4em';
-        overlay.style.textShadow      = makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor);
+        overlay.style.textShadow      = makeTextShadow(outlineSize * scale, outlineColor, shadowSize * scale, shadowColor);
         const hasText = overlay.textContent.trim() !== '';
         overlay.style.cursor          = hasText ? 'move' : 'default';
         overlay.style.pointerEvents   = hasText ? 'auto' : 'none';
@@ -915,16 +978,19 @@ export async function init() {
         // Background — only visible when overlay has text
         const hasContent = overlay.textContent.trim() !== '';
         overlay.style.backgroundColor = (bgOpacity > 0 && hasContent) ? hexToRgba(bgColor, bgOpacity) : 'transparent';
-        overlay.style.padding         = (bgOpacity > 0 && hasContent) ? `${padY}px ${padX}px` : '0';
-        overlay.style.borderRadius    = (bgOpacity > 0 && hasContent) ? bgRadius + 'px' : '0';
+        overlay.style.padding         = (bgOpacity > 0 && hasContent) ? `${padY * scale}px ${padX * scale}px` : '0';
+        overlay.style.borderRadius    = (bgOpacity > 0 && hasContent) ? (bgRadius * scale) + 'px' : '0';
 
         // Translate marginV (video px) → overlay % for preview approximation
         const marginVPct = videoNatH > 0 ? (marginV / videoNatH * 100) : 2;
 
-        // Position
-        if (posXpx !== null && posYpx !== null && videoNatW > 0) {
-            overlay.style.left      = (posXpx / videoNatW * 100) + '%';
-            overlay.style.top       = (posYpx / videoNatH * 100) + '%';
+        // Position — per-subtitle posX/posY override the global controls
+        const effectivePosX = (sub?.posX != null) ? sub.posX : posXpx;
+        const effectivePosY = (sub?.posY != null) ? sub.posY : posYpx;
+
+        if (effectivePosX !== null && effectivePosY !== null && videoNatW > 0) {
+            overlay.style.left      = (effectivePosX / videoNatW * 100) + '%';
+            overlay.style.top       = (effectivePosY / videoNatH * 100) + '%';
             overlay.style.bottom    = '';
             overlay.style.transform = 'translate(-50%, -50%)';
         } else {
@@ -944,6 +1010,19 @@ export async function init() {
                     overlay.style.bottom    = marginVPct + '%';
                     overlay.style.transform = 'translateX(-50%)';
             }
+        }
+
+        // Subtitle animation — retrigger when subtitle changes
+        const animType = sub?.animation || 'none';
+        const animDur  = ((sub?.animDuration || 0.6)).toFixed(2) + 's';
+        if (!sub) {
+            _lastSubStart = -1;
+            overlay.style.animation = '';
+        } else if (sub.start !== _lastSubStart) {
+            _lastSubStart = sub.start;
+            overlay.style.animation = 'none';
+            void overlay.offsetWidth; // force reflow to restart animation
+            overlay.style.animation = animType !== 'none' ? `sub-${animType} ${animDur} ease forwards` : '';
         }
 
         // Single-line preference: keep on one line if text fits, wrap only if it doesn't
@@ -1236,6 +1315,7 @@ export async function init() {
             setVal('vid-margin-v',       s.marginV);
             setVal('vid-karaoke-color',  s.karaokeColor);
             setCheck('vid-karaoke-enable', s.karaokeEnabled);
+            setVal('vid-karaoke-mode',   s.karaokeMode);
             if (s.posX)      setVal('vid-pos-x',      s.posX);
             if (s.posY)      setVal('vid-pos-y',      s.posY);
             if (s.subWidth)  setVal('vid-sub-width',  s.subWidth);
@@ -1266,7 +1346,7 @@ export async function init() {
         const g = id => document.getElementById(id);
         const settings = {
             fontFamily:     (g('vid-font-family')    || {}).value   || 'Arial',
-            fontSize:       (g('vid-font-size-n')    || {}).value   || '24',
+            fontSize:       (g('vid-font-size-n')    || {}).value   || '52',
             fontColor:      (g('vid-font-color')     || {}).value   || '#ffffff',
             bold:           g('vid-bold')?.classList.contains('active')       || false,
             italic:         g('vid-italic')?.classList.contains('active')     || false,
@@ -1279,18 +1359,19 @@ export async function init() {
             subHeight:      (g('vid-sub-height')     || {}).value   || '',
             bgOpacity:      (g('vid-bg-opacity-n')   || {}).value   || '50',
             bgColor:        (g('vid-bg-color')       || {}).value   || '#000000',
-            bgPadX:         (g('vid-bg-pad-x')       || {}).value   || '12',
-            bgPadY:         (g('vid-bg-pad-y')       || {}).value   || '6',
-            bgRadius:       (g('vid-bg-radius')      || {}).value   || '4',
-            outlineSize:    (g('vid-outline-size-n') || {}).value   || '1',
+            bgPadX:         (g('vid-bg-pad-x')       || {}).value   || '30',
+            bgPadY:         (g('vid-bg-pad-y')       || {}).value   || '15',
+            bgRadius:       (g('vid-bg-radius')      || {}).value   || '10',
+            outlineSize:    (g('vid-outline-size-n') || {}).value   || '3',
             outlineColor:   (g('vid-outline-color')  || {}).value   || '#000000',
             shadowSize:     (g('vid-shadow-size-n')  || {}).value   || '0',
             shadowColor:    (g('vid-shadow-color')   || {}).value   || '#000000',
             lineHeight:     (g('vid-line-height')    || {}).value   || '1.35',
             maxWidth:       (g('vid-max-width')      || {}).value   || '90',
-            marginV:        (g('vid-margin-v')       || {}).value   || '10',
+            marginV:        (g('vid-margin-v')       || {}).value   || '30',
             karaokeColor:   (g('vid-karaoke-color')  || {}).value   || '#ffdd00',
             karaokeEnabled: (g('vid-karaoke-enable') || {}).checked || false,
+            karaokeMode:    (g('vid-karaoke-mode')   || {}).value   || 'word',
         };
         try {
             await postJSON('/api/templates', { name: finalName, settings });

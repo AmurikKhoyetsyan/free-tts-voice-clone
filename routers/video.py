@@ -8,9 +8,9 @@ from core.log import app_log, print_progress
 router = APIRouter(prefix="/api/video", tags=["video"])
 
 BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRT_DIR   = os.path.join(BASE_DIR, ".output", "subtitle")
-VIDEO_IN  = os.path.join(BASE_DIR, ".output", "video", "src")
-VIDEO_OUT = os.path.join(BASE_DIR, ".output", "video")
+SRT_DIR   = os.path.join(BASE_DIR, ".outputs", "subtitle")
+VIDEO_IN  = os.path.join(BASE_DIR, ".outputs", "video", "src")
+VIDEO_OUT = os.path.join(BASE_DIR, ".outputs", "video")
 os.makedirs(VIDEO_IN,  exist_ok=True)
 os.makedirs(VIDEO_OUT, exist_ok=True)
 
@@ -116,10 +116,13 @@ def _hex_to_ass(hex_color: str, opacity: int = 100) -> str:
 
 
 def _ass_time(sec: float) -> str:
-    h  = int(sec // 3600)
-    m  = int((sec % 3600) // 60)
-    s  = int(sec % 60)
-    cs = int(round((sec % 1) * 100))
+    sec      = max(0.0, sec)
+    total_cs = int(round(sec * 100))   # avoid per-field rounding overflow
+    cs       = total_cs % 100
+    total_s  = total_cs // 100
+    h        = total_s // 3600
+    m        = (total_s % 3600) // 60
+    s        = total_s % 60
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
@@ -154,8 +157,79 @@ def _probe_dimensions(path: str) -> tuple:
         return 1920, 1080
 
 
+def _compute_default_pos(alignment: int, frame_w: int, frame_h: int,
+                          margin_v: int, margin_l: int, margin_r: int) -> tuple:
+    """Compute default subtitle (x, y) from ASS alignment + margins."""
+    row = (alignment - 1) // 3   # 0=bottom, 1=middle, 2=top
+    col = (alignment - 1) % 3    # 0=left,   1=center, 2=right
+    x   = [margin_l, frame_w // 2, max(0, frame_w - margin_r)][col]
+    y   = [max(0, frame_h - margin_v), frame_h // 2, margin_v][row]
+    return x, y
+
+
+def _build_override_block(pos_inner: str, anim: str,
+                           frame_w: int, frame_h: int,
+                           alignment: int, margin_v: int,
+                           margin_l: int, margin_r: int,
+                           dur_ms: int = 600) -> str:
+    """
+    Build a SINGLE ASS override block merging position + animation.
+    \fad must share a block with \pos/\an or libass ignores it.
+    """
+    dur  = dur_ms
+    half = dur_ms // 2
+
+    # Extract existing \pos(x,y) and \an from pos_inner, if present
+    m_pos = re.search(r"\\pos\((\d+),(\d+)\)", pos_inner)
+    m_an  = re.search(r"\\an(\d)",              pos_inner)
+
+    if m_pos:
+        px, py = int(m_pos.group(1)), int(m_pos.group(2))
+    elif frame_w > 0 and frame_h > 0:
+        px, py = _compute_default_pos(alignment, frame_w, frame_h, margin_v, margin_l, margin_r)
+    else:
+        px, py = None, None
+
+    an_tag = m_an.group(0) if m_an else f"\\an{alignment}"
+
+    if not anim or anim == "none":
+        return ("{" + pos_inner + "}") if pos_inner else ""
+
+    if anim == "fade-in":
+        # Merge \fad into the same block as \pos so libass applies it
+        inner = (pos_inner or "") + f"\\fad({dur},{dur})"
+        return "{" + inner + "}"
+
+    if anim in ("slide-up", "slide-down") and px is not None:
+        dy    = 30 if anim == "slide-up" else -30
+        # \move replaces \pos; keep \an; add \fad for smooth edges
+        inner = (f"{an_tag}\\fad({half},{half})"
+                 f"\\move({px},{py + dy},{px},{py},0,{dur})")
+        return "{" + inner + "}"
+
+    if anim in ("slide-up", "slide-down"):
+        # No position info available — fall back to fade
+        inner = (pos_inner or "") + f"\\fad({half},{half})"
+        return "{" + inner + "}"
+
+    if anim == "zoom-in":
+        inner = (pos_inner or "") + f"\\fscx5\\fscy5\\t(0,{dur},\\fscx100\\fscy100)"
+        return "{" + inner + "}"
+
+    if anim == "fade-out":
+        inner = (pos_inner or "") + f"\\fad(0,{dur})"
+        return "{" + inner + "}"
+
+    if anim == "typewriter":
+        inner = (pos_inner or "") + f"\\fad({dur},0)"
+        return "{" + inner + "}"
+
+    return ("{" + pos_inner + "}") if pos_inner else ""
+
+
 def _srt_to_ass(srt_content: str, style_dict: dict,
-                pos_tag: str = "", frame_w: int = 0, frame_h: int = 0) -> str:
+                pos_tag: str = "", frame_w: int = 0, frame_h: int = 0,
+                anim_map: dict = None) -> str:
     """Convert SRT to ASS with embedded style and optional \\pos / margins."""
     sd           = style_dict
     border_style = int(sd.get("BorderStyle", 1))
@@ -186,6 +260,7 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         extra_h_margin = 0
 
     # ── Width → text-wrap margins ─────────────────────────────────────────────
+    text_wrap = float(frame_w) if frame_w > 0 else 0.0
     margin_l = margin_r = 0
     if frame_w > 0:
         if sub_w_px > 0:
@@ -198,9 +273,12 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         base_margin   = max(0, int((frame_w - text_wrap) / 2))
         margin_l = margin_r = base_margin + int(extra_h_margin)
 
-    karaoke_on = bool(sd.get("KaraokeEnabled", False))
-    if karaoke_on:
-        primary_c   = _hex_to_ass(str(sd.get("KaraokeColor", "ffdd00")))
+    karaoke_on   = bool(sd.get("KaraokeEnabled", False))
+    karaoke_mode = sd.get("KaraokeMode", "word")
+    karaoke_color_ass = _hex_to_ass(str(sd.get("KaraokeColor", "ffdd00")))
+    if karaoke_on and karaoke_mode == "cumulative":
+        # \k tag approach: primary = karaoke color, secondary = text color
+        primary_c   = karaoke_color_ass
         secondary_c = str(sd.get("PrimaryColour", "&H00FFFFFF"))
     else:
         primary_c   = str(sd.get("PrimaryColour", "&H00FFFFFF"))
@@ -275,7 +353,7 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
     )
     header = (
-        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\n\n"
+        f"[Script Info]\nScriptType: v4.00+\n{res_line}Collisions: Normal\nWrapStyle: 0\n\n"
         f"[V4+ Styles]\n{fmt_line}\n"
         f"Style: {style_line}\n{extra_style}\n"
         "[Events]\n"
@@ -293,24 +371,75 @@ def _srt_to_ass(srt_content: str, style_dict: dict,
         if len(lines) < 3:
             continue
         try:
+            try:
+                sub_idx = int(lines[0].strip())
+            except ValueError:
+                sub_idx = 0
             start_s, end_s = lines[1].split(" --> ")
             text = "\\N".join(l for l in lines[2:] if l.strip())
-            if karaoke_on:
-                dur   = s2sec(end_s) - s2sec(start_s)
-                words = text.replace("\\N", " ").split()
-                if words:
-                    cs   = max(1, round(dur * 100 / len(words)))
-                    text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
-            t0 = _ass_time(s2sec(start_s))
-            t1 = _ass_time(s2sec(end_s))
-            events.append(
-                f"Dialogue: 0,{t0},{t1},Default,,0,0,0,,{pos_tag}{text}"
+            anim_entry = (anim_map or {}).get(sub_idx, "none")
+            if isinstance(anim_entry, dict):
+                anim    = anim_entry.get("animation", "none")
+                dur_ms  = int(float(anim_entry.get("animDuration", 0.6)) * 1000)
+            else:
+                anim    = str(anim_entry)
+                dur_ms  = 600
+            pos_inner = pos_tag.strip("{}") if pos_tag else ""
+            ov_block  = _build_override_block(
+                pos_inner, anim, frame_w, frame_h,
+                int(sd.get("Alignment", 2)),
+                int(sd.get("MarginV",   10)),
+                margin_l, margin_r,
+                dur_ms=dur_ms,
             )
-            if has_text_outline:
-                # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
-                events.append(
-                    f"Dialogue: 1,{t0},{t1},TextOutline,,0,0,0,,{pos_tag}{text}"
-                )
+            abs_start = s2sec(start_s)
+            abs_end   = s2sec(end_s)
+            # Per-event margins so libass respects text_wrap even when \pos is set
+            m_pos_ev = re.search(r'\\pos\((\d+(?:\.\d+)?),(\d+(?:\.\d+)?)\)', ov_block)
+            if m_pos_ev and frame_w > 0 and text_wrap > 0:
+                epx     = float(m_pos_ev.group(1))
+                half_tw = text_wrap / 2
+                ev_ml   = max(0, int(epx - half_tw)) + int(extra_h_margin)
+                ev_mr   = max(0, int(frame_w - epx - half_tw)) + int(extra_h_margin)
+            else:
+                ev_ml, ev_mr = margin_l, margin_r
+            if karaoke_on and karaoke_mode == "word":
+                words = [w for w in re.split(r'(?:\\N|\s)+', text) if w]
+                n = max(1, len(words))
+                word_dur = (abs_end - abs_start) / n
+                text_c = primary_c  # text color (no swap in word mode)
+                for stage in range(n):
+                    wt0 = abs_start + stage * word_dur
+                    wt1 = abs_start + (stage + 1) * word_dur if stage < n - 1 else abs_end
+                    before  = " ".join(words[:stage])
+                    current = words[stage]
+                    after   = " ".join(words[stage + 1:])
+                    if before and after:
+                        ktext = before + " {\\1c" + karaoke_color_ass + "}" + current + "{\\1c" + text_c + "} " + after
+                    elif before:
+                        ktext = before + " {\\1c" + karaoke_color_ass + "}" + current
+                    elif after:
+                        ktext = "{\\1c" + karaoke_color_ass + "}" + current + "{\\1c" + text_c + "} " + after
+                    else:
+                        ktext = "{\\1c" + karaoke_color_ass + "}" + current
+                    ws0 = _ass_time(wt0)
+                    ws1 = _ass_time(wt1)
+                    events.append(f"Dialogue: 0,{ws0},{ws1},Default,,{ev_ml},{ev_mr},0,,{ov_block}{ktext}")
+                    if has_text_outline:
+                        events.append(f"Dialogue: 1,{ws0},{ws1},TextOutline,,{ev_ml},{ev_mr},0,,{ov_block}{ktext}")
+            else:
+                if karaoke_on:  # cumulative: \k tags
+                    dur   = abs_end - abs_start
+                    words = text.replace("\\N", " ").split()
+                    if words:
+                        cs   = max(1, round(dur * 100 / len(words)))
+                        text = " ".join(f"{{\\k{cs}}}{w}" for w in words)
+                t0 = _ass_time(abs_start)
+                t1 = _ass_time(abs_end)
+                events.append(f"Dialogue: 0,{t0},{t1},Default,,{ev_ml},{ev_mr},0,,{ov_block}{text}")
+                if has_text_outline:
+                    # Layer 1: transparent fill + visible stroke only (sits on top of box layer)
+                    events.append(f"Dialogue: 1,{t0},{t1},TextOutline,,{ev_ml},{ev_mr},0,,{ov_block}{text}")
         except Exception:
             continue
 
@@ -351,7 +480,9 @@ def burn_subtitles(
     preview_width:   int   = Form(0),
     karaoke_enabled: str   = Form("false"),
     karaoke_color:   str   = Form("ffdd00"),
+    karaoke_mode:    str   = Form("word"),
     text_align:      str   = Form("center"),
+    subs_json:       str   = Form("[]"),
 ):
     video_src = os.path.join(VIDEO_IN, os.path.basename(video_name))
     srt_src   = os.path.join(SRT_DIR,  os.path.basename(srt_name))
@@ -359,6 +490,16 @@ def burn_subtitles(
         raise HTTPException(400, "Видео не найдено")
     if not os.path.exists(srt_src):
         raise HTTPException(400, "SRT файл не найден")
+
+    try:
+        _subs_list = json.loads(subs_json) if subs_json.strip() else []
+        anim_map = {}
+        for s in _subs_list:
+            idx = int(s.get("index", 0))
+            anim_dur = float(s.get("animDuration", 0.6))
+            anim_map[idx] = {"animation": str(s.get("animation", "none")), "animDuration": anim_dur}
+    except Exception:
+        anim_map = {}
 
     orig_ext = os.path.splitext(video_name)[1].lstrip(".") or "mp4"
     ext      = (output_format.strip().lstrip(".") or orig_ext).lower()
@@ -384,6 +525,7 @@ def burn_subtitles(
         "SubHeightPx":    sub_height_px,
         "KaraokeEnabled": karaoke_enabled.lower() in ("true", "1", "yes"),
         "KaraokeColor":   karaoke_color.lstrip("#"),
+        "KaraokeMode":    karaoke_mode,
     }
 
     if bg_opacity > 0:
@@ -450,14 +592,6 @@ def burn_subtitles(
                 fw, fh = (output_width, output_height) if (output_width > 0 and output_height > 0) \
                          else _probe_dimensions(tmp_in)
 
-                # Scale CSS-pixel UI values → video-space pixels so sizes match the preview
-                if preview_width > 0 and fw > 0:
-                    px_scale = fw / preview_width
-                    style_dict["FontSize"] = max(1, round(float(style_dict["FontSize"]) * px_scale))
-                    for _k in ("PadX", "PadY", "Outline", "Shadow", "TextOutlineSize"):
-                        if _k in style_dict:
-                            style_dict[_k] = float(style_dict[_k]) * px_scale
-
                 # Build optional position override tag
                 pos_tag = ""
                 if use_pos:
@@ -472,7 +606,7 @@ def burn_subtitles(
                 q.put(("progress", 0.10, "Конвертация субтитров…"))
                 with open(srt_src, encoding="utf-8") as f:
                     srt_content = f.read()
-                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw, fh)
+                ass_text = _srt_to_ass(srt_content, style_dict, pos_tag, fw, fh, anim_map=anim_map)
                 tmp_sub  = os.path.join(tmp, "sub.ass")
                 with open(tmp_sub, "w", encoding="utf-8", newline='\n') as f:
                     f.write(ass_text)

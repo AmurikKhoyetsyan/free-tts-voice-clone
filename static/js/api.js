@@ -83,6 +83,18 @@ export async function synthesizeStream(url, opts, handlers) {
     }
 }
 
+// Cached XTTS status — promise shared across all callers, retried on failure
+let _xttsStatusPromise = null;
+export function getXttsStatus() {
+    if (!_xttsStatusPromise) {
+        _xttsStatusPromise = getJSON('/api/xtts/status').catch(err => {
+            _xttsStatusPromise = null;
+            throw err;
+        });
+    }
+    return _xttsStatusPromise;
+}
+
 function parseSSE(chunk) {
     const lines = chunk.split('\n');
     let event = 'message';
