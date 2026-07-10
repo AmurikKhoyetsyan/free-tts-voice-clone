@@ -208,6 +208,8 @@ async def list_projects():
         try:
             with open(os.path.join(PROJECTS_DIR, fn), encoding="utf-8") as f:
                 d = json.load(f)
+            if d.get("is_template"):
+                continue
             items.append({
                 "id":             d.get("id", fn[:-5]),
                 "name":           d.get("name", "Без названия"),
@@ -215,6 +217,7 @@ async def list_projects():
                 "updated_at":     d.get("updated_at", ""),
                 "slide_count":    len(d.get("slides", [])),
                 "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
+                "is_template":    False,
             })
         except Exception:
             pass
@@ -229,6 +232,7 @@ class ProjectBody(BaseModel):
     subtitles:       list = []
     pip:             list = []
     export_settings: dict = {}
+    is_template:     bool = False
 
 
 @router.post("/projects")
@@ -250,6 +254,7 @@ async def save_project(body: ProjectBody):
         "subtitles": body.subtitles,
         "pip": body.pip,
         "export_settings": body.export_settings,
+        "is_template": body.is_template,
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -294,6 +299,48 @@ async def delete_project(pid: str):
         os.remove(path)
     app_log(f"Project deleted: {pid}", "INFO", "ImgVid")
     return {"ok": True}
+
+
+@router.post("/projects/{pid}/save-as-template")
+async def save_project_as_template(pid: str):
+    src = os.path.join(PROJECTS_DIR, f"{pid}.json")
+    if not os.path.exists(src):
+        raise HTTPException(404, "Проект не найден")
+    with open(src, encoding="utf-8") as f:
+        data = json.load(f)
+    new_id = uuid.uuid4().hex
+    now = datetime.datetime.now().isoformat()
+    template = {**data, "id": new_id, "is_template": True,
+                "created_at": now, "updated_at": now,
+                "name": data.get("name", "Шаблон") + " (шаблон)"}
+    tpath = os.path.join(PROJECTS_DIR, f"{new_id}.json")
+    with open(tpath, "w", encoding="utf-8") as f:
+        json.dump(template, f, ensure_ascii=False, indent=2)
+    app_log(f"Project saved as template: {template['name']}", "INFO", "ImgVid")
+    return {"id": new_id, "name": template["name"]}
+
+
+@router.get("/templates")
+async def list_templates():
+    items = []
+    for fn in sorted(os.listdir(PROJECTS_DIR), reverse=True):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(PROJECTS_DIR, fn), encoding="utf-8") as f:
+                d = json.load(f)
+            if not d.get("is_template"):
+                continue
+            items.append({
+                "id":             d.get("id", fn[:-5]),
+                "name":           d.get("name", "Шаблон"),
+                "updated_at":     d.get("updated_at", ""),
+                "slide_count":    len(d.get("slides", [])),
+                "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
+            })
+        except Exception:
+            pass
+    return {"templates": items}
 
 # ── .project format helpers ───────────────────────────────────────────────────
 
@@ -838,22 +885,47 @@ async def export_video(
                 )
                 filter_parts = []
                 for i, slide in enumerate(slides):
-                    parts = [scale_f]
                     clip_type = slide.get("type", "image")
                     speed = float(slide.get("speed", 1) or 1)
                     trim_in = float(slide.get("trimIn", 0) or 0)
                     dur = float(slide.get("duration", 3))
 
-                    # For video clips: apply trim and speed
+                    pre_parts = []
+                    cur_scale_f = scale_f
+
                     if clip_type == "video":
-                        trim_parts = []
                         if trim_in > 0:
-                            trim_parts.append(f"trim=start={trim_in:.3f}:duration={dur / max(0.01, speed):.3f},setpts=PTS-STARTPTS")
+                            pre_parts.append(f"trim=start={trim_in:.3f}:duration={dur / max(0.01, speed):.3f},setpts=PTS-STARTPTS")
                         if speed != 1.0:
-                            trim_parts.append(f"setpts={1.0/speed:.6f}*PTS")
-                        if trim_parts:
-                            parts = trim_parts + [scale_f]
-                        # else parts stays as [scale_f]
+                            pre_parts.append(f"setpts={1.0/speed:.6f}*PTS")
+                    else:
+                        # Image: apply crop, custom scale, and offset before standard resize
+                        crop = slide.get("crop") or {}
+                        img_scale_pct = float(slide.get("imgScale", 100) or 100)
+                        img_ox = float(slide.get("imgOffsetX", 0) or 0)
+                        img_oy = float(slide.get("imgOffsetY", 0) or 0)
+
+                        cx = float(crop.get("x", 0)) / 100
+                        cy = float(crop.get("y", 0)) / 100
+                        cw = max(0.01, float(crop.get("w", 100))) / 100
+                        ch = max(0.01, float(crop.get("h", 100))) / 100
+                        if cx > 0 or cy > 0 or cw < 1.0 or ch < 1.0:
+                            pre_parts.append(f"crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{cx:.4f}:ih*{cy:.4f}")
+
+                        if img_scale_pct != 100:
+                            s = max(0.1, img_scale_pct / 100)
+                            pre_parts.append(f"scale=iw*{s:.4f}:ih*{s:.4f}")
+
+                        if img_ox != 0 or img_oy != 0:
+                            ox_px = int(width * img_ox / 100)
+                            oy_px = int(height * img_oy / 100)
+                            cur_scale_f = (
+                                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                                f"pad={width}:{height}:(ow-iw)/2+{ox_px}:(oh-ih)/2+{oy_px}:black,"
+                                f"setsar=1,fps={fps},format=yuv420p"
+                            )
+
+                    parts = pre_parts + [cur_scale_f]
 
                     for ef in slide.get("effects", []):
                         et, ev = ef.get("type"), ef.get("value", 0)
@@ -984,46 +1056,46 @@ async def export_video(
                 audio_map = []
                 total_dur = sum(float(s.get("duration", 3)) for s in slides)
                 if valid_audio:
-                    if len(valid_audio) == 1:
-                        t           = valid_audio[0]
-                        ai          = audio_start_idx
+                    def _build_audio_filter(t, ai_idx, out_label, clip_to_total=True):
                         vol         = float(t.get("volume", 1.0))
-                        fi          = float(t.get("fadeIn", t.get("fade_in", 0)))
+                        fi          = float(t.get("fadeIn",  t.get("fade_in",  0)))
                         fo          = float(t.get("fadeOut", t.get("fade_out", 0)))
                         trim_in     = float(t.get("trimIn", 0))
                         start_off   = float(t.get("startOffset", 0))
                         track_dur   = t.get("duration")
                         track_dur_f = float(track_dur) if track_dur is not None else None
                         af = []
-                        if trim_in > 0:
-                            af.append(f"atrim=start={trim_in:.3f}")
+                        # Trim file start and/or limit segment duration
+                        if trim_in > 0 or track_dur_f is not None:
+                            atrim_args = []
+                            if trim_in > 0:
+                                atrim_args.append(f"start={trim_in:.3f}")
+                            if track_dur_f is not None:
+                                atrim_args.append(f"end={trim_in + track_dur_f:.3f}")
+                            af.append(f"atrim={':'.join(atrim_args)}")
                             af.append("asetpts=PTS-STARTPTS")
                         af.append(f"volume={vol}")
-                        if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
+                        if fi > 0:
+                            af.append(f"afade=t=in:ss=0:d={fi:.2f}")
                         if fo > 0:
                             fade_start = (track_dur_f - fo) if track_dur_f else max(0, total_dur - fo - start_off)
                             af.append(f"afade=t=out:st={max(0, fade_start):.2f}:d={fo:.2f}")
                         if start_off > 0:
-                            delay_ms = int(start_off * 1000)
-                            af.append(f"adelay={delay_ms}:all=1")
-                        af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
-                        filter_parts.append(f"[{ai}:a]{','.join(af)}[aout]")
+                            af.append(f"adelay={int(start_off * 1000)}:all=1")
+                        if clip_to_total:
+                            af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
+                        return f"[{ai_idx}:a]{','.join(af)}{out_label}"
+
+                    if len(valid_audio) == 1:
+                        filter_parts.append(
+                            _build_audio_filter(valid_audio[0], audio_start_idx, "[aout]", clip_to_total=True)
+                        )
                         audio_map = ["-map", "[aout]"]
                     else:
                         for j, t in enumerate(valid_audio):
-                            ai          = audio_start_idx + j
-                            vol         = float(t.get("volume", 1.0))
-                            trim_in     = float(t.get("trimIn", 0))
-                            start_off   = float(t.get("startOffset", 0))
-                            af = []
-                            if trim_in > 0:
-                                af.append(f"atrim=start={trim_in:.3f}")
-                                af.append("asetpts=PTS-STARTPTS")
-                            af.append(f"volume={vol}")
-                            if start_off > 0:
-                                delay_ms = int(start_off * 1000)
-                                af.append(f"adelay={delay_ms}:all=1")
-                            filter_parts.append(f"[{ai}:a]{','.join(af)}[a{j}]")
+                            filter_parts.append(
+                                _build_audio_filter(t, audio_start_idx + j, f"[a{j}]", clip_to_total=False)
+                            )
                         amix_in = "".join(f"[a{j}]" for j in range(len(valid_audio)))
                         filter_parts.append(
                             f"{amix_in}amix=inputs={len(valid_audio)}:duration=first,"

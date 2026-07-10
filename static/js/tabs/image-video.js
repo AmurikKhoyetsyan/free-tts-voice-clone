@@ -644,6 +644,17 @@ export async function init() {
     // ── Save / Export ─────────────────────────────────────────────────────────
     saveBtn.addEventListener('click', _saveProject);
     exportBtn.addEventListener('click', _startExport);
+    $('ive-save-template-btn')?.addEventListener('click', async () => {
+        if (!S.projectId) { await _saveProject(); }
+        if (!S.projectId) { toast('Сначала сохраните проект', 'warn'); return; }
+        try {
+            const r = await fetch(`/api/imgvid/projects/${S.projectId}/save-as-template`, { method: 'POST' });
+            const d = await r.json();
+            if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            toast('Сохранено как шаблон: ' + d.name, 'ok');
+            await loadTemplatesList();
+        } catch (e) { toast(e.message, 'err'); }
+    });
     // .amur save/open
     saveAmurBtn?.addEventListener('click', async () => {
         if (!S.projectId) { await _saveProject(); }
@@ -748,6 +759,7 @@ export async function init() {
     goEnd.innerHTML         = ICONS.tbGoEnd;
 
     await loadProjectsList();
+    await loadTemplatesList();
     renderAll();
 
     // Size the preview content to match the selected export resolution aspect ratio
@@ -776,7 +788,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/images', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, effects: [], subtitles: [] });
+                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
                 S.dirty = true; log('Изображение добавлено: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -811,7 +823,7 @@ export async function init() {
             S.dirty = true; log('Аудио добавлено: ' + d.original, 'done');
             renderMediaList(); renderTimeline();
             // Probe original duration asynchronously via Web Audio
-            _probeAudioDuration(d.url).then(dur => { if (dur > 0) { track.originalDuration = dur; } });
+            _probeAudioDuration(d.url).then(dur => { if (dur > 0) { track.originalDuration = dur; track.duration = dur; renderTimeline(); } });
         } catch (e) { toast(e.message, 'err'); }
     }
 
@@ -1555,8 +1567,11 @@ export async function init() {
                 previewImg.src = clip.fileUrl; previewImg.dataset.src = clip.fileUrl;
             }
             previewImg.style.display = 'block';
+            _applyImgTransform(previewImg, clip);
         } else {
             previewImg.style.display = 'none';
+            previewImg.style.transform = '';
+            previewImg.style.clipPath = '';
             if (previewVideo.dataset.src !== clip.fileUrl) {
                 previewVideo.src = clip.fileUrl; previewVideo.dataset.src = clip.fileUrl;
                 previewVideo.load();
@@ -1618,6 +1633,23 @@ export async function init() {
             subOverlay.style.display = 'none';
             if (subContainer) subContainer.style.display = 'none';
             _lastSubStart = null;
+        }
+    }
+
+    function _applyImgTransform(imgEl, clip) {
+        const sc = (clip.imgScale || 100) / 100;
+        const ox = clip.imgOffsetX || 0;
+        const oy = clip.imgOffsetY || 0;
+        imgEl.style.transform = (sc !== 1 || ox !== 0 || oy !== 0)
+            ? `scale(${sc}) translate(${ox}%,${oy}%)`
+            : '';
+        const crop = clip.crop;
+        if (crop && (crop.x > 0 || crop.y > 0 || crop.w < 100 || crop.h < 100)) {
+            const t = crop.y, r = 100 - crop.x - crop.w;
+            const b = 100 - crop.y - crop.h, l = crop.x;
+            imgEl.style.clipPath = `inset(${t}% ${r}% ${b}% ${l}%)`;
+        } else {
+            imgEl.style.clipPath = '';
         }
     }
 
@@ -1958,6 +1990,7 @@ export async function init() {
                     <option value="2"${(track.speed??1)===2?' selected':''}>2×</option>
                 </select>
             </label>
+            <button class="btn btn-sm" id="acp-split" style="margin-top:4px" title="Разделить в позиции курсора">✂ Разделить</button>
             <button class="btn btn-sm danger" id="acp-del" style="margin-top:6px">Удалить дорожку</button>
         </div>`;
 
@@ -1983,6 +2016,25 @@ export async function init() {
             S.dirty = true;
             const el = _audioEls.get(track.id);
             if (el) el.playbackRate = track.speed;
+        });
+        $('acp-split').addEventListener('click', () => {
+            const t = S.currentTime;
+            const st = track.startOffset || 0;
+            const origDur = track.originalDuration || 3600;
+            const usedDur = track.duration !== undefined ? track.duration : Math.max(1, totalDur() - st);
+            const end = st + usedDur;
+            if (t <= st + 0.05 || t >= end - 0.05) {
+                toast('Поставьте курсор внутри аудио дорожки', 'warn'); return;
+            }
+            const firstDur = t - st;
+            const audioSplitPos = (track.trimIn || 0) + firstDur;
+            const secondDur = end - t;
+            track.duration = firstDur;
+            const newTrack = { ...track, id: uid(), startOffset: t, trimIn: Math.min(audioSplitPos, origDur - 0.1), duration: secondDur };
+            const ti = S.audioTracks.indexOf(track);
+            S.audioTracks.splice(ti + 1, 0, newTrack);
+            S.dirty = true; renderTimeline(); renderProps();
+            toast('Аудио разделено', 'ok');
         });
         $('acp-del').addEventListener('click', () => { S.audioTracks.splice(idx, 1); S.selAudioIdx = -1; S.dirty = true; renderAll(); });
     }
@@ -2025,6 +2077,16 @@ export async function init() {
                 <span>Изображение</span>
                 <input type="file" id="pv-replace-file" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden>
                 <button class="btn btn-sm" id="pv-replace-btn">Заменить</button>
+            </div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Трансформация</div>
+            <label class="ive-label">Масштаб%<input class="ive-input" type="number" id="pv-img-scale" min="10" max="500" step="5" value="${clip.imgScale||100}"></label>
+            <div class="ive-row2">
+                <label class="ive-label">Смещ. X<input class="ive-input" type="number" id="pv-img-ox" min="-100" max="100" step="1" value="${clip.imgOffsetX||0}"></label>
+                <label class="ive-label">Смещ. Y<input class="ive-input" type="number" id="pv-img-oy" min="-100" max="100" step="1" value="${clip.imgOffsetY||0}"></label>
+            </div>
+            <div class="ive-row2">
+                <button class="btn btn-sm" id="pv-crop-btn">${clip.crop && clip.crop.w < 100 ? '✂ Обрезка (' + Math.round(clip.crop.w) + '×' + Math.round(clip.crop.h) + '%)' : '✂ Обрезать'}</button>
+                <button class="btn btn-sm" id="pv-reset-transform" title="Сбросить трансформацию">↺ Сброс</button>
             </div>` : ''}
             ${isVideo ? `<button class="btn btn-sm" id="pv-extract-audio" style="margin-top:4px">Извлечь аудио</button>` : ''}
             <button class="btn btn-sm" id="pv-apply-all" style="margin-top:4px">Apply to All</button>
@@ -2058,6 +2120,25 @@ export async function init() {
                     S.dirty = true; log('Изображение заменено: ' + d.original, 'done'); renderAll();
                 } catch (err) { toast(err.message, 'err'); }
                 $('pv-replace-file').value = '';
+            });
+        }
+        if (!isVideo) {
+            $('pv-img-scale')?.addEventListener('change', e => {
+                clip.imgScale = Math.max(10, Math.min(500, parseFloat(e.target.value) || 100));
+                S.dirty = true; renderPreview();
+            });
+            $('pv-img-ox')?.addEventListener('change', e => {
+                clip.imgOffsetX = parseFloat(e.target.value) || 0;
+                S.dirty = true; renderPreview();
+            });
+            $('pv-img-oy')?.addEventListener('change', e => {
+                clip.imgOffsetY = parseFloat(e.target.value) || 0;
+                S.dirty = true; renderPreview();
+            });
+            $('pv-crop-btn')?.addEventListener('click', () => _openCropDialog(clip));
+            $('pv-reset-transform')?.addEventListener('click', () => {
+                clip.imgScale = 100; clip.imgOffsetX = 0; clip.imgOffsetY = 0; clip.crop = null;
+                S.dirty = true; renderPreview(); renderProps();
             });
         }
         $('pv-speed').addEventListener('change', e => {
@@ -2107,6 +2188,49 @@ export async function init() {
                 } catch (e) { toast(e.message, 'err'); }
             });
         }
+    }
+
+    function _openCropDialog(clip) {
+        const modal = document.getElementById('ive-crop-modal');
+        if (!modal) { toast('Модальное окно кропа не найдено', 'err'); return; }
+        const crop = clip.crop || { x: 0, y: 0, w: 100, h: 100 };
+        document.getElementById('ive-crop-x').value = crop.x || 0;
+        document.getElementById('ive-crop-y').value = crop.y || 0;
+        document.getElementById('ive-crop-w').value = crop.w || 100;
+        document.getElementById('ive-crop-h').value = crop.h || 100;
+        const prevImg = document.getElementById('ive-crop-preview-img');
+        if (prevImg) prevImg.src = clip.fileUrl || '';
+        modal.hidden = false;
+
+        const applyPreset = (ar) => {
+            const xEl = document.getElementById('ive-crop-x');
+            const yEl = document.getElementById('ive-crop-y');
+            const wEl = document.getElementById('ive-crop-w');
+            const hEl = document.getElementById('ive-crop-h');
+            if (ar === 'original') { xEl.value=0; yEl.value=0; wEl.value=100; hEl.value=100; return; }
+            const [aw, ah] = ar.split(':').map(Number);
+            const ratio = aw / ah;
+            let w = 100, h = Math.round(100 / ratio);
+            if (h > 100) { h = 100; w = Math.round(100 * ratio); }
+            xEl.value = Math.round((100 - w) / 2);
+            yEl.value = Math.round((100 - h) / 2);
+            wEl.value = w;
+            hEl.value = h;
+        };
+
+        modal.querySelectorAll('.ive-crop-preset').forEach(btn => {
+            btn.onclick = () => applyPreset(btn.dataset.preset);
+        });
+
+        document.getElementById('ive-crop-ok').onclick = () => {
+            const x = Math.max(0, parseFloat(document.getElementById('ive-crop-x').value) || 0);
+            const y = Math.max(0, parseFloat(document.getElementById('ive-crop-y').value) || 0);
+            const w = Math.max(1, parseFloat(document.getElementById('ive-crop-w').value) || 100);
+            const h = Math.max(1, parseFloat(document.getElementById('ive-crop-h').value) || 100);
+            clip.crop = (x === 0 && y === 0 && w >= 100 && h >= 100) ? null : { x, y, w, h };
+            S.dirty = true; modal.hidden = true; renderPreview(); renderProps();
+        };
+        document.getElementById('ive-crop-cancel').onclick = () => { modal.hidden = true; };
     }
 
     // ── Full-featured subtitle editor ─────────────────────────────────────────
@@ -2717,6 +2841,26 @@ export async function init() {
         } catch { listEl.innerHTML = '<div class="ive-empty">Ошибка</div>'; }
     }
 
+    async function loadTemplatesList() {
+        const listEl = $('ive-templates-list');
+        if (!listEl) return;
+        try {
+            const r = await fetch('/api/imgvid/templates');
+            const data = await r.json();
+            const tmpls = data.templates || [];
+            if (!tmpls.length) { listEl.innerHTML = '<div class="ive-empty">Нет шаблонов</div>'; return; }
+            listEl.innerHTML = tmpls.map(t => `
+            <div class="ive-proj-row" data-tid="${t.id}">
+                <div class="ive-proj-name">${eh(t.name)}</div>
+                <div class="ive-proj-meta">${t.slide_count} · ${t.total_duration}с</div>
+                <div class="ive-proj-btns">
+                    <button class="hist-btn accent" data-tact="use" title="Использовать шаблон">${ICONS.edit}</button>
+                    <button class="hist-btn danger" data-tact="del" title="Удалить">${ICONS.trash}</button>
+                </div>
+            </div>`).join('');
+        } catch { if (listEl) listEl.innerHTML = '<div class="ive-empty">Ошибка</div>'; }
+    }
+
     $('ive-projects-list').addEventListener('click', async e => {
         const row = e.target.closest('.ive-proj-row'); if (!row) return;
         const pid = row.dataset.pid;
@@ -2767,6 +2911,39 @@ export async function init() {
             renderAll(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
+    });
+
+    $('ive-templates-list')?.addEventListener('click', async e => {
+        const row = e.target.closest('.ive-proj-row'); if (!row) return;
+        const tid = row.dataset.tid;
+        const act = e.target.closest('[data-tact]')?.dataset.tact;
+        if (act === 'del') {
+            const ok = await openConfirm({ title: 'Удалить', message: 'Удалить шаблон?', confirmLabel: 'Удалить' });
+            if (!ok) return;
+            await fetch(`/api/imgvid/projects/${tid}`, { method: 'DELETE' });
+            log('Шаблон удалён', 'done');
+            await loadTemplatesList(); return;
+        }
+        if (act === 'use') {
+            if (S.dirty && !confirm('Несохранённые изменения. Открыть шаблон?')) return;
+            try {
+                const r = await fetch(`/api/imgvid/projects/${tid}`);
+                const d = await r.json();
+                _stopPlayback();
+                S.projectId = null; S.projectName = d.name.replace(/ \(шаблон\)$/, '');
+                S.clips = d.slides || []; S.audioTracks = d.audio || [];
+                S.subtitles = d.subtitles || [];
+                _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+                _pipEls.clear();
+                S.pipLayers = d.pip || d.pipLayers || [];
+                S.selPipIdx = -1; S.selIdxs = new Set();
+                S.selIdx = S.clips.length ? 0 : -1; S.dirty = true;
+                if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+                _applyExportSettings(d.export_settings);
+                renderAll();
+                toast('Шаблон загружен: ' + S.projectName, 'ok');
+            } catch (err) { toast(err.message, 'err'); }
+        }
     });
 
     // ── Save ──────────────────────────────────────────────────────────────────
