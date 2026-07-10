@@ -5,36 +5,10 @@ import { openConfirm }     from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-const TRANSITIONS = [
-    { value: 'none', label: 'Нет' }, { value: 'fade', label: 'Fade' },
-    { value: 'crossfade', label: 'Cross Fade' }, { value: 'dissolve', label: 'Dissolve' },
-    { value: 'fadeblack', label: 'Fade Black' }, { value: 'fadewhite', label: 'Fade White' },
-    { value: 'slideleft', label: 'Slide Left' }, { value: 'slideright', label: 'Slide Right' },
-    { value: 'slideup', label: 'Slide Up' }, { value: 'slidedown', label: 'Slide Down' },
-    { value: 'wipeleft', label: 'Wipe Left' }, { value: 'wiperight', label: 'Wipe Right' },
-    { value: 'wipeup', label: 'Wipe Up' }, { value: 'wipedown', label: 'Wipe Down' },
-    { value: 'zoomin', label: 'Zoom In' }, { value: 'pixelize', label: 'Pixelize' },
-    { value: 'hblur', label: 'Blur' }, { value: 'circlecrop', label: 'Circle' },
-    { value: 'radial', label: 'Radial' }, { value: 'fadegrays', label: 'Fade Grays' },
-    { value: 'hlslice', label: 'H Slice' }, { value: 'vuslice', label: 'V Slice' },
-];
-
-const EFFECTS_DEF = [
-    { key: 'brightness', label: 'Яркость',   min: -100, max: 100, step: 1,   def: 0 },
-    { key: 'contrast',   label: 'Контраст',  min: -100, max: 100, step: 1,   def: 0 },
-    { key: 'saturation', label: 'Насыщение', min: -100, max: 100, step: 1,   def: 0 },
-    { key: 'blur',       label: 'Размытие',  min: 0,    max: 20,  step: 0.5, def: 0 },
-    { key: 'sharpen',    label: 'Резкость',  min: 0,    max: 50,  step: 1,   def: 0 },
-    { key: 'filmgrain',  label: 'Зернист.',  min: 0,    max: 50,  step: 1,   def: 0 },
-    { key: 'grayscale',  label: 'Ч/Б',       toggle: true, def: 0 },
-    { key: 'sepia',      label: 'Сепия',     toggle: true, def: 0 },
-    { key: 'vignette',   label: 'Виньетка',  toggle: true, def: 0 },
-    { key: 'invert',     label: 'Инверсия',  toggle: true, def: 0 },
-];
-
-const FONTS = ['Arial', 'Times New Roman', 'Georgia', 'Courier New', 'Verdana', 'Impact', 'Trebuchet MS'];
-const ANIMS = ['none', 'fade-in', 'fade-out', 'slide-up', 'slide-down', 'typewriter', 'zoom-in'];
+import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS } from '../imgvid/constants.js';
+import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
+import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
+import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -55,151 +29,6 @@ const S = {
     // Preview dimensions (set by _updatePreviewSize, used for subtitle scaling)
     previewH: 0, previewW: 0,
 };
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-function uid()     { return Math.random().toString(36).slice(2, 10); }
-function eh(s)     { return String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function fmt(s)    { const m = Math.floor(s / 60), ss = Math.floor(s % 60), t = Math.floor((s % 1) * 10); return `${m}:${ss.toString().padStart(2,'0')}.${t}`; }
-function fmtShort(s) { const m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${m}:${ss.toString().padStart(2,'0')}`; }
-function totalDur(){ return S.clips.reduce((a, c) => a + (c.duration || 3), 0); }
-
-function _getSnapTargets(excludeIdx, type) {
-    const targets = [];
-    // Clip boundaries
-    let cur = 0;
-    S.clips.forEach(c => {
-        targets.push(cur);
-        cur += c.duration || 3;
-        targets.push(cur);
-    });
-    // Audio track boundaries
-    S.audioTracks.forEach(a => {
-        targets.push(a.startOffset || 0);
-        if (a.duration !== undefined) targets.push((a.startOffset || 0) + a.duration);
-    });
-    // Subtitle boundaries (excluding current)
-    S.subtitles.forEach((s, i) => {
-        if (type === 'sub' && i === excludeIdx) return;
-        targets.push(s.start || 0);
-        targets.push(s.end || 3);
-    });
-    // Playhead
-    targets.push(S.currentTime);
-    return targets;
-}
-
-function _snap(t, targets, threshold = 0.15) {
-    let best = t, bestDist = threshold;
-    for (const target of targets) {
-        const dist = Math.abs(t - target);
-        if (dist < bestDist) { best = target; bestDist = dist; }
-    }
-    return best;
-}
-
-function clipAtTime(t) {
-    let cur = 0;
-    for (let i = 0; i < S.clips.length; i++) {
-        const d = S.clips[i].duration || 3;
-        if (t < cur + d || i === S.clips.length - 1)
-            return { clip: S.clips[i], idx: i, local: Math.max(0, t - cur), start: cur };
-        cur += d;
-    }
-    return null;
-}
-
-function buildCSSFilter(effects) {
-    if (!effects?.length) return '';
-    const m = Object.fromEntries(effects.map(e => [e.type, e.value]));
-    const p = [];
-    if (m.brightness !== undefined) p.push(`brightness(${1 + m.brightness / 100})`);
-    if (m.contrast   !== undefined) p.push(`contrast(${1 + m.contrast / 100})`);
-    if (m.saturation !== undefined) p.push(`saturate(${Math.max(0, 1 + m.saturation / 100)})`);
-    if (m.blur !== undefined && m.blur > 0) p.push(`blur(${m.blur}px)`);
-    if (m.grayscale) p.push('grayscale(1)');
-    if (m.sepia)     p.push('sepia(0.8)');
-    if (m.invert)    p.push('invert(1)');
-    return p.join(' ');
-}
-
-function hexToRgba(hex, a) {
-    const h = (hex || '#000000').replace('#', '');
-    const r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
-    return `rgba(${r},${g},${b},${a})`;
-}
-
-function _makeTextShadow(outlineSize, outlineColor, shadowSize, shadowColor) {
-    const parts = [];
-    if (outlineSize > 0) {
-        const s = outlineSize, c = outlineColor;
-        parts.push(
-            `${-s}px ${-s}px 0 ${c}`, `${s}px ${-s}px 0 ${c}`,
-            `${-s}px ${s}px 0 ${c}`,  `${s}px ${s}px 0 ${c}`,
-            `0 ${-s}px 0 ${c}`,       `0 ${s}px 0 ${c}`,
-            `${-s}px 0 0 ${c}`,       `${s}px 0 0 ${c}`,
-        );
-    }
-    if (shadowSize > 0) {
-        const blur = Math.ceil(shadowSize / 2);
-        parts.push(`${shadowSize}px ${shadowSize}px ${blur}px ${shadowColor}`);
-    }
-    return parts.join(', ');
-}
-
-// ── Waveform cache (high-resolution: 4000 samples, resampled per draw) ────────
-const _waveCache = new Map();
-const _WAVE_RES  = 4000;
-
-async function drawWaveform(canvas, url) {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    let hiPeaks = _waveCache.get(url);
-    if (!hiPeaks) {
-        try {
-            const buf = await (await fetch(url)).arrayBuffer();
-            const ac  = new (window.AudioContext || window.webkitAudioContext)();
-            const dec = await ac.decodeAudioData(buf);
-            ac.close();
-            const data  = dec.getChannelData(0);
-            const block = Math.max(1, Math.floor(data.length / _WAVE_RES));
-            hiPeaks = new Float32Array(_WAVE_RES);
-            for (let i = 0; i < _WAVE_RES; i++) {
-                let mx = 0;
-                for (let j = 0; j < block; j++) mx = Math.max(mx, Math.abs(data[i * block + j] || 0));
-                hiPeaks[i] = mx;
-            }
-            _waveCache.set(url, hiPeaks);
-        } catch { return; }
-    }
-
-    ctx.fillStyle = 'rgba(74,158,255,0.08)';
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(74,158,255,0.75)';
-    ctx.lineWidth = 1;
-    const mid = h / 2;
-    ctx.beginPath();
-    for (let x = 0; x < w; x++) {
-        const fi  = (x / (w - 1 || 1)) * (_WAVE_RES - 1);
-        const lo  = Math.floor(fi), hi2 = Math.min(lo + 1, _WAVE_RES - 1);
-        const t   = fi - lo;
-        const amp = ((hiPeaks[lo] || 0) * (1 - t) + (hiPeaks[hi2] || 0) * t) * mid * 0.88;
-        ctx.moveTo(x + 0.5, mid - amp);
-        ctx.lineTo(x + 0.5, mid + amp);
-    }
-    ctx.stroke();
-}
-
-async function _probeAudioDuration(url) {
-    try {
-        const buf = await (await fetch(url)).arrayBuffer();
-        const ac  = new (window.AudioContext || window.webkitAudioContext)();
-        const dec = await ac.decodeAudioData(buf);
-        ac.close();
-        return dec.duration;
-    } catch { return 0; }
-}
 
 // ── Audio element pool ────────────────────────────────────────────────────────
 const _audioEls = new Map(); // trackId → HTMLAudioElement
@@ -239,6 +68,13 @@ function _pauseAllAudio() {
 // ── Init ──────────────────────────────────────────────────────────────────────
 export async function init() {
     const $ = id => document.getElementById(id);
+
+    // Wrappers so existing code that calls totalDur() / clipAtTime(t) / _snap / _getSnapTargets still works
+    const totalDur = () => _totalDurFn(S.clips);
+    const clipAtTime = (t) => _clipAtTimeFn(S.clips, t);
+    const _getSnapTargets = (excludeIdx, type) => getSnapTargets(S, excludeIdx, type);
+    const _snap = snap;
+    const _probeAudioDuration = probeAudioDuration;
 
     const section       = document.querySelector('[data-panel="imgvid"]');
     const newBtn        = $('ive-new-btn');
@@ -784,6 +620,7 @@ export async function init() {
     renderAll();
 
     // Size the preview content to match the selected export resolution aspect ratio
+    // → imgvid/preview.js (updateCustomResVis)
     function _updateCustomResVis() {
         const isCustom = resEl?.value === 'custom';
         if (resWEl) resWEl.style.display = isCustom ? '' : 'none';
@@ -791,6 +628,7 @@ export async function init() {
         if (resXEl) resXEl.style.display = isCustom ? '' : 'none';
     }
 
+    // → imgvid/export.js (updateExportModePanels)
     function _updateExportModePanels() {
         const fmtVal = $('ive-exp-format')?.value || 'mp4';
         const isAudio = fmtVal.startsWith('audio:');
@@ -934,6 +772,7 @@ export async function init() {
     }
 
     // ── Preview zoom ──────────────────────────────────────────────────────────
+    // → imgvid/preview.js (applyZoom)
     function _applyZoom(mode, pct) {
         S.previewMode = mode;
         if (mode === 'fit') {
@@ -971,6 +810,7 @@ export async function init() {
         return v;
     }
 
+    // → imgvid/preview.js (updatePreviewSize)
     function _updatePreviewSize() {
         const resVal = _getResolution();
         const parts  = resVal.split('x').map(Number);
@@ -3056,6 +2896,7 @@ export async function init() {
     }
 
     // ── Export ────────────────────────────────────────────────────────────────
+    // → imgvid/export.js (startExport)
     async function _startExport() {
         if (!S.clips.length) { toast('Нет клипов для экспорта', 'warn'); return; }
 
@@ -3192,6 +3033,7 @@ export async function init() {
         _pipEls.clear();
     }
 
+    // → imgvid/export.js (getExportSettings)
     function _getExportSettings() {
         return {
             format:     $('ive-exp-format')?.value  || 'mp4',
@@ -3202,6 +3044,7 @@ export async function init() {
         };
     }
 
+    // → imgvid/export.js (applyExportSettings)
     function _applyExportSettings(s) {
         if (!s) return;
         const fmtEl   = $('ive-exp-format');
