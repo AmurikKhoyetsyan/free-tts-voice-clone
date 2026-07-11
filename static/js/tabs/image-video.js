@@ -1084,7 +1084,7 @@ export async function init() {
             div.innerHTML = `${thumbHtml}
                 <div class="ive-tl-clip-label">${eh(clip.original || clip.file)}</div>
                 ${clip.type === 'video' ? '<div class="ive-tl-clip-badge">▶</div><div class="ive-tl-clip-resize-left"></div>' : ''}
-                <div class="ive-tl-clip-resize" data-ridx="${i}"></div>`;
+                ${clip.type !== 'video' ? `<div class="ive-tl-clip-resize" data-ridx="${i}"></div>` : ''}`;
 
             div.addEventListener('click', e => {
                 if (e.target.closest('.ive-tl-clip-resize') || e.target.closest('.ive-tl-clip-resize-left')) return;
@@ -1146,7 +1146,7 @@ export async function init() {
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
-            div.querySelector('.ive-tl-clip-resize').addEventListener('mousedown', e => {
+            div.querySelector('.ive-tl-clip-resize')?.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
                 const sx = e.clientX, sd = clip.duration;
                 const onMove = ev => {
@@ -1177,26 +1177,27 @@ export async function init() {
             videoTrackEl.appendChild(div);
             cursor += dur;
         });
-        // Add inter-clip transition blocks centered at clip boundaries
+        // Add inter-clip transition blocks at clip boundaries (additive model)
         let tCursor = 0;
         S.clips.forEach((clip, i) => {
             const dur = clip.duration || 3;
+            // Transition stored on INCOMING clip (clip.transition = from clips[i-1] to clips[i])
             if (i > 0) {
-                const prev = S.clips[i - 1];
-                const trans = prev.transition;
+                const trans = clip.transition;
                 if (trans?.type && trans.type !== 'none') {
-                    const transDur  = trans.duration || 0.5;
+                    const transDur   = trans.duration || 0.5;
                     const transDurPx = Math.max(20, transDur * S.pxPerSec);
                     const junctionX  = tCursor * S.pxPerSec;
                     const block = document.createElement('div');
                     block.className = 'ive-tl-trans-block';
-                    block.style.left  = (junctionX - transDurPx / 2) + 'px';
+                    // Block starts at the junction and extends into the incoming clip's territory
+                    block.style.left  = junctionX + 'px';
                     block.style.width = transDurPx + 'px';
                     const lbl = TRANSITIONS.find(t => t.value === trans.type)?.label || trans.type;
                     block.innerHTML = `<span class="ive-tl-trans-label">${eh(lbl)}</span><span class="ive-tl-trans-dur">${transDur}s</span>`;
                     block.addEventListener('click', e => {
                         e.stopPropagation();
-                        _selectClip(i - 1);
+                        _selectClip(i);
                         S.activeTab = 'slide';
                         document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                         document.querySelector('[data-ptab="slide"]')?.classList.add('active');
@@ -1412,14 +1413,26 @@ export async function init() {
             _renderPipInPreview(S.currentTime);
             return;
         }
-        const { clip, idx, local } = info;
-        const clipDur   = clip.duration || 3;
-        const nextClip  = S.clips[idx + 1];
-        const trans     = clip.transition;
-        const transType = (trans?.type && trans.type !== 'none') ? trans.type : 'none';
-        const transDur  = Math.max(0.01, parseFloat(trans?.duration || 0.5));
-        const inTrans   = transType !== 'none' && nextClip && local >= clipDur - transDur;
-        const transProgress = inTrans ? Math.max(0, Math.min(1, (local - (clipDur - transDur)) / transDur)) : 0;
+        const inTrans = info.inTransition;
+        let clip, idx, local, nextClip, transType, transDur, transProgress;
+        if (inTrans) {
+            clip          = info.outClip;
+            idx           = info.outIdx;
+            nextClip      = info.inClip;
+            transType     = info.transType;
+            transDur      = info.transDur;
+            transProgress = info.transProgress;
+            // Additive model: outgoing clip has finished playing — show its last frame
+            local         = info.outClip.duration;
+        } else {
+            clip          = info.clip;
+            idx           = info.idx;
+            local         = info.local;
+            nextClip      = null;
+            transType     = 'none';
+            transDur      = 0.5;
+            transProgress = 0;
+        }
 
         previewEmpty.style.display  = 'none';
 
@@ -1462,7 +1475,11 @@ export async function init() {
             const videoTime = local + (clip.trimIn || 0);
             const vSpeed    = clip.speed ?? 1;
             if (previewVideo.playbackRate !== vSpeed) previewVideo.playbackRate = vSpeed;
-            if (!S.isPlaying) {
+            if (inTrans) {
+                // Outgoing clip at its last frame — always frozen during transition
+                if (!previewVideo.paused) previewVideo.pause();
+                if (Math.abs(previewVideo.currentTime - videoTime) > 0.05) previewVideo.currentTime = videoTime;
+            } else if (!S.isPlaying) {
                 if (Math.abs(previewVideo.currentTime - videoTime) > 0.15) previewVideo.currentTime = videoTime;
                 if (!previewVideo.paused) previewVideo.pause();
             } else {
