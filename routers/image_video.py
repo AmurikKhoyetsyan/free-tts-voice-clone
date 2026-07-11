@@ -470,19 +470,7 @@ async def export_video(
 
     crf = {"low": 28, "medium": 22, "high": 18, "lossless": 0}.get(quality, 22)
 
-    # ── Extend last slide by total xfade duration (before defining worker) ──────
-    # Must live here (export_video scope) so slides is NOT treated as a local
-    # variable inside worker(), which would cause UnboundLocalError.
-    _total_trans_dur = sum(
-        float(slides[i].get("transition", {}).get("duration", 0.5))
-        for i in range(1, len(slides))
-        if _XFADE.get(slides[i].get("transition", {}).get("type", "none"))
-    )
-    if _total_trans_dur > 0 and len(slides) > 1:
-        slides = list(slides)
-        _last_slide = dict(slides[-1])
-        _last_slide["duration"] = float(_last_slide.get("duration", 3)) + _total_trans_dur
-        slides[-1] = _last_slide
+
 
     q: queue.Queue = queue.Queue()
     _NO_WIN = 0x08000000 if os.name == "nt" else 0
@@ -643,6 +631,9 @@ async def export_video(
                         sub_filter = f"subtitles='{ass_path}'"
 
                 # ── Transitions ──────────────────────────────────────────────
+                # Additive model: each clip keeps its full duration.
+                # The outgoing stream is padded (tpad clone) so xfade has frames
+                # during the transition window that starts after the clip ends.
                 q.put(("progress", 0.12, "Сборка переходов…"))
                 if len(slides) == 1:
                     last = "v0"
@@ -653,11 +644,17 @@ async def export_video(
                         trans = slides[i].get("transition", {})
                         xname = _XFADE.get(trans.get("type", "none"))
                         tdur  = float(trans.get("duration", 0.5)) if xname else 0.0
-                        offset += float(slides[i-1].get("duration", 3)) - tdur
+                        # Additive: offset = cumulative sum of full clip durations (no subtraction)
+                        offset += float(slides[i-1].get("duration", 3))
                         out    = f"xf{i}"
                         if xname:
+                            # Pad outgoing stream so it has frozen frames during the transition window
+                            padded = f"{prev}_p{i}"
                             filter_parts.append(
-                                f"[{prev}][v{i}]xfade=transition={xname}:"
+                                f"[{prev}]tpad=stop_mode=clone:stop_duration={tdur:.3f}[{padded}]"
+                            )
+                            filter_parts.append(
+                                f"[{padded}][v{i}]xfade=transition={xname}:"
                                 f"duration={tdur:.3f}:offset={max(0, offset):.3f}[{out}]"
                             )
                         else:

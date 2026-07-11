@@ -84,10 +84,5 @@ def _extract_thumb(video_path: str, thumb_path: str) -> bool:
 
 
 def _compute_video_dur(slides: list) -> float:
-    """Exact video stream duration after xfade transitions shorten it."""
-    total = sum(float(s.get("duration", 3)) for s in slides)
-    for i in range(1, len(slides)):
-        trans = slides[i].get("transition", {})
-        if _XFADE.get(trans.get("type", "none")):
-            total -= float(trans.get("duration", 0.5))
-    return max(0.0, total)
+    """Total video duration: additive model — clips keep their full duration."""
+    return max(0.0, sum(float(s.get("duration", 3)) for s in slides))
