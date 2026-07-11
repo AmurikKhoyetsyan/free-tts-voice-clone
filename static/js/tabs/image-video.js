@@ -2879,6 +2879,223 @@ export async function init() {
         } catch { listEl.innerHTML = '<div class="ive-empty">Ошибка</div>'; }
     }
 
+    // ── Template Apply ────────────────────────────────────────────────────────
+
+    function _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs }) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('ive-tmpl-apply-modal');
+            if (!modal) { resolve(null); return; }
+
+            const name = tmpl.name.replace(/ \(шаблон\)$/, '');
+            const slideCount = (tmpl.slides || []).length;
+
+            document.getElementById('tmpl-modal-name').textContent = name;
+            document.getElementById('tmpl-media-count').textContent = slideCount
+                ? `(ожидается ${slideCount} файл${slideCount === 1 ? '' : slideCount < 5 ? 'а' : 'ов'})`
+                : '';
+
+            document.getElementById('tmpl-media-section').style.display = hasSlides ? '' : 'none';
+            document.getElementById('tmpl-sub-section').style.display   = hasSubs   ? '' : 'none';
+            document.getElementById('tmpl-audio-section').style.display = hasAudio  ? '' : 'none';
+            document.getElementById('tmpl-pip-section').style.display   = hasPip    ? '' : 'none';
+
+            const mediaInput = document.getElementById('tmpl-media-input');
+            const audioInput = document.getElementById('tmpl-audio-input');
+            const pipInput   = document.getElementById('tmpl-pip-input');
+            const mediaList  = document.getElementById('tmpl-media-file-list');
+            const audioName  = document.getElementById('tmpl-audio-filename');
+            const pipName    = document.getElementById('tmpl-pip-filename');
+
+            mediaInput.value = ''; audioInput.value = ''; pipInput.value = '';
+            mediaList.innerHTML = ''; audioName.textContent = ''; pipName.textContent = '';
+
+            document.getElementById('tmpl-media-pick').onclick = () => mediaInput.click();
+            document.getElementById('tmpl-audio-pick').onclick = () => audioInput.click();
+            document.getElementById('tmpl-pip-pick').onclick   = () => pipInput.click();
+
+            mediaInput.onchange = () => {
+                const files = Array.from(mediaInput.files || []);
+                mediaList.innerHTML = files.map((f, i) =>
+                    `<div style="padding:2px 0"><span style="color:var(--text-dim,#999)">${i + 1}.</span> ${eh(f.name)}</div>`
+                ).join('');
+            };
+            audioInput.onchange = () => { audioName.textContent = audioInput.files?.[0]?.name || ''; };
+            pipInput.onchange   = () => { pipName.textContent   = pipInput.files?.[0]?.name   || ''; };
+
+            const close = (val) => {
+                modal.hidden = true;
+                document.removeEventListener('keydown', onKey);
+                resolve(val);
+            };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            document.addEventListener('keydown', onKey);
+
+            document.getElementById('tmpl-cancel-btn').onclick = () => close(null);
+            document.getElementById('tmpl-apply-btn').onclick  = () => close({
+                mediaFiles: Array.from(mediaInput.files || []),
+                audioFile:  audioInput.files?.[0] || null,
+                pipFile:    pipInput.files?.[0]   || null,
+            });
+
+            modal.hidden = false;
+        });
+    }
+
+    async function _applyTemplate(tid) {
+        let tmpl;
+        try {
+            const r = await fetch(`/api/imgvid/projects/${tid}`);
+            if (!r.ok) { toast('Ошибка загрузки шаблона', 'err'); return; }
+            tmpl = await r.json();
+        } catch (err) { toast(err.message, 'err'); return; }
+
+        if (S.dirty && !confirm('Несохранённые изменения. Применить шаблон?')) return;
+
+        const hasSlides = (tmpl.slides    || []).length > 0;
+        const hasAudio  = (tmpl.audio     || []).length > 0;
+        const hasPip    = (tmpl.pip       || []).length > 0;
+        const hasSubs   = (tmpl.subtitles || []).length > 0;
+
+        const result = await _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs });
+        if (!result) return;
+
+        const { mediaFiles, audioFile, pipFile } = result;
+        _stopPlayback();
+
+        const applyBtn = document.getElementById('tmpl-apply-btn');
+        if (applyBtn) applyBtn.disabled = true;
+        toast('Загрузка файлов…', 'info');
+
+        try {
+            // ── Slides ──────────────────────────────────────────────────────────
+            const newClips = [];
+            if (mediaFiles.length > 0) {
+                const tmplSlides = tmpl.slides || [];
+                const count = Math.max(mediaFiles.length, tmplSlides.length);
+                for (let i = 0; i < count; i++) {
+                    const file      = mediaFiles[i];
+                    const tmplSlide = tmplSlides[i] || {};
+
+                    if (!file) {
+                        // No user file for this slot — skip (drop slot)
+                        continue;
+                    }
+
+                    const isVid = file.type.startsWith('video/') ||
+                        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(file.name);
+                    const fd = new FormData(); fd.append('file', file);
+                    const r = await fetch(isVid ? '/api/imgvid/clips' : '/api/imgvid/images',
+                        { method: 'POST', body: fd });
+                    const d = await r.json();
+                    if (!r.ok) { toast(d.detail || 'Ошибка загрузки', 'err'); continue; }
+
+                    const base = { ...tmplSlide, id: uid(), subtitles: [] };
+                    base.type      = isVid ? 'video' : 'image';
+                    base.file      = d.name;
+                    base.fileUrl   = d.url;
+                    base.thumbUrl  = isVid ? (d.thumb_url || '') : d.url;
+                    base.original  = d.original;
+                    // Ensure structural defaults for slides beyond template slots
+                    base.transition  = base.transition  || { type: 'none', duration: 0.5 };
+                    base.effects     = base.effects     || [];
+                    base.startEffect = base.startEffect || { type: 'none', duration: 1.0 };
+                    base.endEffect   = base.endEffect   || { type: 'none', duration: 1.0 };
+
+                    if (isVid) {
+                        // Keep template duration; fall back to actual video duration
+                        base.duration = tmplSlide.duration || d.duration || 5;
+                        // Clear image-only fields
+                        delete base.imgScale; delete base.imgOffsetX;
+                        delete base.imgOffsetY; delete base.crop;
+                    } else {
+                        base.duration = tmplSlide.duration || 3;
+                        // Clear video-only fields
+                        delete base.trimIn; delete base.muteAudio;
+                        // Ensure image defaults exist
+                        if (base.imgScale   === undefined) base.imgScale   = 100;
+                        if (base.imgOffsetX === undefined) base.imgOffsetX = 0;
+                        if (base.imgOffsetY === undefined) base.imgOffsetY = 0;
+                    }
+                    newClips.push(base);
+                }
+            } else {
+                // No media selected — use template slides as-is (graceful fallback)
+                (tmpl.slides || []).forEach(s => newClips.push({ ...s, id: uid(), subtitles: [] }));
+            }
+
+            // ── Audio ────────────────────────────────────────────────────────────
+            let newAudio = [];
+            if (audioFile && hasAudio) {
+                const fd = new FormData(); fd.append('file', audioFile);
+                const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
+                const d = await r.json();
+                if (r.ok) {
+                    const tmplA = tmpl.audio[0] || {};
+                    newAudio = [{ ...tmplA, id: uid(), file: d.name, fileUrl: d.url, original: d.original }];
+                }
+            } else if (!audioFile && hasAudio) {
+                // Fallback: preserve template audio tracks as-is
+                newAudio = (tmpl.audio || []).map(a => ({ ...a, id: uid() }));
+            }
+
+            // ── PIP ──────────────────────────────────────────────────────────────
+            let newPip = [];
+            if (pipFile && hasPip) {
+                const isVid = pipFile.type.startsWith('video/') ||
+                    /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(pipFile.name);
+                const fd = new FormData(); fd.append('file', pipFile);
+                const r = await fetch(isVid ? '/api/imgvid/clips' : '/api/imgvid/images',
+                    { method: 'POST', body: fd });
+                const d = await r.json();
+                if (r.ok) {
+                    const tmplP = tmpl.pip[0] || {};
+                    newPip = [{ ...tmplP, id: uid(), type: isVid ? 'video' : 'image',
+                        file: d.name, fileUrl: d.url,
+                        thumbUrl: isVid ? (d.thumb_url || '') : d.url, original: d.original }];
+                }
+            } else if (!pipFile && hasPip) {
+                newPip = (tmpl.pip || []).map(p => ({ ...p, id: uid() }));
+            }
+
+            // ── Subtitles ────────────────────────────────────────────────────────
+            let newSubs = [];
+            if (hasSubs) {
+                const tmplSub = { ...(tmpl.subtitles[0] || {}) };
+                const projDur = _totalDurFn(newClips);
+                newSubs = [{
+                    ...tmplSub,
+                    id: uid(),
+                    text:  tmplSub.text  || '',
+                    start: tmplSub.start || 0,
+                    end:   Math.min(tmplSub.end || 3, projDur || 3),
+                }];
+            }
+
+            // ── Apply to state ───────────────────────────────────────────────────
+            S.projectId   = null;
+            S.projectName = tmpl.name.replace(/ \(шаблон\)$/, '');
+            S.clips       = newClips;
+            S.audioTracks = newAudio;
+            S.subtitles   = newSubs;
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers   = newPip;
+            S.selPipIdx   = -1; S.selIdxs = new Set();
+            S.selIdx      = S.clips.length ? 0 : -1;
+            S.dirty       = true;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(tmpl.export_settings);
+            renderAll();
+            log('Шаблон применён: ' + S.projectName, 'done');
+            toast('Шаблон применён: ' + S.projectName, 'ok');
+
+        } catch (err) {
+            toast(err.message, 'err');
+        } finally {
+            if (applyBtn) applyBtn.disabled = false;
+        }
+    }
+
     async function loadTemplatesList() {
         const listEl = $('ive-templates-list');
         if (!listEl) return;
@@ -2963,24 +3180,7 @@ export async function init() {
             await loadTemplatesList(); return;
         }
         if (act === 'use') {
-            if (S.dirty && !confirm('Несохранённые изменения. Открыть шаблон?')) return;
-            try {
-                const r = await fetch(`/api/imgvid/projects/${tid}`);
-                const d = await r.json();
-                _stopPlayback();
-                S.projectId = null; S.projectName = d.name.replace(/ \(шаблон\)$/, '');
-                S.clips = d.slides || []; S.audioTracks = d.audio || [];
-                S.subtitles = d.subtitles || [];
-                _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
-                _pipEls.clear();
-                S.pipLayers = d.pip || d.pipLayers || [];
-                S.selPipIdx = -1; S.selIdxs = new Set();
-                S.selIdx = S.clips.length ? 0 : -1; S.dirty = true;
-                if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
-                _applyExportSettings(d.export_settings);
-                renderAll();
-                toast('Шаблон загружен: ' + S.projectName, 'ok');
-            } catch (err) { toast(err.message, 'err'); }
+            await _applyTemplate(tid);
         }
     });
 
