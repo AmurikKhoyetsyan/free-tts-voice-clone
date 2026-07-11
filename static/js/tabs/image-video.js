@@ -5,7 +5,7 @@ import { openConfirm }     from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
-import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS } from '../imgvid/constants.js';
+import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS } from '../imgvid/constants.js';
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
@@ -666,7 +666,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/images', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
+                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
                 S.dirty = true; log('Изображение добавлено: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -682,7 +682,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/clips', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, effects: [], subtitles: [] });
+                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
                 S.dirty = true; log('Видеоклип добавлен: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -1519,6 +1519,7 @@ export async function init() {
             _applyTransitionCSS(transType, transProgress);
         } else {
             _resetTransitionPreview();
+            _applyClipStartEndEffects(clip, local);
         }
 
         // Render PIP layers
@@ -1550,6 +1551,52 @@ export async function init() {
         } else {
             imgEl.style.clipPath = '';
         }
+    }
+
+    function _applyClipStartEndEffects(clip, local) {
+        const start = clip.startEffect;
+        const end   = clip.endEffect;
+        const dur   = clip.duration || 3;
+        let opacity = 1, scale = 1, tx = 0, ty = 0;
+
+        if (start?.type && start.type !== 'none') {
+            const d = Math.max(0.01, start.duration || 1);
+            const p = Math.max(0, Math.min(1, local / d));
+            if (p < 1) {
+                switch (start.type) {
+                    case 'fade-in':    opacity *= p; break;
+                    case 'zoom-in':    scale = 0.5 + 0.5 * p; break;
+                    case 'zoom-out':   scale = 1.5 - 0.5 * p; break;
+                    case 'slide-left': tx = (p - 1) * 100; break;
+                    case 'slide-right':tx = (1 - p) * 100; break;
+                    case 'slide-up':   ty = (p - 1) * 100; break;
+                    case 'slide-down': ty = (1 - p) * 100; break;
+                }
+            }
+        }
+
+        if (end?.type && end.type !== 'none') {
+            const d = Math.max(0.01, end.duration || 1);
+            const p = Math.max(0, Math.min(1, (dur - local) / d));
+            if (p < 1) {
+                switch (end.type) {
+                    case 'fade-out':   opacity *= p; break;
+                    case 'zoom-in':    scale *= 1 + (1 - p) * 0.5; break;
+                    case 'zoom-out':   scale *= 0.5 + 0.5 * p; break;
+                    case 'slide-left': tx -= (1 - p) * 100; break;
+                    case 'slide-right':tx += (1 - p) * 100; break;
+                    case 'slide-up':   ty -= (1 - p) * 100; break;
+                    case 'slide-down': ty += (1 - p) * 100; break;
+                }
+            }
+        }
+
+        const zT  = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
+        const effT = (scale !== 1 || tx !== 0 || ty !== 0)
+            ? `scale(${scale.toFixed(4)}) translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%)`
+            : '';
+        previewContent.style.opacity   = opacity.toFixed(4);
+        previewContent.style.transform = [zT, effT].filter(Boolean).join(' ') || '';
     }
 
     function _renderSubOverlay(sub, subKey) {
@@ -2004,6 +2051,24 @@ export async function init() {
             <label class="ive-label" id="pv-tdur-row" ${(!clip.transition?.type || clip.transition.type === 'none') ? 'hidden' : ''}>Длит. перехода (с)
                 <input class="ive-input" id="pv-trans-dur" type="number" min="0.1" max="4" step="0.1" value="${clip.transition?.duration || 0.5}">
             </label>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Начальный эффект</div>
+            <label class="ive-label">Тип
+                <select class="ive-select" id="pv-start-eff-type">
+                    ${START_EFFECTS.map(e => `<option value="${e.value}"${(clip.startEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label" id="pv-start-eff-dur-row" ${(!clip.startEffect?.type||clip.startEffect.type==='none')?'hidden':''}>Длит. (с)
+                <input class="ive-input" id="pv-start-eff-dur" type="number" min="0.1" max="${clip.duration}" step="0.1" value="${clip.startEffect?.duration||1.0}">
+            </label>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Конечный эффект</div>
+            <label class="ive-label">Тип
+                <select class="ive-select" id="pv-end-eff-type">
+                    ${END_EFFECTS.map(e => `<option value="${e.value}"${(clip.endEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label" id="pv-end-eff-dur-row" ${(!clip.endEffect?.type||clip.endEffect.type==='none')?'hidden':''}>Длит. (с)
+                <input class="ive-input" id="pv-end-eff-dur" type="number" min="0.1" max="${clip.duration}" step="0.1" value="${clip.endEffect?.duration||1.0}">
+            </label>
             <label class="ive-label">Скорость
                 <select class="ive-select" id="pv-speed">
                     <option value="0.25"${(clip.speed??1)===0.25?' selected':''}>0.25×</option>
@@ -2057,6 +2122,28 @@ export async function init() {
             const v = parseFloat(e.target.value);
             if (isFinite(v) && v > 0) { clip.transition.duration = v; S.dirty = true; }
         });
+        const seTypeEl = $('pv-start-eff-type'), seDurRow = $('pv-start-eff-dur-row');
+        seTypeEl.addEventListener('change', () => {
+            clip.startEffect = clip.startEffect || {};
+            clip.startEffect.type = seTypeEl.value;
+            seDurRow.hidden = seTypeEl.value === 'none';
+            S.dirty = true; renderPreview();
+        });
+        $('pv-start-eff-dur')?.addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            if (isFinite(v) && v > 0) { (clip.startEffect = clip.startEffect || {}).duration = v; S.dirty = true; renderPreview(); }
+        });
+        const eeTypeEl = $('pv-end-eff-type'), eeDurRow = $('pv-end-eff-dur-row');
+        eeTypeEl.addEventListener('change', () => {
+            clip.endEffect = clip.endEffect || {};
+            clip.endEffect.type = eeTypeEl.value;
+            eeDurRow.hidden = eeTypeEl.value === 'none';
+            S.dirty = true; renderPreview();
+        });
+        $('pv-end-eff-dur')?.addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            if (isFinite(v) && v > 0) { (clip.endEffect = clip.endEffect || {}).duration = v; S.dirty = true; renderPreview(); }
+        });
         if (!isVideo) {
             $('pv-replace-btn').addEventListener('click', () => $('pv-replace-file').click());
             $('pv-replace-file').addEventListener('change', async () => {
@@ -2107,8 +2194,10 @@ export async function init() {
         $('pv-apply-all').addEventListener('click', () => {
             S.clips.forEach((c, idx) => {
                 if (c === clip) return;
-                c.duration   = clip.duration;
-                c.transition = JSON.parse(JSON.stringify(clip.transition || {}));
+                c.duration    = clip.duration;
+                c.transition  = JSON.parse(JSON.stringify(clip.transition  || {}));
+                c.startEffect = JSON.parse(JSON.stringify(clip.startEffect || {}));
+                c.endEffect   = JSON.parse(JSON.stringify(clip.endEffect   || {}));
                 c.speed      = clip.speed;
                 c.muteAudio  = clip.muteAudio;
                 c.trimIn     = clip.trimIn;

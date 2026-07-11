@@ -11,6 +11,7 @@ from routers.imgvid.ffmpeg_utils import (
     _XFADE, _EFFECTS,
     _find, _probe_duration_clip, _extract_thumb,
     _compute_video_dur,
+    _start_effect_filters, _end_effect_filters,
 )
 from routers.imgvid.ass_writer import _ass_time, _write_ass
 import routers.imgvid.project_ops as _proj_ops
@@ -588,6 +589,16 @@ async def export_video(
                         et, ev = ef.get("type"), ef.get("value", 0)
                         if et in _EFFECTS and float(ev) != 0:
                             parts.append(_EFFECTS[et](ev))
+
+                    start_eff = slide.get("startEffect") or {}
+                    end_eff   = slide.get("endEffect")   or {}
+                    se_type   = (start_eff.get("type") or "none").strip()
+                    ee_type   = (end_eff.get("type")   or "none").strip()
+                    se_dur    = min(float(start_eff.get("duration") or 1.0), dur)
+                    ee_dur    = min(float(end_eff.get("duration")   or 1.0), dur)
+                    parts.extend(_start_effect_filters(se_type, se_dur, dur, width, height))
+                    parts.extend(_end_effect_filters(ee_type, ee_dur, dur, width, height))
+
                     filter_parts.append(f"[{i}:v]{','.join(parts)}[v{i}]")
 
                 # ── Subtitles ────────────────────────────────────────────────
