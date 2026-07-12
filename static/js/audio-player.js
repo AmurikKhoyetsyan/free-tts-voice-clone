@@ -77,32 +77,6 @@ export class AudioPlayer {
         (this._cbs[event] || []).forEach(cb => { try { cb(); } catch (_) {} });
     }
 
-    _startRaf(audio, wave, curEl) {
-        let baseWall  = performance.now();
-        let baseAudio = audio.currentTime;
-
-        const tick = (wall) => {
-            const dur  = audio.duration;
-            const real = audio.currentTime;
-
-            // Re-sync base if playback position drifted (seek, rate change)
-            const rate = audio.playbackRate || 1;
-            const extrapolated = baseAudio + (wall - baseWall) / 1000 * rate;
-            if (Math.abs(real - extrapolated) > 0.08) {
-                baseAudio = real;
-                baseWall  = wall;
-            }
-
-            if (isFinite(dur) && dur > 0) {
-                const cur = Math.min(dur, baseAudio + (wall - baseWall) / 1000 * rate);
-                wave.setProgress(cur / dur);
-                curEl.textContent = fmt(cur);
-            }
-            this._raf = requestAnimationFrame(tick);
-        };
-        this._raf = requestAnimationFrame(tick);
-    }
-
     _stopRaf() {
         if (this._raf !== null) { cancelAnimationFrame(this._raf); this._raf = null; }
     }
@@ -118,6 +92,9 @@ export class AudioPlayer {
             <div class="ap-wave-bg">
                 <div class="ap-wave"></div>
                 <span class="ap-hover-time" aria-hidden="true"></span>
+            </div>
+            <div class="ap-seekbar-wrap">
+                <input type="range" class="ap-seek-bar" min="0" max="1" step="0.0001" value="0">
             </div>
             <div class="ap-timestamps">
                 <span class="ap-time-cur">0:00</span>
@@ -138,6 +115,7 @@ export class AudioPlayer {
         const waveEl    = this.host.querySelector('.ap-wave');
         const waveBgEl  = this.host.querySelector('.ap-wave-bg');
         const hoverTime = this.host.querySelector('.ap-hover-time');
+        const seekBar   = this.host.querySelector('.ap-seek-bar');
         const curEl     = this.host.querySelector('.ap-time-cur');
         const durEl     = this.host.querySelector('.ap-time-dur');
         const playBtn   = this.host.querySelector('.ap-play');
@@ -152,7 +130,49 @@ export class AudioPlayer {
         this._wave = wave;
         wave.load(url);
 
-        // Hover: show time tooltip + light-orange tint left-to-cursor
+        // ── Unified UI sync ──────────────────────────────────────────────────
+        // Called with actual currentTime + duration; updates all visual elements.
+        const _syncUI = (cur, dur) => {
+            const r = dur > 0 ? cur / dur : 0;
+            wave.setProgress(r);
+            seekBar.value = r;
+            curEl.textContent = fmt(cur);
+        };
+
+        // ── RAF: smooth progress during playback ─────────────────────────────
+        // Simple direct read each frame — no extrapolation, no drift.
+        const _startRaf = () => {
+            const tick = () => {
+                const dur = audio.duration;
+                const cur = audio.currentTime;
+                if (isFinite(dur) && dur > 0) _syncUI(cur, dur);
+                this._raf = requestAnimationFrame(tick);
+            };
+            this._raf = requestAnimationFrame(tick);
+        };
+
+        // ── Seek bar (range input) ───────────────────────────────────────────
+        // `input` fires continuously during drag → preview waveform + time.
+        // `change` fires on release → commit to audio.currentTime.
+        let seekBarDragging = false;
+        seekBar.addEventListener('mousedown', () => { seekBarDragging = true; });
+        seekBar.addEventListener('input', () => {
+            const dur = audio.duration;
+            if (!isFinite(dur) || dur <= 0) return;
+            const ratio = parseFloat(seekBar.value);
+            wave.setProgress(ratio);
+            curEl.textContent = fmt(ratio * dur);
+        });
+        seekBar.addEventListener('change', () => {
+            const dur = audio.duration;
+            if (!isFinite(dur) || dur <= 0) return;
+            audio.currentTime = parseFloat(seekBar.value) * dur;
+            seekBarDragging = false;
+        });
+        // Safety: clear drag flag on mouseup anywhere
+        document.addEventListener('mouseup', () => { seekBarDragging = false; }, { once: false });
+
+        // ── Waveform hover ───────────────────────────────────────────────────
         wave.onHover((ratio) => {
             if (!isFinite(audio.duration) || audio.duration <= 0) return;
             hoverTime.textContent = fmt(ratio * audio.duration);
@@ -164,58 +184,78 @@ export class AudioPlayer {
         });
         wave.onLeave(() => hoverTime.classList.remove('visible'));
 
-        // Speed cycling
-        let speedIdx = 2; // 1x
-        speedBtn.addEventListener('click', () => {
-            speedIdx = (speedIdx + 1) % SPEEDS.length;
-            const s = SPEEDS[speedIdx];
-            audio.playbackRate = s;
-            speedBtn.textContent = Number.isInteger(s) ? `${s}x` : `${s}x`;
+        // ── Waveform seek (click + drag) ─────────────────────────────────────
+        wave.onSeek((ratio) => {
+            const dur = audio.duration;
+            if (!isFinite(dur) || dur <= 0) return;
+            const t = ratio * dur;
+            audio.currentTime = t;
+            _syncUI(t, dur);
         });
 
-        skipB.addEventListener('click', () => {
-            if (isFinite(audio.duration)) audio.currentTime = Math.max(0, audio.currentTime - 5);
-        });
-        skipF.addEventListener('click', () => {
-            if (isFinite(audio.duration)) audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+        // ── Audio events ─────────────────────────────────────────────────────
+        audio.addEventListener('loadedmetadata', () => {
+            durEl.textContent = fmt(audio.duration);
         });
 
         audio.addEventListener('play', () => {
             playBtn.innerHTML = ICONS.pause;
             playBtn.setAttribute('aria-label', 'Пауза');
-            this._startRaf(audio, wave, curEl);
+            _startRaf();
             this._emit('play');
         });
+
         audio.addEventListener('pause', () => {
             this._stopRaf();
             playBtn.innerHTML = ICONS.play;
             playBtn.setAttribute('aria-label', 'Воспроизвести');
             this._emit('pause');
         });
+
         audio.addEventListener('ended', () => {
             this._stopRaf();
             playBtn.innerHTML = ICONS.play;
             playBtn.setAttribute('aria-label', 'Воспроизвести');
             wave.setProgress(0);
+            seekBar.value = 0;
             curEl.textContent = '0:00';
             audioManager.stop(this);
             this._emit('ended');
         });
-        audio.addEventListener('loadedmetadata', () => {
-            durEl.textContent = fmt(audio.duration);
+
+        // Fired by browser on seek (even while paused) — keeps UI in sync
+        // after skip-back/forward clicks when audio is paused.
+        audio.addEventListener('timeupdate', () => {
+            if (!seekBarDragging) {
+                const dur = audio.duration;
+                const cur = audio.currentTime;
+                if (isFinite(dur) && dur > 0 && audio.paused) {
+                    _syncUI(cur, dur);
+                }
+            }
         });
 
+        // ── Controls ─────────────────────────────────────────────────────────
         playBtn.addEventListener('click', () => {
             if (audio.paused) this.play();
             else this.pause();
         });
 
-        wave.onClick((ratio) => {
-            if (isFinite(audio.duration) && audio.duration > 0) {
-                audio.currentTime = ratio * audio.duration;
-                wave.setProgress(ratio);
-                curEl.textContent = fmt(audio.currentTime);
-            }
+        let speedIdx = 2; // default 1x
+        speedBtn.addEventListener('click', () => {
+            speedIdx = (speedIdx + 1) % SPEEDS.length;
+            const s = SPEEDS[speedIdx];
+            audio.playbackRate = s;
+            speedBtn.textContent = `${s}x`;
+        });
+
+        skipB.addEventListener('click', () => {
+            if (isFinite(audio.duration))
+                audio.currentTime = Math.max(0, audio.currentTime - 5);
+        });
+        skipF.addEventListener('click', () => {
+            if (isFinite(audio.duration))
+                audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
         });
 
         this.host.querySelector('.ap-download').addEventListener('click', () => {

@@ -55,6 +55,66 @@
     opacity: 1;
 }
 
+/* Seek bar (range input) */
+.audio-player .ap-seekbar-wrap {
+    padding: 0 2px;
+}
+
+.audio-player .ap-seek-bar {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    border: none;
+    background: var(--border);
+    accent-color: var(--accent);
+    display: block;
+}
+
+.audio-player .ap-seek-bar::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+}
+
+.audio-player .ap-seek-bar::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    margin-top: -5px;
+    transition: transform .1s;
+}
+
+.audio-player .ap-seek-bar::-webkit-slider-thumb:hover,
+.audio-player .ap-seek-bar:active::-webkit-slider-thumb {
+    transform: scale(1.25);
+}
+
+.audio-player .ap-seek-bar::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    border: none;
+}
+
+.audio-player .ap-seek-bar::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
 /* Timestamps row */
 .audio-player .ap-timestamps {
     display: flex;
