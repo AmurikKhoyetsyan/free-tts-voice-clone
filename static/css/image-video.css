@@ -49,6 +49,17 @@
     letter-spacing: .04em;
 }
 
+/* Sidebar sub-tabs (Projects / Templates) */
+.ive-sidebar-tabs { display: flex; gap: 2px; }
+.ive-stab {
+    padding: 3px 10px; font-size: 11px; font-weight: 500;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; color: var(--text-dim); cursor: pointer;
+    transition: background .12s, color .12s;
+}
+.ive-stab:hover  { background: var(--bg2); color: var(--text); }
+.ive-stab.active { background: var(--accent, #4a9eff); color: #fff; border-color: var(--accent, #4a9eff); }
+
 /* Projects */
 .ive-projects-list { max-height: 140px; overflow-y: auto; }
 .ive-proj-row {
@@ -627,3 +638,89 @@
 
 /* Multi-select clip highlighting */
 .ive-tl-clip.multi-sel { outline: 2px solid rgba(74,158,255,0.7); }
+
+/* Template apply modal — DnD file slots */
+.tmpl-dnd-slot {
+    border: 1px dashed var(--border, #e5e7eb);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--surface-2, #f4f4f5);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    box-sizing: border-box;
+}
+.tmpl-dnd-slot.drag-over {
+    border-color: var(--accent, #f97316);
+    background: var(--accent-soft, #ffedd5);
+}
+.tmpl-dnd-slot.has-file {
+    cursor: default;
+    border-style: solid;
+    border-color: var(--border, #e5e7eb);
+}
+.tmpl-dnd-zone {
+    display: flex; flex-direction: row;
+    align-items: center; gap: 8px; flex: 1;
+}
+.tmpl-dnd-icon { font-size: 16px; line-height: 1; flex-shrink: 0; }
+.tmpl-dnd-hint { font-size: 12px; color: var(--text-muted, #71717a); flex: 1; }
+.tmpl-dnd-thumb {
+    width: 56px; height: 36px;
+    object-fit: cover; border-radius: 3px;
+    border: 1px solid var(--border, #e5e7eb); flex-shrink: 0;
+    background: var(--surface-2, #f4f4f5);
+}
+.tmpl-dnd-file-info {
+    flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0;
+}
+.tmpl-dnd-fname {
+    font-size: 12px; font-weight: 500; color: var(--text, #18181b);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tmpl-dnd-dur { font-size: 11px; color: var(--text-muted, #71717a); }
+
+/* Template apply — slide assignment list */
+.tmpl-slide-list {
+    display: flex; flex-direction: column; gap: 3px; margin-top: 6px;
+}
+.tmpl-slide-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; border: 1px solid var(--border, #e5e7eb);
+    border-radius: 5px; background: var(--surface, #fff); min-height: 36px;
+}
+.tmpl-slide-row-lbl {
+    font-size: 12px; color: var(--text-muted, #71717a);
+    min-width: 28px; flex-shrink: 0;
+}
+.tmpl-slide-row-empty {
+    flex: 1; font-size: 11px; color: var(--text-dim, #a1a1aa); font-style: italic;
+}
+
+/* Sound effects chips */
+.ive-sfx-chips {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px;
+}
+.ive-sfx-chip {
+    padding: 2px 8px; font-size: 10px; font-weight: 500;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg2); color: var(--text-dim);
+    cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+    line-height: 1.5;
+}
+.ive-sfx-chip:hover { background: var(--bg3); color: var(--text); }
+.ive-sfx-chip.active {
+    background: var(--accent, #4a9eff); color: #fff;
+    border-color: var(--accent, #4a9eff);
+}
+.ive-sfx-params-block {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 6px 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 3px;
+}
+.ive-sfx-params-label {
+    font-size: 10px; font-weight: 600; color: var(--text-dim); margin-bottom: 2px;
+}

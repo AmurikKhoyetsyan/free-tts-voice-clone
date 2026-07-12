@@ -12,6 +12,8 @@ export class WaveRenderer {
         this.peaks     = null;
         this._progress = 0;
         this._hover    = null;
+        this._seekMoveHandler = null;
+        this._seekUpHandler   = null;
 
         this.canvas = document.createElement('canvas');
         this.canvas.style.cssText =
@@ -43,6 +45,28 @@ export class WaveRenderer {
         if (this.peaks) this._draw(ratio);
     }
 
+    // Fires handler(ratio) on mousedown AND during drag — covers click and scrub.
+    // Replaces the old onClick; also used by audio-player for seek.
+    onSeek(handler) {
+        let active = false;
+        const getR = (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        };
+        this.canvas.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            active = true;
+            handler(getR(e));
+            e.preventDefault(); // prevent text selection during drag
+        });
+        // Document-level so drag continues outside the canvas
+        this._seekMoveHandler = (e) => { if (active) handler(getR(e)); };
+        this._seekUpHandler   = () => { active = false; };
+        document.addEventListener('mousemove', this._seekMoveHandler);
+        document.addEventListener('mouseup',   this._seekUpHandler);
+    }
+
+    // Keep onClick for any existing external callers
     onClick(handler) {
         this.canvas.addEventListener('click', (e) => {
             const rect = this.canvas.getBoundingClientRect();
@@ -69,6 +93,8 @@ export class WaveRenderer {
     }
 
     destroy() {
+        if (this._seekMoveHandler) document.removeEventListener('mousemove', this._seekMoveHandler);
+        if (this._seekUpHandler)   document.removeEventListener('mouseup',   this._seekUpHandler);
         this.canvas.remove();
         this.peaks = null;
     }

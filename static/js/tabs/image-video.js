@@ -1,11 +1,11 @@
 import { log }             from '../logger.js';
 import { toast }           from '../toast.js';
 import { synthesizeStream } from '../api.js';
-import { openConfirm }     from '../modal.js';
+import { openConfirm, openPrompt } from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
-import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS } from '../imgvid/constants.js';
+import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS } from '../imgvid/constants.js';
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
@@ -28,6 +28,8 @@ const S = {
     pipLayers: [],
     // Preview dimensions (set by _updatePreviewSize, used for subtitle scaling)
     previewH: 0, previewW: 0,
+    // Template edit mode
+    isTemplateMode: false, editingTemplateId: null,
 };
 
 // ── Audio element pool ────────────────────────────────────────────────────────
@@ -504,12 +506,21 @@ export async function init() {
     $('ive-save-template-btn')?.addEventListener('click', async () => {
         if (!S.projectId) { await _saveProject(); }
         if (!S.projectId) { toast('Сначала сохраните проект', 'warn'); return; }
+        const suggestedName = (S.projectName || 'Шаблон').trim();
+        const name = await openPrompt({ title: 'Сохранить как шаблон', initial: suggestedName, confirmLabel: 'Сохранить' });
+        if (name === null) return;
         try {
-            const r = await fetch(`/api/imgvid/projects/${S.projectId}/save-as-template`, { method: 'POST' });
+            const r = await fetch(`/api/imgvid/projects/${S.projectId}/save-as-template`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() || suggestedName }),
+            });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            toast('Сохранено как шаблон: ' + d.name, 'ok');
+            toast('Шаблон сохранён: ' + d.name, 'ok');
             await loadTemplatesList();
+            events.dispatchEvent(new CustomEvent('imgvid-template-changed'));
+            _switchSidebarTab('templates');
         } catch (e) { toast(e.message, 'err'); }
     });
     // .amur save/open
@@ -588,6 +599,12 @@ export async function init() {
         } catch (e) { toast(e.message, 'err'); }
     });
 
+    // Listen for edit-template event from History tab
+    events?.addEventListener('imgvid-edit-template', async (ev) => {
+        const tid = ev.detail?.tid; if (!tid) return;
+        await _editTemplate(tid);
+    });
+
     // ── Keyboard shortcuts ────────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
         if (!section || section.hidden) return;
@@ -604,6 +621,19 @@ export async function init() {
             case 'Delete': case 'Backspace':
                 if (S.selIdx >= 0) { e.preventDefault(); _deleteSelectedClip(); }             break;
         }
+    });
+
+    // ── Sidebar sub-tabs (Projects / Templates) ───────────────────────────────
+    function _switchSidebarTab(name) {
+        document.querySelectorAll('.ive-stab').forEach(b => {
+            b.classList.toggle('active', b.dataset.stab === name);
+        });
+        document.querySelectorAll('.ive-stab-pane').forEach(p => {
+            p.style.display = p.dataset.stabpane === name ? '' : 'none';
+        });
+    }
+    document.querySelectorAll('.ive-stab').forEach(b => {
+        b.addEventListener('click', () => _switchSidebarTab(b.dataset.stab));
     });
 
     // ── Boot ──────────────────────────────────────────────────────────────────
@@ -666,7 +696,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/images', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
+                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
                 S.dirty = true; log('Изображение добавлено: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -682,7 +712,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/clips', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, effects: [], subtitles: [] });
+                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
                 S.dirty = true; log('Видеоклип добавлен: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -1519,6 +1549,7 @@ export async function init() {
             _applyTransitionCSS(transType, transProgress);
         } else {
             _resetTransitionPreview();
+            _applyClipStartEndEffects(clip, local);
         }
 
         // Render PIP layers
@@ -1550,6 +1581,52 @@ export async function init() {
         } else {
             imgEl.style.clipPath = '';
         }
+    }
+
+    function _applyClipStartEndEffects(clip, local) {
+        const start = clip.startEffect;
+        const end   = clip.endEffect;
+        const dur   = clip.duration || 3;
+        let opacity = 1, scale = 1, tx = 0, ty = 0;
+
+        if (start?.type && start.type !== 'none') {
+            const d = Math.max(0.01, start.duration || 1);
+            const p = Math.max(0, Math.min(1, local / d));
+            if (p < 1) {
+                switch (start.type) {
+                    case 'fade-in':    opacity *= p; break;
+                    case 'zoom-in':    scale = 0.5 + 0.5 * p; break;
+                    case 'zoom-out':   scale = 1.5 - 0.5 * p; break;
+                    case 'slide-left': tx = (p - 1) * 100; break;
+                    case 'slide-right':tx = (1 - p) * 100; break;
+                    case 'slide-up':   ty = (p - 1) * 100; break;
+                    case 'slide-down': ty = (1 - p) * 100; break;
+                }
+            }
+        }
+
+        if (end?.type && end.type !== 'none') {
+            const d = Math.max(0.01, end.duration || 1);
+            const p = Math.max(0, Math.min(1, (dur - local) / d));
+            if (p < 1) {
+                switch (end.type) {
+                    case 'fade-out':   opacity *= p; break;
+                    case 'zoom-in':    scale *= 1 + (1 - p) * 0.5; break;
+                    case 'zoom-out':   scale *= 0.5 + 0.5 * p; break;
+                    case 'slide-left': tx -= (1 - p) * 100; break;
+                    case 'slide-right':tx += (1 - p) * 100; break;
+                    case 'slide-up':   ty -= (1 - p) * 100; break;
+                    case 'slide-down': ty += (1 - p) * 100; break;
+                }
+            }
+        }
+
+        const zT  = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
+        const effT = (scale !== 1 || tx !== 0 || ty !== 0)
+            ? `scale(${scale.toFixed(4)}) translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%)`
+            : '';
+        previewContent.style.opacity   = opacity.toFixed(4);
+        previewContent.style.transform = [zT, effT].filter(Boolean).join(' ') || '';
     }
 
     function _renderSubOverlay(sub, subKey) {
@@ -1914,6 +1991,26 @@ export async function init() {
     }
 
     function _renderPropsAudio(track, idx) {
+        const AUDIO_FX = [
+            { type: 'echo',       label: 'Эхо',       params: [{key:'delay',label:'Задержка (мс)',min:50,max:2000,step:50,def:500},{key:'decay',label:'Затухание',min:0.1,max:1,step:0.1,def:0.5}] },
+            { type: 'reverb',     label: 'Реверб',    params: [{key:'delay',label:'Задержка (мс)',min:50,max:3000,step:50,def:1000},{key:'decay',label:'Затухание',min:0.1,max:1,step:0.1,def:0.8}] },
+            { type: 'bassboost',  label: 'Бас',       params: [{key:'gain',label:'Усиление (дБ)',min:-20,max:20,step:1,def:10}] },
+            { type: 'treble',     label: 'Тембр',     params: [{key:'gain',label:'Усиление (дБ)',min:-20,max:20,step:1,def:8}] },
+            { type: 'compressor', label: 'Компрес.',  params: [{key:'ratio',label:'Коэффициент',min:1,max:20,step:0.5,def:4}] },
+            { type: 'phone',      label: 'Телефон',   params: [] },
+            { type: 'radio',      label: 'Радио',     params: [] },
+            { type: 'lowpass',    label: 'НЧ фильтр', params: [{key:'freq',label:'Частота (Гц)',min:100,max:8000,step:100,def:500}] },
+            { type: 'highpass',   label: 'ВЧ фильтр', params: [{key:'freq',label:'Частота (Гц)',min:200,max:12000,step:200,def:2000}] },
+            { type: 'chorus',     label: 'Хорус',     params: [] },
+            { type: 'flanger',    label: 'Флэнджер',  params: [] },
+            { type: 'distortion', label: 'Дисторшн',  params: [{key:'level',label:'Уровень',min:0.5,max:5,step:0.1,def:1.5}] },
+            { type: 'noise',      label: 'Шумодав',   params: [] },
+            { type: 'pitch',      label: 'Питч',      params: [{key:'semitones',label:'Полутоны',min:-12,max:12,step:1,def:2}] },
+        ];
+        const SPEED_VALS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+        const curSpeed = track.speed ?? 1;
+        const isCustomSpeed = !SPEED_VALS.includes(curSpeed);
+
         propsBody.innerHTML = `
         <div class="ive-audio-props-item">
             <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${eh(track.original || track.file)}</div>
@@ -1931,15 +2028,17 @@ export async function init() {
             <label class="ive-label">Длит. (с)<input class="ive-input" id="acp-dur" type="number" min="0" step="0.5" placeholder="авто" value="${track.duration !== undefined ? track.duration : ''}"></label>
             <label class="ive-label">Скорость
                 <select class="ive-select" id="acp-speed">
-                    <option value="0.5"${(track.speed??1)===0.5?' selected':''}>0.5×</option>
-                    <option value="0.75"${(track.speed??1)===0.75?' selected':''}>0.75×</option>
-                    <option value="1"${(!track.speed||track.speed===1)?' selected':''}>1× (норма)</option>
-                    <option value="1.25"${(track.speed??1)===1.25?' selected':''}>1.25×</option>
-                    <option value="1.5"${(track.speed??1)===1.5?' selected':''}>1.5×</option>
-                    <option value="2"${(track.speed??1)===2?' selected':''}>2×</option>
+                    ${SPEED_VALS.map(v => `<option value="${v}"${curSpeed===v?' selected':''}>${v===1?'1× (норма)':v+'×'}</option>`).join('')}
+                    <option value="custom"${isCustomSpeed?' selected':''}>Другое…</option>
                 </select>
             </label>
-            <button class="btn btn-sm" id="acp-split" style="margin-top:4px" title="Разделить в позиции курсора">✂ Разделить</button>
+            <div id="acp-speed-custom-wrap" style="display:${isCustomSpeed?'block':'none'};margin-top:2px">
+                <input class="ive-input" id="acp-speed-custom" type="number" min="0.1" max="10" step="0.05" placeholder="напр. 1.8" value="${isCustomSpeed?curSpeed:''}">
+            </div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:8px 0 4px">Звуковые эффекты</div>
+            <div class="ive-sfx-chips" id="acp-sfx-chips"></div>
+            <div id="acp-sfx-params"></div>
+            <button class="btn btn-sm" id="acp-split" style="margin-top:8px" title="Разделить в позиции курсора">✂ Разделить</button>
             <button class="btn btn-sm danger" id="acp-del" style="margin-top:6px">Удалить дорожку</button>
         </div>`;
 
@@ -1948,7 +2047,6 @@ export async function init() {
             track.volume = parseFloat(volEl.value);
             volV.textContent = track.volume.toFixed(2);
             S.dirty = true;
-            // Live volume update
             const el = _audioEls.get(track.id);
             if (el) el.volume = Math.max(0, Math.min(1, track.volume));
         });
@@ -1960,12 +2058,84 @@ export async function init() {
             track.duration = isFinite(v) && v > 0 ? v : undefined;
             S.dirty = true; renderTimeline();
         });
-        $('acp-speed').addEventListener('change', e => {
-            track.speed = parseFloat(e.target.value) || 1;
+
+        const speedSel = $('acp-speed'), speedCustomWrap = $('acp-speed-custom-wrap'), speedCustom = $('acp-speed-custom');
+        const _applySpeed = (val) => {
+            track.speed = val;
             S.dirty = true;
             const el = _audioEls.get(track.id);
-            if (el) el.playbackRate = track.speed;
+            if (el) el.playbackRate = val;
+        };
+        speedSel.addEventListener('change', () => {
+            if (speedSel.value === 'custom') {
+                speedCustomWrap.style.display = 'block';
+                speedCustom.focus();
+            } else {
+                speedCustomWrap.style.display = 'none';
+                _applySpeed(parseFloat(speedSel.value) || 1);
+            }
         });
+        speedCustom.addEventListener('change', () => {
+            const v = parseFloat(speedCustom.value);
+            if (isFinite(v) && v > 0) _applySpeed(v);
+        });
+
+        // ── Sound effects ──────────────────────────────────────────────────────
+        if (!track.soundEffects) track.soundEffects = [];
+
+        function _sfxRender() {
+            const chipsEl = $('acp-sfx-chips'), paramsEl = $('acp-sfx-params');
+            if (!chipsEl || !paramsEl) return;
+            chipsEl.innerHTML = AUDIO_FX.map(fx => {
+                const on = track.soundEffects.some(e => e.type === fx.type);
+                return `<button class="ive-sfx-chip${on?' active':''}" data-fxt="${fx.type}">${fx.label}</button>`;
+            }).join('');
+            paramsEl.innerHTML = '';
+            track.soundEffects.forEach(eff => {
+                const fxDef = AUDIO_FX.find(f => f.type === eff.type);
+                if (!fxDef || !fxDef.params.length) return;
+                const wrap = document.createElement('div');
+                wrap.className = 'ive-sfx-params-block';
+                wrap.innerHTML = `<div class="ive-sfx-params-label">${fxDef.label}</div>` +
+                    fxDef.params.map(p => {
+                        const val = eff[p.key] !== undefined ? eff[p.key] : p.def;
+                        return `<label class="ive-label">${p.label}
+                            <div class="ive-range-row">
+                                <input class="ive-range" type="range" data-efft="${eff.type}" data-pk="${p.key}" min="${p.min}" max="${p.max}" step="${p.step}" value="${val}">
+                                <span class="ive-range-val" id="sfxv-${eff.type}-${p.key}">${val}</span>
+                            </div></label>`;
+                    }).join('');
+                paramsEl.appendChild(wrap);
+            });
+            chipsEl.querySelectorAll('.ive-sfx-chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const type = btn.dataset.fxt;
+                    const i = track.soundEffects.findIndex(e => e.type === type);
+                    if (i >= 0) {
+                        track.soundEffects.splice(i, 1);
+                    } else {
+                        const fxDef = AUDIO_FX.find(f => f.type === type);
+                        const entry = { type };
+                        if (fxDef) fxDef.params.forEach(p => { entry[p.key] = p.def; });
+                        track.soundEffects.push(entry);
+                    }
+                    S.dirty = true; _sfxRender();
+                });
+            });
+            paramsEl.querySelectorAll('input[data-efft]').forEach(rng => {
+                rng.addEventListener('input', () => {
+                    const eff = track.soundEffects.find(e => e.type === rng.dataset.efft);
+                    if (!eff) return;
+                    const val = parseFloat(rng.value);
+                    eff[rng.dataset.pk] = val;
+                    const vEl = $(`sfxv-${rng.dataset.efft}-${rng.dataset.pk}`);
+                    if (vEl) vEl.textContent = val;
+                    S.dirty = true;
+                });
+            });
+        }
+        _sfxRender();
+
         $('acp-split').addEventListener('click', () => {
             const t = S.currentTime;
             const st = track.startOffset || 0;
@@ -2003,6 +2173,24 @@ export async function init() {
             </label>
             <label class="ive-label" id="pv-tdur-row" ${(!clip.transition?.type || clip.transition.type === 'none') ? 'hidden' : ''}>Длит. перехода (с)
                 <input class="ive-input" id="pv-trans-dur" type="number" min="0.1" max="4" step="0.1" value="${clip.transition?.duration || 0.5}">
+            </label>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Начальный эффект</div>
+            <label class="ive-label">Тип
+                <select class="ive-select" id="pv-start-eff-type">
+                    ${START_EFFECTS.map(e => `<option value="${e.value}"${(clip.startEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label" id="pv-start-eff-dur-row" ${(!clip.startEffect?.type||clip.startEffect.type==='none')?'hidden':''}>Длит. (с)
+                <input class="ive-input" id="pv-start-eff-dur" type="number" min="0.1" max="${clip.duration}" step="0.1" value="${clip.startEffect?.duration||1.0}">
+            </label>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Конечный эффект</div>
+            <label class="ive-label">Тип
+                <select class="ive-select" id="pv-end-eff-type">
+                    ${END_EFFECTS.map(e => `<option value="${e.value}"${(clip.endEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label" id="pv-end-eff-dur-row" ${(!clip.endEffect?.type||clip.endEffect.type==='none')?'hidden':''}>Длит. (с)
+                <input class="ive-input" id="pv-end-eff-dur" type="number" min="0.1" max="${clip.duration}" step="0.1" value="${clip.endEffect?.duration||1.0}">
             </label>
             <label class="ive-label">Скорость
                 <select class="ive-select" id="pv-speed">
@@ -2057,6 +2245,28 @@ export async function init() {
             const v = parseFloat(e.target.value);
             if (isFinite(v) && v > 0) { clip.transition.duration = v; S.dirty = true; }
         });
+        const seTypeEl = $('pv-start-eff-type'), seDurRow = $('pv-start-eff-dur-row');
+        seTypeEl.addEventListener('change', () => {
+            clip.startEffect = clip.startEffect || {};
+            clip.startEffect.type = seTypeEl.value;
+            seDurRow.hidden = seTypeEl.value === 'none';
+            S.dirty = true; renderPreview();
+        });
+        $('pv-start-eff-dur')?.addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            if (isFinite(v) && v > 0) { (clip.startEffect = clip.startEffect || {}).duration = v; S.dirty = true; renderPreview(); }
+        });
+        const eeTypeEl = $('pv-end-eff-type'), eeDurRow = $('pv-end-eff-dur-row');
+        eeTypeEl.addEventListener('change', () => {
+            clip.endEffect = clip.endEffect || {};
+            clip.endEffect.type = eeTypeEl.value;
+            eeDurRow.hidden = eeTypeEl.value === 'none';
+            S.dirty = true; renderPreview();
+        });
+        $('pv-end-eff-dur')?.addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            if (isFinite(v) && v > 0) { (clip.endEffect = clip.endEffect || {}).duration = v; S.dirty = true; renderPreview(); }
+        });
         if (!isVideo) {
             $('pv-replace-btn').addEventListener('click', () => $('pv-replace-file').click());
             $('pv-replace-file').addEventListener('change', async () => {
@@ -2107,8 +2317,10 @@ export async function init() {
         $('pv-apply-all').addEventListener('click', () => {
             S.clips.forEach((c, idx) => {
                 if (c === clip) return;
-                c.duration   = clip.duration;
-                c.transition = JSON.parse(JSON.stringify(clip.transition || {}));
+                c.duration    = clip.duration;
+                c.transition  = JSON.parse(JSON.stringify(clip.transition  || {}));
+                c.startEffect = JSON.parse(JSON.stringify(clip.startEffect || {}));
+                c.endEffect   = JSON.parse(JSON.stringify(clip.endEffect   || {}));
                 c.speed      = clip.speed;
                 c.muteAudio  = clip.muteAudio;
                 c.trimIn     = clip.trimIn;
@@ -2790,6 +3002,504 @@ export async function init() {
         } catch { listEl.innerHTML = '<div class="ive-empty">Ошибка</div>'; }
     }
 
+    // ── Template Apply ────────────────────────────────────────────────────────
+
+    // Build a dropdown+upload widget for a single slot.
+    // existingItems: array of {id, label, url?}
+    // Drag-and-drop file upload slot for template apply modal.
+    // Returns element with .getSelection() → {type:'new', file:File} | {type:'skip'}
+    function _makeDndSlot(accept, icon, hintLabel) {
+        let selectedFile = null;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'tmpl-dnd-slot';
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file'; fileInput.accept = accept;
+        fileInput.style.display = 'none';
+        wrap.appendChild(fileInput);
+
+        function _clearContent() {
+            Array.from(wrap.children).forEach(c => { if (c !== fileInput) c.remove(); });
+        }
+
+        function _renderEmpty() {
+            selectedFile = null;
+            wrap.classList.remove('has-file', 'drag-over');
+            _clearContent();
+            const zone = document.createElement('div');
+            zone.className = 'tmpl-dnd-zone';
+            const iconEl = document.createElement('div');
+            iconEl.className = 'tmpl-dnd-icon'; iconEl.textContent = icon;
+            const hint = document.createElement('div');
+            hint.className = 'tmpl-dnd-hint'; hint.textContent = `Перетащите или выберите ${hintLabel}`;
+            const pickBtn = document.createElement('button');
+            pickBtn.className = 'btn btn-sm'; pickBtn.type = 'button';
+            pickBtn.textContent = 'Выбрать';
+            pickBtn.onclick = e => { e.stopPropagation(); fileInput.click(); };
+            zone.append(iconEl, hint, pickBtn);
+            wrap.appendChild(zone);
+        }
+
+        function _renderFile(file) {
+            selectedFile = file;
+            _clearContent();
+            wrap.classList.add('has-file'); wrap.classList.remove('drag-over');
+            const isImg = file.type.startsWith('image/');
+            const isVid = file.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(file.name);
+            const isAud = !isVid && (file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(file.name));
+
+            if (isImg || isVid) {
+                const thumb = document.createElement(isVid ? 'video' : 'img');
+                thumb.className = 'tmpl-dnd-thumb';
+                if (isVid) { thumb.muted = true; thumb.preload = 'metadata'; }
+                thumb.src = URL.createObjectURL(file);
+                wrap.appendChild(thumb);
+            }
+
+            const info = document.createElement('div');
+            info.className = 'tmpl-dnd-file-info';
+            const fname = document.createElement('div');
+            fname.className = 'tmpl-dnd-fname'; fname.textContent = file.name;
+            info.appendChild(fname);
+
+            if (isAud || isVid) {
+                const durEl = document.createElement('div');
+                durEl.className = 'tmpl-dnd-dur'; durEl.textContent = '…';
+                info.appendChild(durEl);
+                const tmp = document.createElement(isVid ? 'video' : 'audio');
+                tmp.preload = 'metadata';
+                tmp.onloadedmetadata = () => { durEl.textContent = `${tmp.duration.toFixed(1)} с`; };
+                tmp.src = URL.createObjectURL(file);
+            }
+
+            const replBtn = document.createElement('button');
+            replBtn.className = 'btn btn-sm'; replBtn.type = 'button';
+            replBtn.textContent = 'Заменить'; replBtn.style.flexShrink = '0';
+            replBtn.onclick = e => { e.stopPropagation(); fileInput.value = ''; fileInput.click(); };
+            wrap.appendChild(info);
+            wrap.appendChild(replBtn);
+        }
+
+        wrap.addEventListener('dragover', e => { e.preventDefault(); wrap.classList.add('drag-over'); });
+        wrap.addEventListener('dragleave', e => { if (!wrap.contains(e.relatedTarget)) wrap.classList.remove('drag-over'); });
+        wrap.addEventListener('drop', e => {
+            e.preventDefault(); wrap.classList.remove('drag-over');
+            const f = e.dataTransfer.files?.[0]; if (f) _renderFile(f);
+        });
+        fileInput.onchange = () => { const f = fileInput.files?.[0]; if (f) _renderFile(f); };
+
+        _renderEmpty();
+        wrap.getSelection = () => selectedFile ? { type: 'new', file: selectedFile } : { type: 'skip' };
+        return wrap;
+    }
+
+    // One shared drop zone for all slides + per-slot row list below.
+    // Returns element with .getSelections() → [{type:'new',file}|{type:'skip'}, ...]
+    function _makeSlidesDndArea(slides) {
+        const count = slides.length;
+        const assigned = new Array(count).fill(null);
+
+        const container = document.createElement('div');
+
+        // ── Top drop zone (accepts multiple files) ──────────────────────────
+        const dropZone = document.createElement('div');
+        dropZone.className = 'tmpl-dnd-slot';
+        const multiInput = document.createElement('input');
+        multiInput.type = 'file'; multiInput.multiple = true;
+        multiInput.accept = 'image/*,video/*'; multiInput.style.display = 'none';
+        dropZone.appendChild(multiInput);
+        const zone = document.createElement('div');
+        zone.className = 'tmpl-dnd-zone';
+        const zIcon = document.createElement('div');
+        zIcon.className = 'tmpl-dnd-icon'; zIcon.textContent = '📂';
+        const zHint = document.createElement('div');
+        zHint.className = 'tmpl-dnd-hint';
+        zHint.textContent = `Перетащите сюда до ${count} файл${count===1?'':'ов'} для слайдов`;
+        const zBtn = document.createElement('button');
+        zBtn.className = 'btn btn-sm'; zBtn.type = 'button'; zBtn.textContent = 'Выбрать файлы';
+        zBtn.onclick = e => { e.stopPropagation(); multiInput.click(); };
+        zone.append(zIcon, zHint, zBtn);
+        dropZone.appendChild(zone);
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault(); dropZone.classList.remove('drag-over');
+            _assignFiles(Array.from(e.dataTransfer.files));
+        });
+        multiInput.onchange = () => _assignFiles(Array.from(multiInput.files || []));
+        container.appendChild(dropZone);
+
+        // ── Per-slide assignment list ────────────────────────────────────────
+        const listEl = document.createElement('div');
+        listEl.className = 'tmpl-slide-list';
+        container.appendChild(listEl);
+
+        function _assignFiles(files) {
+            for (let i = 0; i < Math.min(files.length, count); i++) assigned[i] = files[i];
+            _renderList();
+        }
+
+        function _renderList() {
+            listEl.innerHTML = '';
+            slides.forEach((slide, i) => {
+                const file = assigned[i];
+                const row = document.createElement('div');
+                row.className = 'tmpl-slide-row';
+
+                const lbl = document.createElement('div');
+                lbl.className = 'tmpl-slide-row-lbl';
+                lbl.textContent = `${i + 1}. ${slide.type === 'video' ? '🎬' : '🖼'}`;
+                row.appendChild(lbl);
+
+                if (file) {
+                    const isVid = file.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(file.name);
+                    const isImg = !isVid && file.type.startsWith('image/');
+                    if (isImg || isVid) {
+                        const thumb = document.createElement(isVid ? 'video' : 'img');
+                        thumb.className = 'tmpl-dnd-thumb';
+                        if (isVid) { thumb.muted = true; thumb.preload = 'metadata'; }
+                        thumb.src = URL.createObjectURL(file);
+                        row.appendChild(thumb);
+                    }
+                    const info = document.createElement('div');
+                    info.className = 'tmpl-dnd-file-info';
+                    const fn = document.createElement('div');
+                    fn.className = 'tmpl-dnd-fname'; fn.textContent = file.name;
+                    info.appendChild(fn);
+                    if (isVid) {
+                        const durEl = document.createElement('div');
+                        durEl.className = 'tmpl-dnd-dur'; durEl.textContent = '…';
+                        info.appendChild(durEl);
+                        const tmp = document.createElement('video');
+                        tmp.preload = 'metadata';
+                        tmp.onloadedmetadata = () => { durEl.textContent = `${tmp.duration.toFixed(1)} с`; };
+                        tmp.src = URL.createObjectURL(file);
+                    }
+                    row.appendChild(info);
+                    const clrBtn = document.createElement('button');
+                    clrBtn.className = 'btn btn-sm'; clrBtn.type = 'button'; clrBtn.textContent = '×';
+                    clrBtn.title = 'Убрать файл'; clrBtn.style.flexShrink = '0';
+                    clrBtn.onclick = () => { assigned[i] = null; _renderList(); };
+                    row.appendChild(clrBtn);
+                } else {
+                    const ph = document.createElement('div');
+                    ph.className = 'tmpl-slide-row-empty'; ph.textContent = 'из шаблона';
+                    row.appendChild(ph);
+                    const fi = document.createElement('input');
+                    fi.type = 'file'; fi.style.display = 'none';
+                    fi.accept = slide.type === 'video' ? 'video/*' : 'image/*,video/*';
+                    fi.onchange = () => { if (fi.files?.[0]) { assigned[i] = fi.files[0]; _renderList(); } };
+                    row.appendChild(fi);
+                    const pb = document.createElement('button');
+                    pb.className = 'btn btn-sm'; pb.type = 'button'; pb.textContent = 'Выбрать';
+                    pb.style.flexShrink = '0'; pb.onclick = () => fi.click();
+                    row.appendChild(pb);
+                }
+                listEl.appendChild(row);
+            });
+        }
+        _renderList();
+
+        container.getSelections = () => assigned.map(f => f ? { type: 'new', file: f } : { type: 'skip' });
+        return container;
+    }
+
+    function _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs }) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('ive-tmpl-apply-modal');
+            if (!modal) { resolve(null); return; }
+
+            document.getElementById('tmpl-modal-name').textContent =
+                tmpl.name.replace(/ \(шаблон\)$/, '');
+
+            // ── Slides ──────────────────────────────────────────────────────
+            const slotsSection = document.getElementById('tmpl-slots-section');
+            slotsSection.innerHTML = '';
+            let slidesDndArea = null;
+            if (hasSlides) {
+                const header = document.createElement('div');
+                header.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:8px';
+                header.textContent = `Медиаслайды (${(tmpl.slides||[]).length})`;
+                slotsSection.appendChild(header);
+                slidesDndArea = _makeSlidesDndArea(tmpl.slides || []);
+                slotsSection.appendChild(slidesDndArea);
+            }
+
+            // ── Subtitles info ───────────────────────────────────────────────
+            document.getElementById('tmpl-sub-section').style.display = hasSubs ? '' : 'none';
+
+            // ── Audio ────────────────────────────────────────────────────────
+            document.getElementById('tmpl-audio-section').style.display = hasAudio ? '' : 'none';
+            const audioSlot = document.getElementById('tmpl-audio-slot');
+            audioSlot.innerHTML = '';
+            let audioWidget = null;
+            if (hasAudio) {
+                audioWidget = _makeDndSlot('audio/*', '🎵', 'аудиофайл');
+                audioSlot.appendChild(audioWidget);
+            }
+
+            // ── PIP ──────────────────────────────────────────────────────────
+            document.getElementById('tmpl-pip-section').style.display = hasPip ? '' : 'none';
+            const pipSlot = document.getElementById('tmpl-pip-slot');
+            pipSlot.innerHTML = '';
+            let pipWidget = null;
+            if (hasPip) {
+                pipWidget = _makeDndSlot('image/*,video/*', '📽', 'PIP файл');
+                pipSlot.appendChild(pipWidget);
+            }
+
+            const close = (val) => {
+                modal.hidden = true;
+                document.removeEventListener('keydown', onKey);
+                resolve(val);
+            };
+            const onKey = (e) => { if (e.key === 'Escape') close(null); };
+            document.addEventListener('keydown', onKey);
+
+            document.getElementById('tmpl-cancel-btn').onclick = () => close(null);
+            document.getElementById('tmpl-apply-btn').onclick  = () => close({
+                slideSelections: slidesDndArea ? slidesDndArea.getSelections() : [],
+                audioSelection:  audioWidget ? audioWidget.getSelection() : { type: 'skip' },
+                pipSelection:    pipWidget   ? pipWidget.getSelection()   : { type: 'skip' },
+            });
+
+            modal.hidden = false;
+        });
+    }
+
+    async function _applyTemplate(tid) {
+        let tmpl;
+        try {
+            const r = await fetch(`/api/imgvid/templates/${tid}`);
+            if (!r.ok) { toast('Ошибка загрузки шаблона', 'err'); return; }
+            tmpl = await r.json();
+        } catch (err) { toast(err.message, 'err'); return; }
+
+        if (S.dirty && !confirm('Несохранённые изменения. Применить шаблон?')) return;
+
+        const hasSlides = (tmpl.slides    || []).length > 0;
+        const hasAudio  = (tmpl.audio     || []).length > 0;
+        const hasPip    = (tmpl.pip       || []).length > 0;
+        const hasSubs   = (tmpl.subtitles || []).length > 0;
+
+        const result = await _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs });
+        if (!result) return;
+
+        const { slideSelections, audioSelection, pipSelection } = result;
+        _stopPlayback();
+
+        const applyBtn = document.getElementById('tmpl-apply-btn');
+        if (applyBtn) applyBtn.disabled = true;
+        toast('Загрузка файлов…', 'info');
+
+        // Helper: upload a File and get back {name, url, thumb_url?, original, duration?}
+        async function _uploadFile(file, isVid) {
+            const fd = new FormData(); fd.append('file', file);
+            const r = await fetch(isVid ? '/api/imgvid/clips' : '/api/imgvid/images', { method: 'POST', body: fd });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Ошибка загрузки');
+            return d;
+        }
+
+        try {
+            // ── Slides ──────────────────────────────────────────────────────────
+            const newClips = [];
+            const tmplSlides = tmpl.slides || [];
+            const anySlideSelected = slideSelections.some(s => s.type !== 'skip');
+
+            if (anySlideSelected) {
+                for (let i = 0; i < slideSelections.length; i++) {
+                    const sel       = slideSelections[i];
+                    const tmplSlide = tmplSlides[i] || {};
+
+                    if (sel.type === 'skip') {
+                        // Keep original template slide
+                        newClips.push({ ...tmplSlide, id: uid(), subtitles: [] });
+                        continue;
+                    }
+
+                    let fileData;
+                    let isVid;
+                    if (sel.type === 'existing') {
+                        const existing = S.clips.find(c => c.id === sel.id);
+                        if (!existing) { continue; }
+                        // Use existing clip data directly (no re-upload)
+                        const base = { ...tmplSlide, id: uid(), subtitles: [],
+                            type: existing.type, file: existing.file,
+                            fileUrl: existing.fileUrl, thumbUrl: existing.thumbUrl,
+                            original: existing.original };
+                        base.transition  = base.transition  || { type: 'none', duration: 0.5 };
+                        base.effects     = base.effects     || [];
+                        base.startEffect = base.startEffect || { type: 'none', duration: 1.0 };
+                        base.endEffect   = base.endEffect   || { type: 'none', duration: 1.0 };
+                        if (existing.type === 'video') {
+                            base.duration = tmplSlide.duration || existing.duration || 5;
+                            delete base.imgScale; delete base.imgOffsetX; delete base.imgOffsetY; delete base.crop;
+                        } else {
+                            base.duration = tmplSlide.duration || 3;
+                            delete base.trimIn; delete base.muteAudio;
+                            if (base.imgScale   === undefined) base.imgScale   = 100;
+                            if (base.imgOffsetX === undefined) base.imgOffsetX = 0;
+                            if (base.imgOffsetY === undefined) base.imgOffsetY = 0;
+                        }
+                        newClips.push(base);
+                        continue;
+                    }
+
+                    // type === 'new'
+                    if (!sel.file) continue;
+                    isVid = sel.file.type.startsWith('video/') ||
+                        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(sel.file.name);
+                    try { fileData = await _uploadFile(sel.file, isVid); }
+                    catch (e) { toast(e.message, 'err'); continue; }
+
+                    const base = { ...tmplSlide, id: uid(), subtitles: [] };
+                    base.type      = isVid ? 'video' : 'image';
+                    base.file      = fileData.name;
+                    base.fileUrl   = fileData.url;
+                    base.thumbUrl  = isVid ? (fileData.thumb_url || '') : fileData.url;
+                    base.original  = fileData.original;
+                    base.transition  = base.transition  || { type: 'none', duration: 0.5 };
+                    base.effects     = base.effects     || [];
+                    base.startEffect = base.startEffect || { type: 'none', duration: 1.0 };
+                    base.endEffect   = base.endEffect   || { type: 'none', duration: 1.0 };
+                    if (isVid) {
+                        base.duration = tmplSlide.duration || fileData.duration || 5;
+                        delete base.imgScale; delete base.imgOffsetX; delete base.imgOffsetY; delete base.crop;
+                    } else {
+                        base.duration = tmplSlide.duration || 3;
+                        delete base.trimIn; delete base.muteAudio;
+                        if (base.imgScale   === undefined) base.imgScale   = 100;
+                        if (base.imgOffsetX === undefined) base.imgOffsetX = 0;
+                        if (base.imgOffsetY === undefined) base.imgOffsetY = 0;
+                    }
+                    newClips.push(base);
+                }
+            } else {
+                // All skipped or no slides in template — use template slides as-is
+                tmplSlides.forEach(s => newClips.push({ ...s, id: uid(), subtitles: [] }));
+            }
+
+            // ── Audio ────────────────────────────────────────────────────────────
+            let newAudio = [];
+            if (hasAudio) {
+                const aSel = audioSelection || { type: 'skip' };
+                if (aSel.type === 'existing') {
+                    // Reuse existing track: apply template processing settings to it
+                    const existing = S.audioTracks.find(t => t.id === aSel.id);
+                    if (existing) {
+                        const tmplA = tmpl.audio[0] || {};
+                        // Copy processing settings from template, keep new file data
+                        newAudio = [{ ...tmplA, id: uid(),
+                            file: existing.file, fileUrl: existing.fileUrl, original: existing.original,
+                            originalDuration: existing.originalDuration,
+                            duration: existing.duration }];
+                    }
+                } else if (aSel.type === 'new' && aSel.file) {
+                    const fd = new FormData(); fd.append('file', aSel.file);
+                    const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
+                    const d = await r.json();
+                    if (r.ok) {
+                        const tmplA = tmpl.audio[0] || {};
+                        // Spread template processing settings but reset file-specific duration
+                        const track = { ...tmplA, id: uid(),
+                            file: d.name, fileUrl: d.url, original: d.original,
+                            duration: undefined, originalDuration: undefined };
+                        newAudio = [track];
+                        // Probe actual duration of new file asynchronously
+                        _probeAudioDuration(d.url).then(dur => {
+                            if (dur > 0) {
+                                track.originalDuration = dur;
+                                track.duration = dur;
+                                if ((track.trimIn || 0) >= dur) track.trimIn = 0;
+                                renderTimeline();
+                            }
+                        });
+                    }
+                } else {
+                    // 'skip' — preserve template audio tracks
+                    newAudio = (tmpl.audio || []).map(a => ({ ...a, id: uid() }));
+                }
+            }
+
+            // ── PIP ──────────────────────────────────────────────────────────────
+            let newPip = [];
+            if (hasPip) {
+                const pSel = pipSelection || { type: 'skip' };
+                if (pSel.type === 'existing') {
+                    const existing = S.pipLayers.find(p => p.id === pSel.id);
+                    if (existing) {
+                        const tmplP = tmpl.pip[0] || {};
+                        newPip = [{ ...tmplP, id: uid(), type: existing.type,
+                            file: existing.file, fileUrl: existing.fileUrl,
+                            thumbUrl: existing.thumbUrl, original: existing.original }];
+                    }
+                } else if (pSel.type === 'new' && pSel.file) {
+                    const isVid = pSel.file.type.startsWith('video/') ||
+                        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(pSel.file.name);
+                    try {
+                        const d = await _uploadFile(pSel.file, isVid);
+                        const tmplP = tmpl.pip[0] || {};
+                        newPip = [{ ...tmplP, id: uid(), type: isVid ? 'video' : 'image',
+                            file: d.name, fileUrl: d.url,
+                            thumbUrl: isVid ? (d.thumb_url || '') : d.url, original: d.original }];
+                    } catch (e) { toast(e.message, 'err'); }
+                } else {
+                    // 'skip' — preserve template PIP layers
+                    newPip = (tmpl.pip || []).map(p => ({ ...p, id: uid() }));
+                }
+            }
+
+            // ── Subtitles ────────────────────────────────────────────────────────
+            let newSubs = [];
+            if (hasSubs) {
+                const tmplSub = { ...(tmpl.subtitles[0] || {}) };
+                const projDur = _totalDurFn(newClips);
+                newSubs = [{
+                    ...tmplSub,
+                    id: uid(),
+                    text:  tmplSub.text  || '',
+                    start: tmplSub.start || 0,
+                    end:   Math.min(tmplSub.end || 3, projDur || 3),
+                }];
+            }
+
+            // ── Apply to state ───────────────────────────────────────────────────
+            S.projectId   = null;
+            S.projectName = tmpl.name.replace(/ \(шаблон\)$/, '');
+            S.isTemplateMode = false; S.editingTemplateId = null;
+            S.clips       = newClips;
+            S.audioTracks = newAudio;
+            S.subtitles   = newSubs;
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers   = newPip;
+            S.selPipIdx   = -1; S.selIdxs = new Set();
+            S.selIdx      = S.clips.length ? 0 : -1;
+            S.dirty       = true;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(tmpl.export_settings);
+            _updateSaveBtn();
+            renderAll();
+            log('Шаблон применён: ' + S.projectName, 'done');
+            toast('Шаблон применён: ' + S.projectName, 'ok');
+
+        } catch (err) {
+            toast(err.message, 'err');
+        } finally {
+            if (applyBtn) applyBtn.disabled = false;
+        }
+    }
+
+    function _fmtDate(iso) {
+        if (!iso) return '';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        } catch { return ''; }
+    }
+
     async function loadTemplatesList() {
         const listEl = $('ive-templates-list');
         if (!listEl) return;
@@ -2799,11 +3509,14 @@ export async function init() {
             const tmpls = data.templates || [];
             if (!tmpls.length) { listEl.innerHTML = '<div class="ive-empty">Нет шаблонов</div>'; return; }
             listEl.innerHTML = tmpls.map(t => `
-            <div class="ive-proj-row" data-tid="${t.id}">
+            <div class="ive-proj-row${S.isTemplateMode && S.editingTemplateId === t.id ? ' active' : ''}" data-tid="${t.id}">
                 <div class="ive-proj-name">${eh(t.name)}</div>
-                <div class="ive-proj-meta">${t.slide_count} · ${t.total_duration}с</div>
+                <div class="ive-proj-meta">${t.slide_count} сл. · ${t.total_duration}с · ${_fmtDate(t.updated_at)}</div>
                 <div class="ive-proj-btns">
-                    <button class="hist-btn accent" data-tact="use" title="Использовать шаблон">${ICONS.edit}</button>
+                    <button class="hist-btn accent" data-tact="use" title="Применить шаблон">${ICONS.edit}</button>
+                    <button class="hist-btn" data-tact="edit" title="Редактировать шаблон">${ICONS.open}</button>
+                    <button class="hist-btn" data-tact="rename" title="Переименовать">${ICONS.pencil}</button>
+                    <button class="hist-btn" data-tact="dup" title="Дублировать">${ICONS.copy}</button>
                     <button class="hist-btn danger" data-tact="del" title="Удалить">${ICONS.trash}</button>
                 </div>
             </div>`).join('');
@@ -2828,6 +3541,7 @@ export async function init() {
             const d = await r.json();
             _stopPlayback();
             S.projectId = d.id; S.projectName = d.name;
+            S.isTemplateMode = false; S.editingTemplateId = null;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
             // Load independent subtitles
             S.subtitles = d.subtitles || [];
@@ -2857,6 +3571,7 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
+            _updateSaveBtn();
             renderAll(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -2869,34 +3584,100 @@ export async function init() {
         if (act === 'del') {
             const ok = await openConfirm({ title: 'Удалить', message: 'Удалить шаблон?', confirmLabel: 'Удалить' });
             if (!ok) return;
-            await fetch(`/api/imgvid/projects/${tid}`, { method: 'DELETE' });
+            await fetch(`/api/imgvid/templates/${tid}`, { method: 'DELETE' });
             log('Шаблон удалён', 'done');
-            await loadTemplatesList(); return;
+            if (S.editingTemplateId === tid) { S.isTemplateMode = false; S.editingTemplateId = null; _updateSaveBtn(); }
+            await loadTemplatesList();
+            events.dispatchEvent(new CustomEvent('imgvid-template-changed'));
+            return;
         }
         if (act === 'use') {
-            if (S.dirty && !confirm('Несохранённые изменения. Открыть шаблон?')) return;
+            await _applyTemplate(tid); return;
+        }
+        if (act === 'edit') {
+            await _editTemplate(tid); return;
+        }
+        if (act === 'rename') {
+            const tmplName = row.querySelector('.ive-proj-name')?.textContent || '';
+            const newName = await openPrompt({ title: 'Переименовать шаблон', initial: tmplName, confirmLabel: 'Сохранить' });
+            if (newName === null || !newName.trim()) return;
             try {
-                const r = await fetch(`/api/imgvid/projects/${tid}`);
+                const r = await fetch(`/api/imgvid/templates/${tid}/rename`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName.trim() }),
+                });
                 const d = await r.json();
-                _stopPlayback();
-                S.projectId = null; S.projectName = d.name.replace(/ \(шаблон\)$/, '');
-                S.clips = d.slides || []; S.audioTracks = d.audio || [];
-                S.subtitles = d.subtitles || [];
-                _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
-                _pipEls.clear();
-                S.pipLayers = d.pip || d.pipLayers || [];
-                S.selPipIdx = -1; S.selIdxs = new Set();
-                S.selIdx = S.clips.length ? 0 : -1; S.dirty = true;
-                if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
-                _applyExportSettings(d.export_settings);
-                renderAll();
-                toast('Шаблон загружен: ' + S.projectName, 'ok');
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                toast('Шаблон переименован: ' + d.name, 'ok');
+                await loadTemplatesList();
             } catch (err) { toast(err.message, 'err'); }
+            return;
+        }
+        if (act === 'dup') {
+            try {
+                const r = await fetch(`/api/imgvid/templates/${tid}/duplicate`, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                toast('Шаблон продублирован: ' + d.name, 'ok');
+                await loadTemplatesList();
+            } catch (err) { toast(err.message, 'err'); }
+            return;
         }
     });
 
     // ── Save ──────────────────────────────────────────────────────────────────
+    function _updateSaveBtn() {
+        if (saveBtn) saveBtn.textContent = S.isTemplateMode ? 'Сохранить шаблон' : 'Сохранить';
+    }
+
+    async function _editTemplate(tid) {
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть шаблон для редактирования?')) return;
+        try {
+            const r = await fetch(`/api/imgvid/templates/${tid}`);
+            if (!r.ok) { toast('Шаблон не найден', 'err'); return; }
+            const d = await r.json();
+            _stopPlayback();
+            S.projectId = null;
+            S.isTemplateMode = true;
+            S.editingTemplateId = tid;
+            S.projectName = d.name;
+            S.clips = d.slides || [];
+            S.audioTracks = d.audio || [];
+            S.subtitles = d.subtitles || [];
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers = d.pip || d.pipLayers || [];
+            S.selPipIdx = -1; S.selIdxs = new Set();
+            S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
+            _updateSaveBtn();
+            renderAll();
+            await loadTemplatesList();
+            toast('Шаблон открыт для редактирования', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+    }
+
     async function _saveProject() {
+        if (S.isTemplateMode && S.editingTemplateId) {
+            // Save back to template
+            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, export_settings: _getExportSettings() };
+            try {
+                const r = await fetch(`/api/imgvid/templates/${S.editingTemplateId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                S.dirty = false;
+                toast('Шаблон сохранён', 'ok'); log('Шаблон сохранён: ' + S.projectName, 'done');
+                await loadTemplatesList();
+                events.dispatchEvent(new CustomEvent('imgvid-template-changed'));
+            } catch (err) { toast(err.message, 'err'); }
+            return;
+        }
         const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, export_settings: _getExportSettings() };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
@@ -3045,9 +3826,11 @@ export async function init() {
         S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
         S.selPipIdx = -1; S.selIdxs = new Set();
         S.pipLayers = [];
+        S.isTemplateMode = false; S.editingTemplateId = null;
         S.dirty = false; S.currentTime = 0;
         _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
         _pipEls.clear();
+        _updateSaveBtn();
     }
 
     // → imgvid/export.js (getExportSettings)

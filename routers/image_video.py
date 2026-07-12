@@ -11,6 +11,7 @@ from routers.imgvid.ffmpeg_utils import (
     _XFADE, _EFFECTS,
     _find, _probe_duration_clip, _extract_thumb,
     _compute_video_dur,
+    _start_effect_filters, _end_effect_filters,
 )
 from routers.imgvid.ass_writer import _ass_time, _write_ass
 import routers.imgvid.project_ops as _proj_ops
@@ -24,10 +25,11 @@ AUDIO_DIR    = os.path.join(IMGVID_DIR, "audio")
 CLIPS_DIR    = os.path.join(IMGVID_DIR, "clips")
 THUMBS_DIR   = os.path.join(IMGVID_DIR, "thumbs")
 PROJECTS_DIR = os.path.join(IMGVID_DIR, "projects")
+TEMPLATES_DIR       = os.path.join(IMGVID_DIR, "templates")
 OUTPUT_DIR          = os.path.join(IMGVID_DIR, "output")
 SAVED_PROJECTS_DIR  = os.path.join(BASE_DIR, ".outputs", "saved_projects")
 
-for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, OUTPUT_DIR, SAVED_PROJECTS_DIR]:
+for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, TEMPLATES_DIR, OUTPUT_DIR, SAVED_PROJECTS_DIR]:
     os.makedirs(_d, exist_ok=True)
 
 _proj_ops.IMAGES_DIR   = IMAGES_DIR
@@ -236,8 +238,12 @@ async def delete_project(pid: str):
     return {"ok": True}
 
 
+class TemplateSaveBody(BaseModel):
+    name: str = ""
+
+
 @router.post("/projects/{pid}/save-as-template")
-async def save_project_as_template(pid: str):
+async def save_project_as_template(pid: str, body: TemplateSaveBody = TemplateSaveBody()):
     src = os.path.join(PROJECTS_DIR, f"{pid}.json")
     if not os.path.exists(src):
         raise HTTPException(404, "Проект не найден")
@@ -245,37 +251,147 @@ async def save_project_as_template(pid: str):
         data = json.load(f)
     new_id = uuid.uuid4().hex
     now = datetime.datetime.now().isoformat()
+    given_name = (body.name or "").strip() or (data.get("name", "Шаблон") + " (шаблон)")
     template = {**data, "id": new_id, "is_template": True,
                 "created_at": now, "updated_at": now,
-                "name": data.get("name", "Шаблон") + " (шаблон)"}
-    tpath = os.path.join(PROJECTS_DIR, f"{new_id}.json")
+                "name": given_name}
+    tpath = os.path.join(TEMPLATES_DIR, f"{new_id}.json")
     with open(tpath, "w", encoding="utf-8") as f:
         json.dump(template, f, ensure_ascii=False, indent=2)
     app_log(f"Project saved as template: {template['name']}", "INFO", "ImgVid")
     return {"id": new_id, "name": template["name"]}
 
 
+def _tmpl_path(tid: str) -> str:
+    """Return path to template file, checking TEMPLATES_DIR first then PROJECTS_DIR for backward compat."""
+    p = os.path.join(TEMPLATES_DIR, f"{tid}.json")
+    if os.path.exists(p):
+        return p
+    p2 = os.path.join(PROJECTS_DIR, f"{tid}.json")
+    if os.path.exists(p2):
+        return p2
+    return p  # non-existent path in new dir
+
+
 @router.get("/templates")
 async def list_templates():
     items = []
-    for fn in sorted(os.listdir(PROJECTS_DIR), reverse=True):
-        if not fn.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(PROJECTS_DIR, fn), encoding="utf-8") as f:
-                d = json.load(f)
-            if not d.get("is_template"):
+    seen = set()
+    # New directory first
+    for folder in [TEMPLATES_DIR, PROJECTS_DIR]:
+        for fn in sorted(os.listdir(folder), reverse=True):
+            if not fn.endswith(".json"):
                 continue
-            items.append({
-                "id":             d.get("id", fn[:-5]),
-                "name":           d.get("name", "Шаблон"),
-                "updated_at":     d.get("updated_at", ""),
-                "slide_count":    len(d.get("slides", [])),
-                "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
-            })
+            try:
+                with open(os.path.join(folder, fn), encoding="utf-8") as f:
+                    d = json.load(f)
+                if folder == PROJECTS_DIR and not d.get("is_template"):
+                    continue
+                tid = d.get("id", fn[:-5])
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                items.append({
+                    "id":             tid,
+                    "name":           d.get("name", "Шаблон"),
+                    "created_at":     d.get("created_at", ""),
+                    "updated_at":     d.get("updated_at", ""),
+                    "slide_count":    len(d.get("slides", [])),
+                    "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
+                })
+            except Exception:
+                pass
+    return {"templates": items}
+
+
+@router.get("/templates/{tid}")
+async def get_template(tid: str):
+    path = _tmpl_path(tid)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Шаблон не найден")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@router.put("/templates/{tid}")
+async def update_template(tid: str, body: ProjectBody):
+    path = _tmpl_path(tid)
+    now = datetime.datetime.now().isoformat()
+    existing_created = now
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing_created = json.load(f).get("created_at", now)
         except Exception:
             pass
-    return {"templates": items}
+    # Always write to TEMPLATES_DIR
+    dest = os.path.join(TEMPLATES_DIR, f"{tid}.json")
+    data = {
+        "id": tid, "name": body.name,
+        "created_at": existing_created, "updated_at": now,
+        "slides": body.slides, "audio": body.audio,
+        "subtitles": body.subtitles,
+        "pip": body.pip,
+        "export_settings": body.export_settings,
+        "is_template": True,
+    }
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    # Remove from old PROJECTS_DIR if it was there
+    old = os.path.join(PROJECTS_DIR, f"{tid}.json")
+    if os.path.exists(old):
+        os.remove(old)
+    app_log(f"Template saved: {body.name}", "INFO", "ImgVid")
+    return {"id": tid, "status": f"Шаблон сохранён: {body.name}"}
+
+
+@router.delete("/templates/{tid}")
+async def delete_template(tid: str):
+    for folder in [TEMPLATES_DIR, PROJECTS_DIR]:
+        p = os.path.join(folder, f"{tid}.json")
+        if os.path.exists(p):
+            os.remove(p)
+    app_log(f"Template deleted: {tid}", "INFO", "ImgVid")
+    return {"ok": True}
+
+
+@router.patch("/templates/{tid}/rename")
+async def rename_template(tid: str, body: dict):
+    path = _tmpl_path(tid)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Шаблон не найден")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["name"] = body.get("name", data["name"])
+    data["updated_at"] = datetime.datetime.now().isoformat()
+    # Write to TEMPLATES_DIR
+    dest = os.path.join(TEMPLATES_DIR, f"{tid}.json")
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    # Clean up old location if different
+    if path != dest and os.path.exists(path):
+        os.remove(path)
+    app_log(f"Template renamed: {data['name']}", "INFO", "ImgVid")
+    return {"id": tid, "name": data["name"]}
+
+
+@router.post("/templates/{tid}/duplicate")
+async def duplicate_template(tid: str):
+    path = _tmpl_path(tid)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Шаблон не найден")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    new_id = uuid.uuid4().hex
+    now = datetime.datetime.now().isoformat()
+    copy = {**data, "id": new_id,
+            "name": data.get("name", "Шаблон") + " (копия)",
+            "created_at": now, "updated_at": now, "is_template": True}
+    dest = os.path.join(TEMPLATES_DIR, f"{new_id}.json")
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(copy, f, ensure_ascii=False, indent=2)
+    app_log(f"Template duplicated: {copy['name']}", "INFO", "ImgVid")
+    return {"id": new_id, "name": copy["name"]}
 
 # ── .project format (pack/unpack) ─────────────────────────────────────────────
 
@@ -588,6 +704,16 @@ async def export_video(
                         et, ev = ef.get("type"), ef.get("value", 0)
                         if et in _EFFECTS and float(ev) != 0:
                             parts.append(_EFFECTS[et](ev))
+
+                    start_eff = slide.get("startEffect") or {}
+                    end_eff   = slide.get("endEffect")   or {}
+                    se_type   = (start_eff.get("type") or "none").strip()
+                    ee_type   = (end_eff.get("type")   or "none").strip()
+                    se_dur    = min(float(start_eff.get("duration") or 1.0), dur)
+                    ee_dur    = min(float(end_eff.get("duration")   or 1.0), dur)
+                    parts.extend(_start_effect_filters(se_type, se_dur, dur, width, height))
+                    parts.extend(_end_effect_filters(ee_type, ee_dur, dur, width, height))
+
                     filter_parts.append(f"[{i}:v]{','.join(parts)}[v{i}]")
 
                 # ── Subtitles ────────────────────────────────────────────────
@@ -723,6 +849,48 @@ async def export_video(
                 video_dur_for_audio = _compute_video_dur(slides)
                 total_dur = video_dur_for_audio
                 if valid_audio:
+                    def _sfx_filter(sfx_type, sfx):
+                        """Return FFmpeg audio filter string for one sound effect."""
+                        if sfx_type == "echo":
+                            d = int(sfx.get("delay", 500)); dc = float(sfx.get("decay", 0.5))
+                            return f"aecho=0.6:0.3:{d}:{dc}"
+                        if sfx_type == "reverb":
+                            d = int(sfx.get("delay", 1000)); dc = float(sfx.get("decay", 0.8))
+                            return f"aecho=0.8:0.9:{d}:{dc}"
+                        if sfx_type == "bassboost":
+                            g = float(sfx.get("gain", 10))
+                            return f"equalizer=f=60:t=o:w=1:g={g}"
+                        if sfx_type == "treble":
+                            g = float(sfx.get("gain", 8))
+                            return f"equalizer=f=8000:t=o:w=1:g={g}"
+                        if sfx_type == "compressor":
+                            r = float(sfx.get("ratio", 4))
+                            return f"acompressor=threshold=0.5:ratio={r}:attack=5:release=50"
+                        if sfx_type == "phone":
+                            return "highpass=f=300,lowpass=f=3400"
+                        if sfx_type == "radio":
+                            return "highpass=f=200,lowpass=f=3000"
+                        if sfx_type == "lowpass":
+                            return f"lowpass=f={int(sfx.get('freq', 500))}"
+                        if sfx_type == "highpass":
+                            return f"highpass=f={int(sfx.get('freq', 2000))}"
+                        if sfx_type == "chorus":
+                            return "chorus=0.7:0.9:55:0.4:0.25:2"
+                        if sfx_type == "flanger":
+                            return "flanger=delay=5:depth=2:speed=0.2:shape=sinusoidal"
+                        if sfx_type == "distortion":
+                            lv = float(sfx.get("level", 1.5))
+                            return f"acrusher=level_in={lv}:level_out=0.5:bits=8:mode=log"
+                        if sfx_type == "noise":
+                            return "afftdn=nf=-25"
+                        if sfx_type == "pitch":
+                            semi = float(sfx.get("semitones", 2))
+                            factor = 2 ** (semi / 12)
+                            rate = int(44100 * factor)
+                            inv = round(1.0 / factor, 4)
+                            return f"asetrate={rate},aresample=44100,atempo={inv}"
+                        return None
+
                     def _build_audio_filter(t, ai_idx, out_label, clip_to_total=True):
                         vol         = float(t.get("volume", 1.0))
                         fi          = float(t.get("fadeIn",  t.get("fade_in",  0)))
@@ -731,6 +899,8 @@ async def export_video(
                         start_off   = float(t.get("startOffset", 0))
                         track_dur   = t.get("duration")
                         track_dur_f = float(track_dur) if track_dur is not None else None
+                        speed       = float(t.get("speed", 1.0))
+                        sound_fx    = t.get("soundEffects") or []
                         af = []
                         # Trim file start and/or limit segment duration
                         if trim_in > 0 or track_dur_f is not None:
@@ -741,7 +911,21 @@ async def export_video(
                                 atrim_args.append(f"end={trim_in + track_dur_f:.3f}")
                             af.append(f"atrim={':'.join(atrim_args)}")
                             af.append("asetpts=PTS-STARTPTS")
+                        # Speed (atempo supports 0.5–2.0 per pass; chain for wider range)
+                        if abs(speed - 1.0) > 0.001:
+                            remaining = speed
+                            while remaining < 0.5:
+                                af.append("atempo=0.5"); remaining /= 0.5
+                            while remaining > 2.0:
+                                af.append("atempo=2.0"); remaining /= 2.0
+                            af.append(f"atempo={remaining:.6f}")
                         af.append(f"volume={vol}")
+                        # Sound effects
+                        for sfx in sound_fx:
+                            sfx_type = (sfx.get("type") or "").strip()
+                            f_str = _sfx_filter(sfx_type, sfx)
+                            if f_str:
+                                af.extend(f_str.split(","))
                         if fi > 0:
                             af.append(f"afade=t=in:ss=0:d={fi:.2f}")
                         if fo > 0:

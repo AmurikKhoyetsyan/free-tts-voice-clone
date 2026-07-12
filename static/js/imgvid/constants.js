@@ -28,3 +28,25 @@ export const EFFECTS_DEF = [
 
 export const FONTS = ['Arial', 'Times New Roman', 'Georgia', 'Courier New', 'Verdana', 'Impact', 'Trebuchet MS'];
 export const ANIMS = ['none', 'fade-in', 'fade-out', 'slide-up', 'slide-down', 'typewriter', 'zoom-in'];
+
+export const START_EFFECTS = [
+    { value: 'none',        label: 'Нет' },
+    { value: 'fade-in',     label: 'Fade In' },
+    { value: 'zoom-in',     label: 'Zoom In' },
+    { value: 'zoom-out',    label: 'Zoom Out' },
+    { value: 'slide-left',  label: 'Slide from Left' },
+    { value: 'slide-right', label: 'Slide from Right' },
+    { value: 'slide-up',    label: 'Slide from Top' },
+    { value: 'slide-down',  label: 'Slide from Bottom' },
+];
+
+export const END_EFFECTS = [
+    { value: 'none',        label: 'Нет' },
+    { value: 'fade-out',    label: 'Fade Out' },
+    { value: 'zoom-in',     label: 'Zoom In' },
+    { value: 'zoom-out',    label: 'Zoom Out' },
+    { value: 'slide-left',  label: 'Slide to Left' },
+    { value: 'slide-right', label: 'Slide to Right' },
+    { value: 'slide-up',    label: 'Slide to Top' },
+    { value: 'slide-down',  label: 'Slide to Bottom' },
+];
