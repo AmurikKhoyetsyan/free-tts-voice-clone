@@ -4389,39 +4389,71 @@ export async function init() {
     function _pasteSelected() {
         if (!_clipboard) { toast('Буфер обмена пуст', 'info'); return; }
         let count = 0;
+        const t = S.currentTime;
+
+        // Compute delta to shift time-based objects so the earliest one starts at playhead.
+        // Clips (sequential) are handled separately via array index.
+        const timeBased = [];
+        if (_clipboard.audio?.length) _clipboard.audio.forEach(a => timeBased.push(a.startOffset || 0));
+        if (_clipboard.subs?.length)  _clipboard.subs.forEach(s  => timeBased.push(s.start || 0));
+        if (_clipboard.pip?.length)   _clipboard.pip.forEach(p   => timeBased.push(p.startTime || 0));
+        const minT  = timeBased.length ? Math.min(...timeBased) : 0;
+        const delta = t - minT;
+
+        // Clips (Video/Image) — sequential layout; insert at the index whose cumulative
+        // start time >= playhead so the pasted clip begins at the cursor position.
         if (_clipboard.clips?.length) {
             const newClips = _clipboard.clips.map(c => ({ ...c, id: uid() }));
-            const insertAt = S.selIdxs.size > 0 ? Math.max(...S.selIdxs) + 1 : (S.selIdx >= 0 ? S.selIdx + 1 : S.clips.length);
+            let cursor = 0, insertAt = S.clips.length;
+            for (let i = 0; i < S.clips.length; i++) {
+                if (cursor >= t) { insertAt = i; break; }
+                cursor += S.clips[i].duration || 3;
+            }
             S.clips.splice(insertAt, 0, ...newClips);
             S.selIdxs = new Set(newClips.map((_, j) => insertAt + j));
             S.selIdx = insertAt + newClips.length - 1;
             count += newClips.length;
         }
+
+        // Audio — place at playhead, preserving relative offsets between tracks.
         if (_clipboard.audio?.length) {
             const newAudio = _clipboard.audio.map(a => {
-                const dur = a.duration ?? a.originalDuration ?? 10;
-                return { ...a, id: uid(), startOffset: (a.startOffset || 0) + dur };
+                const newOff = Math.max(0, Math.round(((a.startOffset || 0) + delta) * 1000) / 1000);
+                return { ...a, id: uid(), startOffset: newOff };
             });
             newAudio.forEach(a => S.audioTracks.push(a));
             S.selAudioIdxs = new Set(newAudio.map((_, j) => S.audioTracks.length - newAudio.length + j));
             S.selAudioIdx = S.audioTracks.length - 1;
             count += newAudio.length;
         }
+
+        // Subtitles — place at playhead, preserving duration and relative offsets.
         if (_clipboard.subs?.length) {
-            const newSubs = _clipboard.subs.map(s => ({ ...s, id: uid(), start: s.start + 0.5, end: s.end + 0.5 }));
-            const insertAt = S.selSubIdxs.size > 0 ? Math.max(...S.selSubIdxs) + 1 : (S.selSubIdx >= 0 ? S.selSubIdx + 1 : S.subtitles.length);
-            S.subtitles.splice(insertAt, 0, ...newSubs);
-            S.selSubIdxs = new Set(newSubs.map((_, j) => insertAt + j));
-            S.selSubIdx = insertAt + newSubs.length - 1;
+            const newSubs = _clipboard.subs.map(s => {
+                const dur = (s.end || 3) - (s.start || 0);
+                const newStart = Math.max(0, Math.round(((s.start || 0) + delta) * 1000) / 1000);
+                return { ...s, id: uid(), start: newStart, end: Math.round((newStart + dur) * 1000) / 1000 };
+            });
+            newSubs.forEach(s => S.subtitles.push(s));
+            S.selSubIdxs = new Set(newSubs.map((_, j) => S.subtitles.length - newSubs.length + j));
+            S.selSubIdx = S.subtitles.length - 1;
             count += newSubs.length;
         }
+
+        // PIP — place at playhead, preserving duration and relative offsets; keep screen position.
         if (_clipboard.pip?.length) {
-            const newPip = _clipboard.pip.map(p => ({ ...p, id: uid(), x: Math.min(90, (p.x || 0) + 2), y: Math.min(90, (p.y || 0) + 2) }));
+            const newPip = _clipboard.pip.map(p => {
+                const dur = (p.endTime ?? ((p.startTime || 0) + 5)) - (p.startTime || 0);
+                const newStart = Math.max(0, Math.round(((p.startTime || 0) + delta) * 1000) / 1000);
+                return { ...p, id: uid(), startTime: newStart, endTime: Math.round((newStart + dur) * 1000) / 1000,
+                    x: Math.min(90, (p.x || 0) + 2), y: Math.min(90, (p.y || 0) + 2) };
+            });
             newPip.forEach(p => S.pipLayers.push(p));
             S.selPipIdxs = new Set(newPip.map((_, j) => S.pipLayers.length - newPip.length + j));
             S.selPipIdx = S.pipLayers.length - 1;
             count += newPip.length;
         }
+
         if (count > 0) { _pushHistory(); S.dirty = true; renderAll(); toast('Вставлено объектов: ' + count, 'ok'); }
     }
 
