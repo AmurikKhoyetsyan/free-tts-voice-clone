@@ -40,7 +40,10 @@ tts/
     ├── index.html
     ├── css/
     └── js/
-        ├── tabs/               # One module per tab
+        ├── audio-player.js     # Waveform + seekbar audio player
+        ├── wave-renderer.js    # Canvas waveform renderer (used by audio-player)
+        ├── loader.js           # withLoader() / makeSkeleton() helpers
+        ├── tabs/               # One module per tab (+ ffmpeg.js, templates.js)
         └── imgvid/             # Image Video Editor sub-modules
 ```
 

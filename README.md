@@ -34,7 +34,7 @@ A local **text-to-speech and video production web app** with eight tabs, served 
 | **Видео** | Upload video, style subtitles visually, burn to MP4 with FFmpeg |
 | **История** | File browser for audio, subtitles, video, and style templates |
 | **Логи** | Server log viewer with per-file edit support |
-| **Image Video** | Full image/video editor — timeline, transitions, effects, subtitles, audio, PIP, export |
+| **Редактор** | Full image/video editor — timeline, transitions, effects, subtitles, audio with sound effects, PIP, template system, export |
 
 ---
 
@@ -44,6 +44,9 @@ A local **text-to-speech and video production web app** with eight tabs, served 
 - **XTTS v2 voice cloning** — Coqui neural TTS, 8 languages, GPU-accelerated (CPU fallback)
 - **Subtitle burning** — full styling (font, colour, karaoke), style templates, FFmpeg output
 - **Image Video Editor** — non-linear timeline, 22 transitions, per-clip effects, ASS subtitles, PIP layers, audio split/trim, cursor-relative zoom (Ctrl+Scroll)
+- **Audio effects** — 14 per-track sound effects (echo, reverb, bass boost, treble, compressor, phone, radio, low/high-pass filter, chorus, flanger, distortion, noise gate, pitch shift); speed 0.25×–4× + custom
+- **Custom audio player** — waveform drag-to-scrub, synchronized seekbar with progress fill, skip ±5 s, speed 0.5×–2×, download
+- **Template system** — save any project as a reusable template; apply via a drag-and-drop modal (single multi-file zone for slides, individual DnD zones for audio/PIP)
 - **Export** — 11 video formats (MP4 / MOV / MKV / AVI / WebM / GIF / …), 7 codecs (H.264 / H.265 / VP9 / …), audio-only export (MP3 / WAV / FLAC / AAC / OGG / M4A / OPUS)
 - **Projects** — save/load as `.project` archives (JSON + all media packed into a ZIP)
 - **SSE streaming** — real-time synthesis and export progress in the browser
@@ -136,15 +139,19 @@ tts/
     ├── css/
     └── js/
         ├── app.js  api.js  audio-manager.js  events.js  icons.js
-        ├── logger.js  modal.js  toast.js  tabs.js
+        ├── audio-player.js      # waveform drag-to-scrub, seekbar, play/download
+        ├── wave-renderer.js     # canvas waveform renderer used by AudioPlayer
+        ├── loader.js  logger.js  modal.js  toast.js  tabs.js
         ├── tabs/
         │   ├── windows.js  cloning.js  saved.js  subtitles.js
-        │   ├── video.js  history.js  logs.js
-        │   └── image-video.js   # Image Video Editor tab (imports from imgvid/)
+        │   ├── video.js  ffmpeg.js  templates.js  history.js  logs.js
+        │   └── image-video.js   # Редактор tab (imports from imgvid/)
         └── imgvid/              # Image Video Editor frontend sub-modules
             ├── constants.js     # TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS
             ├── utils.js         # Pure utility functions (uid, fmt, snap, totalDur, …)
-            └── waveform.js      # drawWaveform(), probeAudioDuration() with cache
+            ├── waveform.js      # drawWaveform(), probeAudioDuration() with cache
+            ├── export.js        # export helpers stub
+            └── preview.js       # preview zoom helpers stub
 ```
 
 Full module descriptions → [Architecture](docs/architecture.md)  
