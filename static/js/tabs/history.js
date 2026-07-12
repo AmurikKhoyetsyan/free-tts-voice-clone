@@ -391,6 +391,163 @@ export async function init() {
         }
     });
 
+    // ── Video Templates (Image Video Editor) ─────────────────────────────────
+    const vidTmplListEl      = document.getElementById('hist-vidtmpl-list');
+    const vidTmplInfoBlock   = document.getElementById('hist-vidtmpl-info-block');
+    const vidTmplInfoLabel   = document.getElementById('hist-vidtmpl-info-label');
+    const vidTmplInfoContent = document.getElementById('hist-vidtmpl-info-content');
+
+    function _fmtDateHist(iso) {
+        if (!iso) return '—';
+        try { return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }); } catch { return '—'; }
+    }
+
+    function renderVidTmpls(tmpls) {
+        if (!vidTmplListEl) return;
+        if (!tmpls.length) { vidTmplListEl.innerHTML = '<div class="hist-empty">Нет шаблонов</div>'; return; }
+        vidTmplListEl.innerHTML = tmpls.map(t => `
+            <div class="hist-row" data-tid="${ea(t.id)}">
+                <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
+                    <span class="hist-name" title="${ea(t.name)}">${eh(t.name)}</span>
+                    <span style="font-size:10px;color:var(--text-dim)">${t.slide_count || 0} слайд. · ${t.total_duration || 0}с · изм. ${_fmtDateHist(t.updated_at)}</span>
+                </div>
+                <div class="hist-btns">
+                    <button class="hist-btn accent" data-tact="edit"   title="Редактировать в редакторе">${ICONS.edit}</button>
+                    <button class="hist-btn"        data-tact="rename" title="Переименовать">${ICONS.pencil}</button>
+                    <button class="hist-btn"        data-tact="dup"    title="Дублировать">${ICONS.copy}</button>
+                    <button class="hist-btn danger" data-tact="delete" title="Удалить">${ICONS.trash}</button>
+                </div>
+            </div>`).join('');
+    }
+
+    async function refreshVidTmpls() {
+        if (!vidTmplListEl) return;
+        skeletonRows(vidTmplListEl, 3);
+        try {
+            const data = await getJSON('/api/imgvid/templates');
+            renderVidTmpls(data.templates || []);
+        } catch (_) {
+            if (vidTmplListEl) vidTmplListEl.innerHTML = '<div class="hist-empty">Ошибка загрузки</div>';
+        }
+    }
+
+    vidTmplListEl?.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-tact]');
+        if (!btn) return;
+        const row = btn.closest('.hist-row');
+        const tid = row?.dataset.tid;
+        const act = btn.dataset.tact;
+        if (!tid) return;
+
+        if (act === 'edit') {
+            document.querySelector('[data-tab="imgvid"]')?.click();
+            events.dispatchEvent(new CustomEvent('imgvid-edit-template', { detail: { tid } }));
+            return;
+        }
+        if (act === 'rename') {
+            const curName = row.querySelector('.hist-name')?.textContent || '';
+            const newName = await openPrompt({ title: 'Переименовать шаблон', initial: curName });
+            if (!newName) return;
+            try {
+                const r = await fetch(`/api/imgvid/templates/${tid}/rename`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName }),
+                });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                toast('Шаблон переименован: ' + d.name, 'ok');
+                await refreshVidTmpls();
+            } catch (e2) { toast(e2.message, 'err'); }
+            return;
+        }
+        if (act === 'dup') {
+            try {
+                const r = await fetch(`/api/imgvid/templates/${tid}/duplicate`, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                toast('Шаблон скопирован: ' + d.name, 'ok');
+                await refreshVidTmpls();
+            } catch (e2) { toast(e2.message, 'err'); }
+            return;
+        }
+        if (act === 'delete') {
+            const curName = row.querySelector('.hist-name')?.textContent || tid;
+            const ok = await openConfirm({ title: 'Удалить шаблон', message: `Удалить «${curName}»?`, confirmLabel: 'Удалить' });
+            if (!ok) return;
+            try {
+                await fetch(`/api/imgvid/templates/${tid}`, { method: 'DELETE' });
+                toast('Шаблон удалён', 'ok');
+                if (vidTmplInfoBlock) vidTmplInfoBlock.hidden = true;
+                await refreshVidTmpls();
+            } catch (e2) { toast(e2.message, 'err'); }
+        }
+    });
+
+    // ── History Logs (server log files) ──────────────────────────────────────
+    const histLogsListEl        = document.getElementById('hist-logs-list');
+    const histLogsPreviewBlock  = document.getElementById('hist-logs-preview-block');
+    const histLogsPreviewLabel  = document.getElementById('hist-logs-preview-label');
+    const histLogsPreviewPre    = document.getElementById('hist-logs-preview-content');
+
+    async function refreshHistLogs() {
+        if (!histLogsListEl) return;
+        skeletonRows(histLogsListEl, 3);
+        try {
+            const data = await getJSON('/api/logs');
+            const files = data.files || [];
+            if (!files.length) { histLogsListEl.innerHTML = '<div class="hist-empty">Нет лог-файлов</div>'; return; }
+            histLogsListEl.innerHTML = files.map(f => `
+                <div class="hist-row" data-logfile="${ea(f.name)}">
+                    <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0">
+                        <span class="hist-name">${eh(f.name)}</span>
+                        <span style="font-size:10px;color:var(--text-dim)">${f.modified || ''}</span>
+                    </div>
+                    <div class="hist-btns">
+                        <button class="hist-btn accent" data-lact="view"   title="Просмотр">${ICONS.eye}</button>
+                        <button class="hist-btn"        data-lact="open"   title="Открыть в редакторе">↗</button>
+                        <button class="hist-btn danger" data-lact="delete" title="Удалить">${ICONS.trash}</button>
+                    </div>
+                </div>`).join('');
+        } catch (_) {
+            if (histLogsListEl) histLogsListEl.innerHTML = '<div class="hist-empty">Ошибка загрузки</div>';
+        }
+    }
+
+    histLogsListEl?.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-lact]');
+        const row = btn ? btn.closest('.hist-row') : e.target.closest('.hist-row');
+        if (!row) return;
+        const fname = row.dataset.logfile;
+        const act = btn?.dataset.lact;
+
+        if (!act || act === 'view') {
+            try {
+                histLogsListEl.querySelectorAll('.hist-row').forEach(r => r.classList.toggle('active', r === row));
+                const data = await getJSON(`/api/logs/${encodeURIComponent(fname)}`);
+                if (histLogsPreviewLabel) histLogsPreviewLabel.textContent = fname;
+                if (histLogsPreviewPre)   histLogsPreviewPre.textContent = data.content?.trim() || '(пусто)';
+                if (histLogsPreviewBlock) histLogsPreviewBlock.hidden = false;
+            } catch (e2) { toast(e2.message, 'err'); }
+            return;
+        }
+        if (act === 'open') {
+            document.querySelector('[data-tab="logs"]')?.click();
+            return;
+        }
+        if (act === 'delete') {
+            const ok = await openConfirm({ title: 'Удалить лог', message: `Удалить «${fname}»?`, confirmLabel: 'Удалить' });
+            if (!ok) return;
+            try {
+                const r = await fetch(`/api/logs/${encodeURIComponent(fname)}`, { method: 'DELETE' });
+                if (!r.ok) { toast('Ошибка удаления', 'err'); return; }
+                toast('Лог удалён', 'ok');
+                if (histLogsPreviewBlock) histLogsPreviewBlock.hidden = true;
+                await refreshHistLogs();
+            } catch (e2) { toast(e2.message, 'err'); }
+        }
+    });
+
     // ── Projects ──────────────────────────────────────────────────────────────
     const projListEl = document.getElementById('hist-proj-list');
 
@@ -411,7 +568,7 @@ export async function init() {
             <div class="hist-btns">
                 <button class="hist-btn accent" data-paction="open"   title="Открыть в редакторе">${ICONS.edit}</button>
                 <button class="hist-btn"        data-paction="amur"   title="Скачать .amur">${ICONS.download}</button>
-                <button class="hist-btn"        data-paction="rename" title="Переименовать">${ICONS.edit}</button>
+                <button class="hist-btn"        data-paction="rename" title="Переименовать">${ICONS.pencil}</button>
                 <button class="hist-btn danger" data-paction="delete" title="Удалить">${ICONS.trash}</button>
             </div>
         </div>`).join('');
@@ -491,14 +648,17 @@ export async function init() {
         else if (type === 'video')     refreshVid();
         else if (type === 'templates') refreshTemplates();
         else if (type === 'projects')  refreshProjects();
+        else if (type === 'vidtmpls')  refreshVidTmpls();
+        else if (type === 'histlogs')  refreshHistLogs();
     });
 
     events.addEventListener('history-changed',   refreshAudio);
     events.addEventListener('subtitles-changed', refreshSRT);
     events.addEventListener('video-changed',     refreshVid);
     events.addEventListener('template-changed',  refreshTemplates);
+    events.addEventListener('imgvid-template-changed', refreshVidTmpls);
 
-    await Promise.all([refreshAudio(), refreshSRT(), refreshVid(), refreshTemplates(), refreshProjects()]);
+    await Promise.all([refreshAudio(), refreshSRT(), refreshVid(), refreshTemplates(), refreshProjects(), refreshVidTmpls(), refreshHistLogs()]);
 }
 
 function _applyVisualPreview(el, s) {

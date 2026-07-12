@@ -519,6 +519,7 @@ export async function init() {
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
             toast('Шаблон сохранён: ' + d.name, 'ok');
             await loadTemplatesList();
+            events.dispatchEvent(new CustomEvent('imgvid-template-changed'));
             _switchSidebarTab('templates');
         } catch (e) { toast(e.message, 'err'); }
     });
@@ -596,6 +597,12 @@ export async function init() {
             renderAll(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
+    });
+
+    // Listen for edit-template event from History tab
+    events?.addEventListener('imgvid-edit-template', async (ev) => {
+        const tid = ev.detail?.tid; if (!tid) return;
+        await _editTemplate(tid);
     });
 
     // ── Keyboard shortcuts ────────────────────────────────────────────────────
@@ -3216,7 +3223,9 @@ export async function init() {
             await fetch(`/api/imgvid/templates/${tid}`, { method: 'DELETE' });
             log('Шаблон удалён', 'done');
             if (S.editingTemplateId === tid) { S.isTemplateMode = false; S.editingTemplateId = null; _updateSaveBtn(); }
-            await loadTemplatesList(); return;
+            await loadTemplatesList();
+            events.dispatchEvent(new CustomEvent('imgvid-template-changed'));
+            return;
         }
         if (act === 'use') {
             await _applyTemplate(tid); return;
@@ -3301,6 +3310,7 @@ export async function init() {
                 S.dirty = false;
                 toast('Шаблон сохранён', 'ok'); log('Шаблон сохранён: ' + S.projectName, 'done');
                 await loadTemplatesList();
+                events.dispatchEvent(new CustomEvent('imgvid-template-changed'));
             } catch (err) { toast(err.message, 'err'); }
             return;
         }

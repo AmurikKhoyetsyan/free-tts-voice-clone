@@ -95,8 +95,8 @@
         <button class="tab" data-tab="history">История</button>
         <button class="tab" data-tab="subtitles">Субтитры</button>
         <button class="tab" data-tab="video">Видео</button>
+        <button class="tab" data-tab="imgvid">Image Video Editor</button>
         <button class="tab" data-tab="logs">Логи</button>
-        <button class="tab" data-tab="imgvid">Image Video</button>
     </nav>
 
     <main class="app-main">
@@ -231,8 +231,10 @@
                     <button class="hist-type-btn active" data-htype="audio">Аудио</button>
                     <button class="hist-type-btn" data-htype="subtitles">Субтитры</button>
                     <button class="hist-type-btn" data-htype="video">Видео</button>
-                    <button class="hist-type-btn" data-htype="templates">Шаблоны</button>
                     <button class="hist-type-btn" data-htype="projects">Проекты</button>
+                    <button class="hist-type-btn" data-htype="templates">Субтитры шаблон</button>
+                    <button class="hist-type-btn" data-htype="vidtmpls">Видео шаблон</button>
+                    <button class="hist-type-btn" data-htype="histlogs">Логи</button>
                 </div>
                 <button class="btn btn-ghost" id="hist-refresh">Обновить</button>
             </div>
@@ -313,6 +315,36 @@
             <!-- Projects (.amur) -->
             <div class="hist-section" id="hist-section-projects" hidden>
                 <div id="hist-proj-list" class="hist-list"></div>
+            </div>
+
+            <!-- Video Templates (Image Video Editor) -->
+            <div class="hist-section" id="hist-section-vidtmpls" hidden>
+                <div class="grid-2">
+                    <div class="col">
+                        <div id="hist-vidtmpl-list" class="hist-list"></div>
+                    </div>
+                    <div class="col">
+                        <div class="result-block" id="hist-vidtmpl-info-block" hidden style="position:static">
+                            <div class="result-label" id="hist-vidtmpl-info-label">Шаблон</div>
+                            <div id="hist-vidtmpl-info-content" style="font-size:13px;line-height:1.7;color:var(--text)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs (server log files) -->
+            <div class="hist-section" id="hist-section-histlogs" hidden>
+                <div class="grid-2">
+                    <div class="col">
+                        <div id="hist-logs-list" class="hist-list"></div>
+                    </div>
+                    <div class="col">
+                        <div class="result-block" id="hist-logs-preview-block" hidden style="position:static">
+                            <div class="result-label" id="hist-logs-preview-label">Лог</div>
+                            <pre id="hist-logs-preview-content" class="srt-preview-content" style="max-height:300px;overflow-y:auto"></pre>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
 
