@@ -360,17 +360,21 @@ export async function init() {
     subRhE.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
-        _pushHistory();
         const rect = previewContent.getBoundingClientRect();
         const sx = e.clientX;
         const w0 = sub.w > 0 ? sub.w : 50;
         if (!(sub.w > 0)) sub.w = 50;
+        let moved = false;
         const onMove = ev => {
+            moved = true;
             const dx = (ev.clientX - sx) / rect.width * 100;
             sub.w = Math.max(5, Math.min(100, Math.round((w0 + 2 * dx) * 10) / 10));
             S.dirty = true; renderPreview(); if (S.selSubIdx >= 0) renderProps();
         };
-        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+            if (moved) _pushHistory();
+        };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     });
@@ -378,18 +382,22 @@ export async function init() {
     subRhS.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
-        _pushHistory();
         const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
         const sy = e.clientY;
         const h0 = sub.h > 0 ? sub.h : 80;
         if (!(sub.h > 0)) sub.h = 80;
+        let moved = false;
         const onMove = ev => {
+            moved = true;
             const dy = (ev.clientY - sy) / sc;
             sub.h = Math.max(10, Math.round(h0 + 2 * dy));
             S.dirty = true; renderPreview(); if (S.selSubIdx >= 0) renderProps();
         };
-        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+            if (moved) _pushHistory();
+        };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     });
@@ -397,7 +405,6 @@ export async function init() {
     subRhSE.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
-        _pushHistory();
         const rect = previewContent.getBoundingClientRect();
         const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
@@ -406,27 +413,32 @@ export async function init() {
         const h0 = sub.h > 0 ? sub.h : 80;
         if (!(sub.w > 0)) sub.w = 50;
         if (!(sub.h > 0)) sub.h = 80;
+        let moved = false;
         const onMove = ev => {
+            moved = true;
             const dx = (ev.clientX - sx) / rect.width * 100;
             const dy = (ev.clientY - sy) / sc;
             sub.w = Math.max(5, Math.min(100, Math.round((w0 + 2 * dx) * 10) / 10));
             sub.h = Math.max(10, Math.round(h0 + 2 * dy));
             S.dirty = true; renderPreview(); if (S.selSubIdx >= 0) renderProps();
         };
-        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+            if (moved) _pushHistory();
+        };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
     });
 
     // ── Subtitle overlay drag (move subtitle position with mouse) ─────────────
-    let _subDragging = false, _subDx0 = 0, _subDy0 = 0, _subX0 = 0, _subY0 = 0;
+    let _subDragging = false, _subDx0 = 0, _subDy0 = 0, _subX0 = 0, _subY0 = 0, _subOverlayMoved = false;
 
     subOverlay.addEventListener('mousedown', e => {
         const sub = subOverlay._activeSub;
         if (!sub) return;
         e.stopPropagation(); e.preventDefault();
-        _pushHistory();
         _subDragging = true;
+        _subOverlayMoved = false;
         _subDx0 = e.clientX; _subDy0 = e.clientY;
         _subX0 = sub.x ?? 50; _subY0 = sub.y ?? 88;
         subOverlay.style.cursor = 'grabbing';
@@ -436,6 +448,7 @@ export async function init() {
         if (!_subDragging) return;
         const sub = subOverlay._activeSub;
         if (!sub) return;
+        _subOverlayMoved = true;
         const rect = (subContainer || previewContent).getBoundingClientRect();
         const dxPct = (e.clientX - _subDx0) / rect.width  * 100;
         const dyPct = (e.clientY - _subDy0) / rect.height * 100;
@@ -448,7 +461,10 @@ export async function init() {
     });
 
     document.addEventListener('mouseup', () => {
-        if (_subDragging) { _subDragging = false; subOverlay.style.cursor = 'grab'; }
+        if (_subDragging) {
+            _subDragging = false; subOverlay.style.cursor = 'grab';
+            if (_subOverlayMoved) _pushHistory();
+        }
     });
 
     // Click on sub overlay selects the subtitle
@@ -841,8 +857,8 @@ export async function init() {
                 const r = await fetch('/api/imgvid/images', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                _pushHistory();
                 S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
+                _pushHistory();
                 S.dirty = true; log('Изображение добавлено: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -858,8 +874,8 @@ export async function init() {
                 const r = await fetch('/api/imgvid/clips', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                _pushHistory();
                 S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
+                _pushHistory();
                 S.dirty = true; log('Видеоклип добавлен: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
         }
@@ -873,9 +889,9 @@ export async function init() {
             const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            _pushHistory();
             const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: 0, trimIn: 0 };
             S.audioTracks.push(track);
+            _pushHistory();
             S.dirty = true; log('Аудио добавлено: ' + d.original, 'done');
             renderMediaList(); renderTimeline();
             // Probe original duration asynchronously via Web Audio
@@ -1199,9 +1215,9 @@ export async function init() {
                 const del = e.target.closest('[data-mdel]');
                 if (del) {
                     const k = del.dataset.mdel, i = +del.dataset.mdi;
-                    _pushHistory();
                     if (k === 'clip') { S.clips.splice(i, 1); if (S.selIdx >= S.clips.length) S.selIdx = S.clips.length - 1; }
                     else { S.audioTracks.splice(i, 1); if (S.selAudioIdx >= S.audioTracks.length) S.selAudioIdx = -1; }
+                    _pushHistory();
                     S.dirty = true; renderAll(); return;
                 }
                 if (row.dataset.mk === 'clip') _selectClip(+row.dataset.mi, { ctrl: e.ctrlKey, shift: e.shiftKey });
@@ -1316,10 +1332,10 @@ export async function init() {
                         cur2 += S.clips[j].duration || 3;
                     }
                     if (dropIdx !== i && dropIdx !== i + 1) {
-                        _pushHistory();
                         const [moved2] = S.clips.splice(i, 1);
                         const finalIdx = dropIdx > i ? dropIdx - 1 : dropIdx;
                         S.clips.splice(finalIdx, 0, moved2);
+                        _pushHistory();
                         S.selIdx = finalIdx; S.dirty = true; renderAll();
                     }
                 };
@@ -1328,13 +1344,17 @@ export async function init() {
             });
             div.querySelector('.ive-tl-clip-resize')?.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
-                _pushHistory();
                 const sx = e.clientX, sd = clip.duration;
+                let moved = false;
                 const onMove = ev => {
+                    moved = true;
                     clip.duration = Math.max(0.5, Math.round((sd + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
                     S.dirty = true; renderTimeline(); renderMediaList(); if (i === S.selIdx) renderProps();
                 };
-                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
+                };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
@@ -1342,16 +1362,20 @@ export async function init() {
             if (clip.type === 'video') {
                 div.querySelector('.ive-tl-clip-resize-left')?.addEventListener('mousedown', e => {
                     e.stopPropagation(); e.preventDefault();
-                    _pushHistory();
                     const sx = e.clientX, sTrimIn = clip.trimIn || 0, sDur = clip.duration;
                     const outPt = sTrimIn + sDur;
+                    let moved = false;
                     const onMove = ev => {
+                        moved = true;
                         const newIn = Math.max(0, Math.round((sTrimIn + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
                         clip.trimIn   = newIn;
                         clip.duration = Math.max(0.5, Math.round((outPt - newIn) * 10) / 10);
                         S.dirty = true; renderTimeline(); renderMediaList(); if (i === S.selIdx) renderProps();
                     };
-                    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                    const onUp = () => {
+                        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                        if (moved) _pushHistory();
+                    };
                     document.addEventListener('mousemove', onMove);
                     document.addEventListener('mouseup', onUp);
                 });
@@ -1444,7 +1468,6 @@ export async function init() {
                         S.selAudioIdxs.add(i);
                         S.selAudioIdx = i;
                     }
-                    S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
                     S.activeTab = 'slide'; renderTimeline(); renderProps();
                     return;
                 }
@@ -1457,30 +1480,52 @@ export async function init() {
                 }
                 S.activeTab = 'slide'; renderTimeline(); renderProps();
                 const sx = e.clientX;
-                const _dragIds = [...S.selAudioIdxs];
-                const _dragOffs = _dragIds.map(idx => S.audioTracks[idx]?.startOffset || 0);
+                // Capture initial positions of ALL selected types for cross-type group drag
+                const _dragInitAudio = [...S.selAudioIdxs].map(idx => ({ idx, startOffset: S.audioTracks[idx]?.startOffset || 0 }));
+                const _dragInitSub = [...S.selSubIdxs].map(idx => {
+                    const s = S.subtitles[idx] || {};
+                    return { idx, start: s.start || 0, dur: (s.end || 3) - (s.start || 0) };
+                });
+                const _dragInitPip = [...S.selPipIdxs].map(idx => {
+                    const p = S.pipLayers[idx] || {};
+                    const st = p.startTime || 0;
+                    return { idx, startTime: st, dur: (p.endTime ?? (st + 5)) - st };
+                });
                 let moved = false;
                 const onMove = ev => {
                     if (!moved && Math.abs(ev.clientX - sx) < 4) return;
-                    if (!moved) _pushHistory();
                     moved = true;
                     const dx = (ev.clientX - sx) / S.pxPerSec;
-                    _dragIds.forEach((idx, j) => {
-                        if (S.audioTracks[idx]) S.audioTracks[idx].startOffset = Math.max(0, Math.round((_dragOffs[j] + dx) * 10) / 10);
+                    _dragInitAudio.forEach(({ idx, startOffset }) => {
+                        if (S.audioTracks[idx]) S.audioTracks[idx].startOffset = Math.max(0, Math.round((startOffset + dx) * 10) / 10);
+                    });
+                    _dragInitSub.forEach(({ idx, start, dur }) => {
+                        const s = S.subtitles[idx]; if (!s) return;
+                        const newStart = Math.max(0, Math.round((start + dx) * 10) / 10);
+                        s.start = newStart; s.end = Math.round((newStart + dur) * 10) / 10;
+                    });
+                    _dragInitPip.forEach(({ idx, startTime, dur }) => {
+                        const p = S.pipLayers[idx]; if (!p) return;
+                        const newStart = Math.max(0, Math.round((startTime + dx) * 10) / 10);
+                        p.startTime = newStart; p.endTime = Math.round((newStart + dur) * 10) / 10;
                     });
                     S.dirty = true; renderTimeline(); renderProps();
                 };
-                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
+                };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
             lh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
-                _pushHistory();
                 const sx = e.clientX, sOff = track.startOffset || 0, sTrimIn = track.trimIn || 0;
                 const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - sOff);
                 const outPt = sOff + sDur;  // keep out-point fixed
+                let moved = false;
                 const onMove = ev => {
+                    moved = true;
                     const dx = (ev.clientX - sx) / S.pxPerSec;
                     const maxTrimIn = (track.originalDuration || 9999) - 0.5;
                     const newOff    = Math.max(0, Math.round((sOff + dx) * 10) / 10);
@@ -1490,21 +1535,28 @@ export async function init() {
                     track.duration    = Math.max(0.5, Math.round((outPt - newOff) * 10) / 10);
                     S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
                 };
-                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
+                };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
             rh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
-                _pushHistory();
                 const sx = e.clientX;
                 const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+                let moved = false;
                 const onMove = ev => {
+                    moved = true;
                     const maxDur = (track.originalDuration || 9999) - (track.trimIn || 0);
                     track.duration = Math.max(0.5, Math.min(maxDur, Math.round((sDur + (ev.clientX - sx) / S.pxPerSec) * 10) / 10));
                     S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
                 };
-                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
+                };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
@@ -1536,7 +1588,7 @@ export async function init() {
                         S.selSubIdxs.add(si);
                         S.selSubIdx = si;
                     }
-                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
                 } else {
                     S.selSubIdx = si;
                     S.selSubIdxs = new Set([si]);
@@ -1562,22 +1614,39 @@ export async function init() {
                     const s2 = S.subtitles[idx] || {};
                     return { idx, start0: s2.start || 0, dur: (s2.end || 3) - (s2.start || 0) };
                 });
+                // Capture initial positions of other selected types for cross-type group drag
+                const _dragInitAudio = [...S.selAudioIdxs].map(idx => ({ idx, startOffset: S.audioTracks[idx]?.startOffset || 0 }));
+                const _dragInitPip = [...S.selPipIdxs].map(idx => {
+                    const p = S.pipLayers[idx] || {};
+                    const st = p.startTime || 0;
+                    return { idx, startTime: st, dur: (p.endTime ?? (st + 5)) - st };
+                });
                 let moved = false;
                 const onMove = ev => {
                     if (!moved && Math.abs(ev.clientX - sx) < 3) return;
-                    if (!moved) _pushHistory();
                     moved = true;
                     const dx = (ev.clientX - sx) / S.pxPerSec;
                     _dragSubData.forEach(({ idx, start0, dur: d }) => {
                         const s2 = S.subtitles[idx]; if (!s2) return;
                         let newStart = Math.max(0, start0 + dx);
-                        if (_dragSubIds.length === 1) newStart = _snap(newStart, snapTargets);
+                        if (_dragSubIds.length === 1 && _dragInitAudio.length === 0 && _dragInitPip.length === 0) newStart = _snap(newStart, snapTargets);
                         s2.start = Math.round(newStart * 10) / 10;
                         s2.end   = Math.round((newStart + d) * 10) / 10;
                     });
+                    _dragInitAudio.forEach(({ idx, startOffset }) => {
+                        if (S.audioTracks[idx]) S.audioTracks[idx].startOffset = Math.max(0, Math.round((startOffset + dx) * 10) / 10);
+                    });
+                    _dragInitPip.forEach(({ idx, startTime, dur }) => {
+                        const p = S.pipLayers[idx]; if (!p) return;
+                        const newStart = Math.max(0, Math.round((startTime + dx) * 10) / 10);
+                        p.startTime = newStart; p.endTime = Math.round((newStart + dur) * 10) / 10;
+                    });
                     S.dirty = true; renderTimeline();
                 };
-                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
+                };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
@@ -1586,13 +1655,17 @@ export async function init() {
             rh.className = 'ive-tl-clip-resize';
             rh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
-                _pushHistory();
                 const sx = e.clientX, e0 = sub.end || 3;
+                let moved = false;
                 const onMove = ev => {
+                    moved = true;
                     sub.end = Math.max((sub.start || 0) + 0.1, Math.round((e0 + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
                     S.dirty = true; renderTimeline();
                 };
-                const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
+                };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
             });
@@ -2142,7 +2215,6 @@ export async function init() {
         });
 
         $('pv-add-sub').addEventListener('click', () => {
-            _pushHistory();
             const t = S.currentTime;
             S.subtitles.push({ id: uid(), text: '', start: Math.round(t * 10) / 10, end: Math.round((t + 3) * 10) / 10,
                 x: 50, y: 88, w: 0, h: 0, fontFamily: 'Arial', fontSize: 40, color: '#ffffff',
@@ -2152,6 +2224,7 @@ export async function init() {
                 animation: 'none', animDuration: 0.6, rotation: 0,
                 lineHeight: 1.35, karaokeEnable: false, karaokeColor: '#ffdd00', karaokeMode: 'word',
                 aboveEffects: false });
+            _pushHistory();
             S.selSubIdx = S.subtitles.length - 1;
             S.dirty = true; renderProps(); renderPreview(); renderTimeline();
         });
@@ -2838,7 +2911,6 @@ export async function init() {
                 const dx = ev.clientX - sx;
                 const dy = ev.clientY - sy;
                 if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-                if (!moved) _pushHistory();
                 moved = true;
                 _dragPipData.forEach(({ pi: pi2, x0: px0, y0: py0 }) => {
                     const p2 = S.pipLayers[pi2]; if (!p2) return;
@@ -2853,7 +2925,7 @@ export async function init() {
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
-                if (moved) { renderProps(); }
+                if (moved) { _pushHistory(); renderProps(); }
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
@@ -2876,13 +2948,14 @@ export async function init() {
         wrapper.querySelectorAll('.ive-pip-rh').forEach(handle => {
             handle.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
-                _pushHistory();
                 const dir = handle.dataset.rhdir;
                 const rect = previewContent.getBoundingClientRect();
                 const sx = e.clientX, sy = e.clientY;
                 const x0 = pip.x || 0, y0 = pip.y || 0;
                 const w0 = pip.w || 30, h0 = pip.h || 20;
+                let moved = false;
                 const onMove = ev => {
+                    moved = true;
                     const dx = (ev.clientX - sx) / rect.width * 100;
                     const dy = (ev.clientY - sy) / rect.height * 100;
                     let newX = x0, newY = y0, newW = w0, newH = h0;
@@ -2917,6 +2990,7 @@ export async function init() {
                 const onUp = () => {
                     document.removeEventListener('mousemove', onMove);
                     document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
                 };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
@@ -3004,7 +3078,7 @@ export async function init() {
                         S.selPipIdxs.add(pi);
                         S.selPipIdx = pi;
                     }
-                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
+                    S.selIdx = -1; S.selIdxs = new Set();
                 } else {
                     S.selPipIdx = pi; S.selPipIdxs = new Set([pi]);
                     S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
@@ -3034,22 +3108,36 @@ export async function init() {
                     const st = p2.startTime || 0;
                     return { pi: pi2, start0: st, dur: (p2.endTime ?? (st + 5)) - st };
                 });
+                // Capture initial positions of other selected types for cross-type group drag
+                const _dragInitAudio = [...S.selAudioIdxs].map(idx => ({ idx, startOffset: S.audioTracks[idx]?.startOffset || 0 }));
+                const _dragInitSub = [...S.selSubIdxs].map(idx => {
+                    const s = S.subtitles[idx] || {};
+                    return { idx, start: s.start || 0, dur: (s.end || 3) - (s.start || 0) };
+                });
                 let moved = false;
                 const onMove = ev => {
                     const dx = (ev.clientX - sx) / S.pxPerSec;
                     if (!moved && Math.abs(dx * S.pxPerSec) < 3) return;
-                    if (!moved) _pushHistory();
                     moved = true;
                     _dragPipTL.forEach(({ pi: pi2, start0, dur: d }) => {
                         const p2 = S.pipLayers[pi2]; if (!p2) return;
                         p2.startTime = Math.max(0, start0 + dx);
                         p2.endTime   = p2.startTime + d;
                     });
+                    _dragInitAudio.forEach(({ idx, startOffset }) => {
+                        if (S.audioTracks[idx]) S.audioTracks[idx].startOffset = Math.max(0, Math.round((startOffset + dx) * 10) / 10);
+                    });
+                    _dragInitSub.forEach(({ idx, start, dur }) => {
+                        const s = S.subtitles[idx]; if (!s) return;
+                        const newStart = Math.max(0, Math.round((start + dx) * 10) / 10);
+                        s.start = newStart; s.end = Math.round((newStart + dur) * 10) / 10;
+                    });
                     S.dirty = true; _renderPipTrack(total);
                 };
                 const onUp = () => {
                     document.removeEventListener('mousemove', onMove);
                     document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
                 };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
@@ -3058,10 +3146,11 @@ export async function init() {
             // Resize end time
             rh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
-                _pushHistory();
                 const sx = e.clientX;
                 const end0 = pip.endTime ?? ((pip.startTime || 0) + 5);
+                let moved = false;
                 const onMove = ev => {
+                    moved = true;
                     const dx = (ev.clientX - sx) / S.pxPerSec;
                     pip.endTime = Math.max((pip.startTime || 0) + 0.1, end0 + dx);
                     S.dirty = true; _renderPipTrack(total);
@@ -3069,6 +3158,7 @@ export async function init() {
                 const onUp = () => {
                     document.removeEventListener('mousemove', onMove);
                     document.removeEventListener('mouseup', onUp);
+                    if (moved) _pushHistory();
                 };
                 document.addEventListener('mousemove', onMove);
                 document.addEventListener('mouseup', onUp);
@@ -3299,13 +3389,13 @@ export async function init() {
             const r = await fetch(endpoint, { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            _pushHistory();
             const pip = {
                 id: uid(), file: d.name, fileUrl: d.url, type: isVideo ? 'video' : 'image',
                 original: d.original, startTime: S.currentTime, endTime: S.currentTime + 5,
                 x: 5, y: 5, w: 30, h: 20, opacity: 1, volume: 0, speed: 1, trimIn: 0, effects: []
             };
             S.pipLayers.push(pip);
+            _pushHistory();
             S.selPipIdx = S.pipLayers.length - 1;
             S.dirty = true;
             log('PIP добавлен: ' + d.original, 'done');
@@ -4189,7 +4279,6 @@ export async function init() {
     }
 
     function _deleteSelectedClip() {
-        _pushHistory();
         let deleted = false;
         // Delete selected clips (all in selIdxs)
         if (S.selIdxs.size > 0) {
@@ -4242,7 +4331,7 @@ export async function init() {
             S.audioTracks.splice(S.selAudioIdx, 1);
             S.selAudioIdx = -1; deleted = true;
         }
-        if (deleted) { S.dirty = true; renderAll(); }
+        if (deleted) { _pushHistory(); S.dirty = true; renderAll(); }
     }
 
     function _clearAllSelections() {
@@ -4299,7 +4388,6 @@ export async function init() {
 
     function _pasteSelected() {
         if (!_clipboard) { toast('Буфер обмена пуст', 'info'); return; }
-        _pushHistory();
         let count = 0;
         if (_clipboard.clips?.length) {
             const newClips = _clipboard.clips.map(c => ({ ...c, id: uid() }));
@@ -4310,7 +4398,10 @@ export async function init() {
             count += newClips.length;
         }
         if (_clipboard.audio?.length) {
-            const newAudio = _clipboard.audio.map(a => ({ ...a, id: uid(), startOffset: (a.startOffset || 0) + 0.5 }));
+            const newAudio = _clipboard.audio.map(a => {
+                const dur = a.duration ?? a.originalDuration ?? 10;
+                return { ...a, id: uid(), startOffset: (a.startOffset || 0) + dur };
+            });
             newAudio.forEach(a => S.audioTracks.push(a));
             S.selAudioIdxs = new Set(newAudio.map((_, j) => S.audioTracks.length - newAudio.length + j));
             S.selAudioIdx = S.audioTracks.length - 1;
@@ -4331,11 +4422,10 @@ export async function init() {
             S.selPipIdx = S.pipLayers.length - 1;
             count += newPip.length;
         }
-        if (count > 0) { S.dirty = true; renderAll(); toast('Вставлено объектов: ' + count, 'ok'); }
+        if (count > 0) { _pushHistory(); S.dirty = true; renderAll(); toast('Вставлено объектов: ' + count, 'ok'); }
     }
 
     function _resetState() {
-        _pushHistory();
         S.projectId = null; S.projectName = 'Новый проект';
         S.clips = []; S.audioTracks = []; S.subtitles = [];
         S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
