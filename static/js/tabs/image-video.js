@@ -15,6 +15,7 @@ const S = {
     projectId: null, projectName: 'Новый проект',
     clips: [], audioTracks: [], subtitles: [],
     selIdx: -1, selAudioIdx: -1, selSubIdx: -1, selPipIdx: -1, selIdxs: new Set(),
+    selSubIdxs: new Set(), selPipIdxs: new Set(), selAudioIdxs: new Set(),
     activeTab: 'slide', dirty: false,
     // Playback
     currentTime: 0, isPlaying: false,
@@ -599,6 +600,120 @@ export async function init() {
         } catch (e) { toast(e.message, 'err'); }
     });
 
+    // ── Select All button ─────────────────────────────────────────────────────
+    $('ive-select-all-btn')?.addEventListener('click', () => _selectAll());
+
+    // ── Marquee selection (rubber-band on empty timeline areas) ───────────────
+    let _marqueeDragging = false;
+    let _marqueeEl = null;
+    let _marqueeClientStart = null;
+
+    function _getMarqueeEl() {
+        if (!_marqueeEl) {
+            _marqueeEl = document.createElement('div');
+            _marqueeEl.style.cssText = 'position:fixed;border:1.5px dashed var(--accent,#f97316);background:rgba(74,158,255,0.08);pointer-events:none;z-index:9999;display:none;border-radius:2px;';
+            document.body.appendChild(_marqueeEl);
+        }
+        return _marqueeEl;
+    }
+
+    tracksScroll.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const tgt = e.target;
+        if (tgt.closest('.ive-tl-clip') || tgt.closest('.ive-tl-audio-item') ||
+            tgt.closest('.ive-tl-sub-item') || tgt.closest('.ive-tl-pip-item') ||
+            tgt.closest('.ive-playhead') || tgt.closest('.ive-time-ruler') ||
+            tgt.closest('.ive-tl-trans-block')) return;
+
+        if (!e.ctrlKey) _clearAllSelections();
+
+        _marqueeClientStart = { x: e.clientX, y: e.clientY };
+        _marqueeDragging = false;
+        const mEl = _getMarqueeEl();
+        mEl.style.display = 'none';
+
+        const onMove = ev => {
+            const dx = Math.abs(ev.clientX - _marqueeClientStart.x);
+            const dy = Math.abs(ev.clientY - _marqueeClientStart.y);
+            if (!_marqueeDragging && dx < 5 && dy < 5) return;
+            _marqueeDragging = true;
+            const x = Math.min(ev.clientX, _marqueeClientStart.x);
+            const y = Math.min(ev.clientY, _marqueeClientStart.y);
+            const w = Math.abs(ev.clientX - _marqueeClientStart.x);
+            const h = Math.abs(ev.clientY - _marqueeClientStart.y);
+            mEl.style.left = x + 'px'; mEl.style.top = y + 'px';
+            mEl.style.width = w + 'px'; mEl.style.height = h + 'px';
+            mEl.style.display = 'block';
+        };
+
+        const onUp = ev => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            const mEl2 = _getMarqueeEl();
+            mEl2.style.display = 'none';
+            if (!_marqueeDragging) { _marqueeDragging = false; return; }
+            _marqueeDragging = false;
+
+            const scrollRect = tracksScroll.getBoundingClientRect();
+            const scrollX = tracksScroll.scrollLeft;
+            const x1c = Math.min(ev.clientX, _marqueeClientStart.x);
+            const x2c = Math.max(ev.clientX, _marqueeClientStart.x);
+            const y1c = Math.min(ev.clientY, _marqueeClientStart.y);
+            const y2c = Math.max(ev.clientY, _marqueeClientStart.y);
+            const t1 = Math.max(0, (x1c - scrollRect.left + scrollX) / S.pxPerSec);
+            const t2 = (x2c - scrollRect.left + scrollX) / S.pxPerSec;
+
+            const overlapY = el => {
+                if (!el) return false;
+                const r = el.getBoundingClientRect();
+                return y1c < r.bottom && y2c > r.top;
+            };
+
+            if (overlapY(videoTrackEl)) {
+                let cursor = 0;
+                S.clips.forEach((clip, i) => {
+                    const cEnd = cursor + (clip.duration || 3);
+                    if (cEnd > t1 && cursor < t2) { S.selIdxs.add(i); S.selIdx = i; }
+                    cursor += clip.duration || 3;
+                });
+            }
+
+            if (overlapY(subTrackEl) && S.subtitles.length) {
+                S.subtitles.forEach((sub, si) => {
+                    if ((sub.end || 3) > t1 && (sub.start || 0) < t2) {
+                        S.selSubIdxs.add(si); S.selSubIdx = si;
+                    }
+                });
+                if (S.selSubIdx >= 0) {
+                    S.activeTab = 'subs';
+                    document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                    document.querySelector('[data-ptab="subs"]')?.classList.add('active');
+                }
+            }
+
+            if (overlapY(audioTrackEl)) {
+                S.audioTracks.forEach((track, i) => {
+                    const tStart = track.startOffset || 0;
+                    const tEnd = tStart + (track.duration !== undefined ? track.duration : Math.max(1, totalDur() - tStart));
+                    if (tEnd > t1 && tStart < t2) { S.selAudioIdxs.add(i); S.selAudioIdx = i; }
+                });
+            }
+
+            if (pipTrackEl && overlapY(pipTrackEl)) {
+                S.pipLayers.forEach((pip, pi) => {
+                    const pStart = pip.startTime || 0;
+                    const pEnd = pip.endTime ?? (pStart + 5);
+                    if (pEnd > t1 && pStart < t2) { S.selPipIdxs.add(pi); S.selPipIdx = pi; }
+                });
+            }
+
+            renderTimeline(); renderProps();
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
     // Listen for edit-template event from History tab
     events?.addEventListener('imgvid-edit-template', async (ev) => {
         const tid = ev.detail?.tid; if (!tid) return;
@@ -618,8 +733,22 @@ export async function init() {
             case 'ArrowRight':  e.preventDefault(); _seek(S.currentTime + (e.shiftKey ? 1 : 0.1)); break;
             case 'Home':        e.preventDefault(); _seek(0);                                  break;
             case 'End':         e.preventDefault(); _seek(totalDur());                         break;
-            case 'Delete': case 'Backspace':
-                if (S.selIdx >= 0) { e.preventDefault(); _deleteSelectedClip(); }             break;
+            case 'Delete': case 'Backspace': {
+            const hasAnySelection = S.selIdx >= 0 || S.selIdxs.size > 0 ||
+                S.selSubIdx >= 0 || S.selSubIdxs.size > 0 ||
+                S.selPipIdx >= 0 || S.selPipIdxs.size > 0 ||
+                S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0;
+            if (hasAnySelection) { e.preventDefault(); _deleteSelectedClip(); }
+            break;
+        }
+        case 'a': case 'A':
+            if (e.ctrlKey) { e.preventDefault(); _selectAll(); }                               break;
+        case 'Escape':
+            _clearAllSelections();                                                              break;
+        case 'c': case 'C':
+            if (e.ctrlKey) { e.preventDefault(); _copySelected(); }                            break;
+        case 'v': case 'V':
+            if (e.ctrlKey) { e.preventDefault(); _pasteSelected(); }                           break;
         }
     });
 
@@ -1262,7 +1391,8 @@ export async function init() {
             const trackDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
             const itemW    = Math.max(40, trackDur * S.pxPerSec);
             const item     = document.createElement('div');
-            item.className = `ive-tl-audio-item${i === S.selAudioIdx ? ' sel' : ''}`;
+            const isMultiAudioSel = S.selAudioIdxs.size > 1 && S.selAudioIdxs.has(i);
+            item.className = `ive-tl-audio-item${i === S.selAudioIdx ? ' sel' : ''}${isMultiAudioSel ? ' multi-sel' : ''}`;
             item.dataset.aidx = i;
             item.style.left  = offsetPx + 'px';
             item.style.width = itemW + 'px';
@@ -1283,7 +1413,21 @@ export async function init() {
                 if (e.target.closest('.ive-tl-audio-resize')) return;
                 if (e.button !== 0) return;
                 e.stopPropagation(); e.preventDefault();
-                S.selAudioIdx = i; S.selIdx = -1; S.activeTab = 'slide'; renderTimeline(); renderProps();
+                if (e.ctrlKey) {
+                    if (S.selAudioIdxs.has(i)) {
+                        S.selAudioIdxs.delete(i);
+                        if (S.selAudioIdx === i) S.selAudioIdx = [...S.selAudioIdxs].at(-1) ?? -1;
+                    } else {
+                        S.selAudioIdxs.add(i);
+                        S.selAudioIdx = i;
+                    }
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                    S.activeTab = 'slide'; renderTimeline(); renderProps();
+                    return;
+                }
+                S.selAudioIdx = i; S.selAudioIdxs = new Set([i]);
+                S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                S.activeTab = 'slide'; renderTimeline(); renderProps();
                 const sx = e.clientX, sOff = track.startOffset || 0;
                 let moved = false;
                 const onMove = ev => {
@@ -1341,15 +1485,28 @@ export async function init() {
         S.subtitles.forEach((sub, si) => {
             const w = Math.max(8, ((sub.end || 3) - (sub.start || 0)) * S.pxPerSec);
             const el = document.createElement('div');
-            el.className = `ive-tl-sub-item${si === S.selSubIdx ? ' sel' : ''}`;
+            const isMultiSubSel = S.selSubIdxs.size > 1 && S.selSubIdxs.has(si);
+            el.className = `ive-tl-sub-item${si === S.selSubIdx ? ' sel' : ''}${isMultiSubSel ? ' multi-sel' : ''}`;
             el.style.left  = ((sub.start || 0) * S.pxPerSec) + 'px';
             el.style.width = w + 'px';
             el.title = sub.text || '';
             el.textContent = sub.text ? sub.text.slice(0, 20) : '—';
             el.addEventListener('click', e => {
                 e.stopPropagation();
-                S.selSubIdx = si;
-                S.selIdx = -1; S.selAudioIdx = -1;
+                if (e.ctrlKey) {
+                    if (S.selSubIdxs.has(si)) {
+                        S.selSubIdxs.delete(si);
+                        if (S.selSubIdx === si) S.selSubIdx = [...S.selSubIdxs].at(-1) ?? -1;
+                    } else {
+                        S.selSubIdxs.add(si);
+                        S.selSubIdx = si;
+                    }
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                } else {
+                    S.selSubIdx = si;
+                    S.selSubIdxs = new Set([si]);
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                }
                 S.activeTab = 'subs';
                 document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                 document.querySelector('[data-ptab="subs"]')?.classList.add('active');
@@ -1358,6 +1515,7 @@ export async function init() {
             // Drag to move subtitle timing
             el.addEventListener('mousedown', e => {
                 if (e.button !== 0) return;
+                if (e.ctrlKey) return; // Ctrl+click handled by click event
                 e.stopPropagation(); e.preventDefault();
                 const sx = e.clientX, s0 = sub.start || 0, e0 = sub.end || 3;
                 const dur = e0 - s0;
@@ -1768,16 +1926,19 @@ export async function init() {
 
     // ── Properties panel ──────────────────────────────────────────────────────
     function renderProps() {
+        if (S.selPipIdxs.size > 1) { _renderPropsMultiPip(); return; }
         if (S.selPipIdx >= 0 && S.selPipIdx < S.pipLayers.length) {
             _renderPropsPip(S.pipLayers[S.selPipIdx], S.selPipIdx); return;
         }
         if (S.selIdxs.size > 1 && S.activeTab !== 'subs') {
             _renderPropsMulti(); return;
         }
+        if (S.selAudioIdxs.size > 1) { _renderPropsMultiAudio(); return; }
         if (S.selAudioIdx >= 0 && S.selAudioIdx < S.audioTracks.length && S.activeTab === 'slide') {
             _renderPropsAudio(S.audioTracks[S.selAudioIdx], S.selAudioIdx); return;
         }
         if (S.activeTab === 'subs') {
+            if (S.selSubIdxs.size > 1) { _renderPropsMultiSub(); return; }
             _renderPropsSubsGlobal(); return;
         }
         const clip = S.clips[S.selIdx];
@@ -2754,7 +2915,8 @@ export async function init() {
             const w     = Math.max(16, (end - start) * S.pxPerSec);
 
             const item = document.createElement('div');
-            item.className = `ive-tl-pip-item${pi === S.selPipIdx ? ' sel' : ''}`;
+            const isMultiPipSel = S.selPipIdxs.size > 1 && S.selPipIdxs.has(pi);
+            item.className = `ive-tl-pip-item${pi === S.selPipIdx ? ' sel' : ''}${isMultiPipSel ? ' multi-sel' : ''}`;
             item.style.left  = left + 'px';
             item.style.width = w + 'px';
             item.textContent = pip.original || pip.file;
@@ -2766,7 +2928,19 @@ export async function init() {
 
             item.addEventListener('click', e => {
                 if (e.target === rh) return;
-                S.selPipIdx = pi; S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
+                if (e.ctrlKey) {
+                    if (S.selPipIdxs.has(pi)) {
+                        S.selPipIdxs.delete(pi);
+                        if (S.selPipIdx === pi) S.selPipIdx = [...S.selPipIdxs].at(-1) ?? -1;
+                    } else {
+                        S.selPipIdxs.add(pi);
+                        S.selPipIdx = pi;
+                    }
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
+                } else {
+                    S.selPipIdx = pi; S.selPipIdxs = new Set([pi]);
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
+                }
                 S.activeTab = 'slide';
                 document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                 document.querySelector('[data-ptab="slide"]')?.classList.add('active');
@@ -2776,6 +2950,7 @@ export async function init() {
             // Drag to move pip
             item.addEventListener('mousedown', e => {
                 if (e.button !== 0 || e.target === rh) return;
+                if (e.ctrlKey) return; // Ctrl+click handled by click event
                 e.preventDefault(); e.stopPropagation();
                 const sx = e.clientX;
                 const s0 = pip.startTime || 0;
@@ -2953,6 +3128,75 @@ export async function init() {
             S.selIdxs = new Set(S.selIdx >= 0 ? [S.selIdx] : []);
             S.dirty = true;
             renderAll();
+        });
+    }
+
+    function _renderPropsMultiSub() {
+        const count = S.selSubIdxs.size;
+        propsBody.innerHTML = `<div class="ive-form">
+            <div style="color:var(--accent);font-size:12px;margin-bottom:8px">Выбрано субтитров: ${count}</div>
+            <button class="btn btn-sm danger" id="multi-sub-delete">Удалить выбранные</button>
+        </div>`;
+        $('multi-sub-delete')?.addEventListener('click', () => {
+            const sorted = [...S.selSubIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => { if (S.subtitles[i] !== undefined) S.subtitles.splice(i, 1); });
+            S.selSubIdx = -1; S.selSubIdxs = new Set();
+            S.dirty = true; renderAll();
+        });
+    }
+
+    function _renderPropsMultiPip() {
+        const count = S.selPipIdxs.size;
+        propsBody.innerHTML = `<div class="ive-form">
+            <div style="color:var(--accent);font-size:12px;margin-bottom:8px">Выбрано PIP-слоёв: ${count}</div>
+            <button class="btn btn-sm danger" id="multi-pip-delete">Удалить выбранные</button>
+        </div>`;
+        $('multi-pip-delete')?.addEventListener('click', () => {
+            const sorted = [...S.selPipIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => {
+                const pip = S.pipLayers[i]; if (!pip) return;
+                const el = _pipEls.get(pip.id);
+                if (el?.wrapper) el.wrapper.remove(); _pipEls.delete(pip.id);
+                S.pipLayers.splice(i, 1);
+            });
+            S.selPipIdx = -1; S.selPipIdxs = new Set();
+            S.dirty = true; renderAll();
+        });
+    }
+
+    function _renderPropsMultiAudio() {
+        const count = S.selAudioIdxs.size;
+        propsBody.innerHTML = `<div class="ive-form">
+            <div style="color:var(--accent);font-size:12px;margin-bottom:8px">Выбрано аудиодорожек: ${count}</div>
+            <label class="ive-label">Громкость
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" id="multi-audio-vol" min="0" max="2" step="0.01" value="1">
+                    <span class="ive-range-val" id="multi-audio-vol-val">100%</span>
+                </div>
+            </label>
+            <button class="btn btn-sm" id="multi-audio-apply" style="margin-top:8px">Применить громкость</button>
+            <button class="btn btn-sm danger" id="multi-audio-delete" style="margin-top:4px">Удалить выбранные</button>
+        </div>`;
+        const volEl = $('multi-audio-vol');
+        const volVal = $('multi-audio-vol-val');
+        volEl?.addEventListener('input', () => { if (volVal) volVal.textContent = Math.round(parseFloat(volEl.value) * 100) + '%'; });
+        $('multi-audio-apply')?.addEventListener('click', () => {
+            const vol = parseFloat($('multi-audio-vol').value);
+            [...S.selAudioIdxs].forEach(i => { if (S.audioTracks[i]) S.audioTracks[i].volume = vol; });
+            S.dirty = true;
+            toast('Громкость применена к ' + S.selAudioIdxs.size + ' дорожкам', 'ok');
+            renderAll();
+        });
+        $('multi-audio-delete')?.addEventListener('click', () => {
+            const sorted = [...S.selAudioIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => {
+                const track = S.audioTracks[i]; if (!track) return;
+                const el = _audioEls.get(track.id);
+                if (el) { el.pause(); _audioEls.delete(track.id); }
+                S.audioTracks.splice(i, 1);
+            });
+            S.selAudioIdx = -1; S.selAudioIdxs = new Set();
+            S.dirty = true; renderAll();
         });
     }
 
@@ -3814,10 +4058,136 @@ export async function init() {
     }
 
     function _deleteSelectedClip() {
-        if (S.selIdx < 0 || S.selIdx >= S.clips.length) return;
-        S.clips.splice(S.selIdx, 1);
-        if (S.selIdx >= S.clips.length) S.selIdx = S.clips.length - 1;
-        S.dirty = true; renderAll();
+        let deleted = false;
+        // Delete selected clips (all in selIdxs)
+        if (S.selIdxs.size > 0) {
+            const sorted = [...S.selIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => { if (i < S.clips.length) S.clips.splice(i, 1); });
+            S.selIdx = S.clips.length ? 0 : -1;
+            S.selIdxs = new Set(S.selIdx >= 0 ? [S.selIdx] : []);
+            deleted = true;
+        }
+        // Delete selected subtitles
+        if (S.selSubIdxs.size > 0) {
+            const sorted = [...S.selSubIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => { if (i < S.subtitles.length) S.subtitles.splice(i, 1); });
+            S.selSubIdx = -1; S.selSubIdxs = new Set(); deleted = true;
+        } else if (!deleted && S.selSubIdx >= 0 && S.selSubIdx < S.subtitles.length) {
+            S.subtitles.splice(S.selSubIdx, 1);
+            S.selSubIdx = -1; deleted = true;
+        }
+        // Delete selected PIPs
+        if (S.selPipIdxs.size > 0) {
+            const sorted = [...S.selPipIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => {
+                const pip = S.pipLayers[i]; if (!pip) return;
+                const el = _pipEls.get(pip.id);
+                if (el?.wrapper) el.wrapper.remove(); _pipEls.delete(pip.id);
+                S.pipLayers.splice(i, 1);
+            });
+            S.selPipIdx = -1; S.selPipIdxs = new Set(); deleted = true;
+        } else if (!deleted && S.selPipIdx >= 0 && S.selPipIdx < S.pipLayers.length) {
+            const pip = S.pipLayers[S.selPipIdx];
+            const el = _pipEls.get(pip?.id);
+            if (el?.wrapper) el.wrapper.remove(); if (pip) _pipEls.delete(pip.id);
+            S.pipLayers.splice(S.selPipIdx, 1);
+            S.selPipIdx = -1; deleted = true;
+        }
+        // Delete selected audio tracks
+        if (S.selAudioIdxs.size > 0) {
+            const sorted = [...S.selAudioIdxs].sort((a, b) => b - a);
+            sorted.forEach(i => {
+                const track = S.audioTracks[i]; if (!track) return;
+                const el = _audioEls.get(track.id);
+                if (el) { el.pause(); _audioEls.delete(track.id); }
+                S.audioTracks.splice(i, 1);
+            });
+            S.selAudioIdx = -1; S.selAudioIdxs = new Set(); deleted = true;
+        } else if (!deleted && S.selAudioIdx >= 0 && S.selAudioIdx < S.audioTracks.length) {
+            const track = S.audioTracks[S.selAudioIdx];
+            const el = _audioEls.get(track?.id);
+            if (el) { el.pause(); _audioEls.delete(track.id); }
+            S.audioTracks.splice(S.selAudioIdx, 1);
+            S.selAudioIdx = -1; deleted = true;
+        }
+        if (deleted) { S.dirty = true; renderAll(); }
+    }
+
+    function _clearAllSelections() {
+        S.selIdx = -1; S.selIdxs = new Set();
+        S.selSubIdx = -1; S.selSubIdxs = new Set();
+        S.selPipIdx = -1; S.selPipIdxs = new Set();
+        S.selAudioIdx = -1; S.selAudioIdxs = new Set();
+        renderTimeline(); renderProps();
+    }
+
+    function _selectAll() {
+        if (S.selSubIdx >= 0 || S.selSubIdxs.size > 0 || S.activeTab === 'subs') {
+            if (!S.subtitles.length) return;
+            S.selSubIdxs = new Set(S.subtitles.map((_, i) => i));
+            S.selSubIdx = 0;
+            S.selIdx = -1; S.selIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+            S.activeTab = 'subs';
+            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+            document.querySelector('[data-ptab="subs"]')?.classList.add('active');
+        } else if (S.selPipIdx >= 0 || S.selPipIdxs.size > 0) {
+            if (!S.pipLayers.length) return;
+            S.selPipIdxs = new Set(S.pipLayers.map((_, i) => i));
+            S.selPipIdx = 0;
+            S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
+        } else if (S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0) {
+            if (!S.audioTracks.length) return;
+            S.selAudioIdxs = new Set(S.audioTracks.map((_, i) => i));
+            S.selAudioIdx = 0;
+            S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
+        } else {
+            if (!S.clips.length) return;
+            S.selIdxs = new Set(S.clips.map((_, i) => i));
+            S.selIdx = 0;
+            S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+        }
+        renderTimeline(); renderProps();
+    }
+
+    let _clipboard = null;
+
+    function _copySelected() {
+        if (S.selIdxs.size > 0) {
+            _clipboard = { type: 'clips', items: [...S.selIdxs].sort((a,b)=>a-b).map(i => JSON.parse(JSON.stringify(S.clips[i]))) };
+            toast('Скопировано ' + S.selIdxs.size + ' клип(а)', 'ok');
+        } else if (S.selIdx >= 0) {
+            _clipboard = { type: 'clips', items: [JSON.parse(JSON.stringify(S.clips[S.selIdx]))] };
+            toast('Клип скопирован', 'ok');
+        } else if (S.selSubIdxs.size > 0) {
+            _clipboard = { type: 'subs', items: [...S.selSubIdxs].sort((a,b)=>a-b).map(i => JSON.parse(JSON.stringify(S.subtitles[i]))) };
+            toast('Скопировано ' + S.selSubIdxs.size + ' субтитр(а)', 'ok');
+        } else if (S.selSubIdx >= 0) {
+            _clipboard = { type: 'subs', items: [JSON.parse(JSON.stringify(S.subtitles[S.selSubIdx]))] };
+            toast('Субтитр скопирован', 'ok');
+        } else {
+            toast('Ничего не выбрано', 'info');
+        }
+    }
+
+    function _pasteSelected() {
+        if (!_clipboard) { toast('Буфер обмена пуст', 'info'); return; }
+        if (_clipboard.type === 'clips') {
+            const newClips = _clipboard.items.map(c => ({ ...c, id: uid() }));
+            const insertAt = S.selIdxs.size > 0 ? Math.max(...S.selIdxs) + 1 : (S.selIdx >= 0 ? S.selIdx + 1 : S.clips.length);
+            S.clips.splice(insertAt, 0, ...newClips);
+            S.selIdxs = new Set(newClips.map((_, j) => insertAt + j));
+            S.selIdx = insertAt + newClips.length - 1;
+            S.dirty = true; renderAll();
+            toast('Вставлено ' + newClips.length + ' клип(а)', 'ok');
+        } else if (_clipboard.type === 'subs') {
+            const newSubs = _clipboard.items.map(s => ({ ...s, id: uid(), start: s.start + 0.5, end: s.end + 0.5 }));
+            const insertAt = S.selSubIdxs.size > 0 ? Math.max(...S.selSubIdxs) + 1 : (S.selSubIdx >= 0 ? S.selSubIdx + 1 : S.subtitles.length);
+            S.subtitles.splice(insertAt, 0, ...newSubs);
+            S.selSubIdxs = new Set(newSubs.map((_, j) => insertAt + j));
+            S.selSubIdx = insertAt + newSubs.length - 1;
+            S.dirty = true; renderAll();
+            toast('Вставлено ' + newSubs.length + ' субтитр(а)', 'ok');
+        }
     }
 
     function _resetState() {
@@ -3825,6 +4195,7 @@ export async function init() {
         S.clips = []; S.audioTracks = []; S.subtitles = [];
         S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
         S.selPipIdx = -1; S.selIdxs = new Set();
+        S.selSubIdxs = new Set(); S.selPipIdxs = new Set(); S.selAudioIdxs = new Set();
         S.pipLayers = [];
         S.isTemplateMode = false; S.editingTemplateId = null;
         S.dirty = false; S.currentTime = 0;

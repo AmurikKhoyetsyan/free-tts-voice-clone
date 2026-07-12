@@ -638,6 +638,9 @@
 
 /* Multi-select clip highlighting */
 .ive-tl-clip.multi-sel { outline: 2px solid rgba(74,158,255,0.7); }
+.ive-tl-sub-item.multi-sel  { outline: 2px solid rgba(74,158,255,0.7); background: rgba(74,158,255,0.2); }
+.ive-tl-pip-item.multi-sel  { outline: 2px solid rgba(74,158,255,0.7); background: rgba(74,158,255,0.45); }
+.ive-tl-audio-item.multi-sel { outline: 2px solid rgba(74,158,255,0.7); }
 
 /* Template apply modal — DnD file slots */
 .tmpl-dnd-slot {
