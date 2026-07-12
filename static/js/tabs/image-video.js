@@ -1991,6 +1991,26 @@ export async function init() {
     }
 
     function _renderPropsAudio(track, idx) {
+        const AUDIO_FX = [
+            { type: 'echo',       label: 'Эхо',       params: [{key:'delay',label:'Задержка (мс)',min:50,max:2000,step:50,def:500},{key:'decay',label:'Затухание',min:0.1,max:1,step:0.1,def:0.5}] },
+            { type: 'reverb',     label: 'Реверб',    params: [{key:'delay',label:'Задержка (мс)',min:50,max:3000,step:50,def:1000},{key:'decay',label:'Затухание',min:0.1,max:1,step:0.1,def:0.8}] },
+            { type: 'bassboost',  label: 'Бас',       params: [{key:'gain',label:'Усиление (дБ)',min:-20,max:20,step:1,def:10}] },
+            { type: 'treble',     label: 'Тембр',     params: [{key:'gain',label:'Усиление (дБ)',min:-20,max:20,step:1,def:8}] },
+            { type: 'compressor', label: 'Компрес.',  params: [{key:'ratio',label:'Коэффициент',min:1,max:20,step:0.5,def:4}] },
+            { type: 'phone',      label: 'Телефон',   params: [] },
+            { type: 'radio',      label: 'Радио',     params: [] },
+            { type: 'lowpass',    label: 'НЧ фильтр', params: [{key:'freq',label:'Частота (Гц)',min:100,max:8000,step:100,def:500}] },
+            { type: 'highpass',   label: 'ВЧ фильтр', params: [{key:'freq',label:'Частота (Гц)',min:200,max:12000,step:200,def:2000}] },
+            { type: 'chorus',     label: 'Хорус',     params: [] },
+            { type: 'flanger',    label: 'Флэнджер',  params: [] },
+            { type: 'distortion', label: 'Дисторшн',  params: [{key:'level',label:'Уровень',min:0.5,max:5,step:0.1,def:1.5}] },
+            { type: 'noise',      label: 'Шумодав',   params: [] },
+            { type: 'pitch',      label: 'Питч',      params: [{key:'semitones',label:'Полутоны',min:-12,max:12,step:1,def:2}] },
+        ];
+        const SPEED_VALS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+        const curSpeed = track.speed ?? 1;
+        const isCustomSpeed = !SPEED_VALS.includes(curSpeed);
+
         propsBody.innerHTML = `
         <div class="ive-audio-props-item">
             <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${eh(track.original || track.file)}</div>
@@ -2008,15 +2028,17 @@ export async function init() {
             <label class="ive-label">Длит. (с)<input class="ive-input" id="acp-dur" type="number" min="0" step="0.5" placeholder="авто" value="${track.duration !== undefined ? track.duration : ''}"></label>
             <label class="ive-label">Скорость
                 <select class="ive-select" id="acp-speed">
-                    <option value="0.5"${(track.speed??1)===0.5?' selected':''}>0.5×</option>
-                    <option value="0.75"${(track.speed??1)===0.75?' selected':''}>0.75×</option>
-                    <option value="1"${(!track.speed||track.speed===1)?' selected':''}>1× (норма)</option>
-                    <option value="1.25"${(track.speed??1)===1.25?' selected':''}>1.25×</option>
-                    <option value="1.5"${(track.speed??1)===1.5?' selected':''}>1.5×</option>
-                    <option value="2"${(track.speed??1)===2?' selected':''}>2×</option>
+                    ${SPEED_VALS.map(v => `<option value="${v}"${curSpeed===v?' selected':''}>${v===1?'1× (норма)':v+'×'}</option>`).join('')}
+                    <option value="custom"${isCustomSpeed?' selected':''}>Другое…</option>
                 </select>
             </label>
-            <button class="btn btn-sm" id="acp-split" style="margin-top:4px" title="Разделить в позиции курсора">✂ Разделить</button>
+            <div id="acp-speed-custom-wrap" style="display:${isCustomSpeed?'block':'none'};margin-top:2px">
+                <input class="ive-input" id="acp-speed-custom" type="number" min="0.1" max="10" step="0.05" placeholder="напр. 1.8" value="${isCustomSpeed?curSpeed:''}">
+            </div>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:8px 0 4px">Звуковые эффекты</div>
+            <div class="ive-sfx-chips" id="acp-sfx-chips"></div>
+            <div id="acp-sfx-params"></div>
+            <button class="btn btn-sm" id="acp-split" style="margin-top:8px" title="Разделить в позиции курсора">✂ Разделить</button>
             <button class="btn btn-sm danger" id="acp-del" style="margin-top:6px">Удалить дорожку</button>
         </div>`;
 
@@ -2025,7 +2047,6 @@ export async function init() {
             track.volume = parseFloat(volEl.value);
             volV.textContent = track.volume.toFixed(2);
             S.dirty = true;
-            // Live volume update
             const el = _audioEls.get(track.id);
             if (el) el.volume = Math.max(0, Math.min(1, track.volume));
         });
@@ -2037,12 +2058,84 @@ export async function init() {
             track.duration = isFinite(v) && v > 0 ? v : undefined;
             S.dirty = true; renderTimeline();
         });
-        $('acp-speed').addEventListener('change', e => {
-            track.speed = parseFloat(e.target.value) || 1;
+
+        const speedSel = $('acp-speed'), speedCustomWrap = $('acp-speed-custom-wrap'), speedCustom = $('acp-speed-custom');
+        const _applySpeed = (val) => {
+            track.speed = val;
             S.dirty = true;
             const el = _audioEls.get(track.id);
-            if (el) el.playbackRate = track.speed;
+            if (el) el.playbackRate = val;
+        };
+        speedSel.addEventListener('change', () => {
+            if (speedSel.value === 'custom') {
+                speedCustomWrap.style.display = 'block';
+                speedCustom.focus();
+            } else {
+                speedCustomWrap.style.display = 'none';
+                _applySpeed(parseFloat(speedSel.value) || 1);
+            }
         });
+        speedCustom.addEventListener('change', () => {
+            const v = parseFloat(speedCustom.value);
+            if (isFinite(v) && v > 0) _applySpeed(v);
+        });
+
+        // ── Sound effects ──────────────────────────────────────────────────────
+        if (!track.soundEffects) track.soundEffects = [];
+
+        function _sfxRender() {
+            const chipsEl = $('acp-sfx-chips'), paramsEl = $('acp-sfx-params');
+            if (!chipsEl || !paramsEl) return;
+            chipsEl.innerHTML = AUDIO_FX.map(fx => {
+                const on = track.soundEffects.some(e => e.type === fx.type);
+                return `<button class="ive-sfx-chip${on?' active':''}" data-fxt="${fx.type}">${fx.label}</button>`;
+            }).join('');
+            paramsEl.innerHTML = '';
+            track.soundEffects.forEach(eff => {
+                const fxDef = AUDIO_FX.find(f => f.type === eff.type);
+                if (!fxDef || !fxDef.params.length) return;
+                const wrap = document.createElement('div');
+                wrap.className = 'ive-sfx-params-block';
+                wrap.innerHTML = `<div class="ive-sfx-params-label">${fxDef.label}</div>` +
+                    fxDef.params.map(p => {
+                        const val = eff[p.key] !== undefined ? eff[p.key] : p.def;
+                        return `<label class="ive-label">${p.label}
+                            <div class="ive-range-row">
+                                <input class="ive-range" type="range" data-efft="${eff.type}" data-pk="${p.key}" min="${p.min}" max="${p.max}" step="${p.step}" value="${val}">
+                                <span class="ive-range-val" id="sfxv-${eff.type}-${p.key}">${val}</span>
+                            </div></label>`;
+                    }).join('');
+                paramsEl.appendChild(wrap);
+            });
+            chipsEl.querySelectorAll('.ive-sfx-chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const type = btn.dataset.fxt;
+                    const i = track.soundEffects.findIndex(e => e.type === type);
+                    if (i >= 0) {
+                        track.soundEffects.splice(i, 1);
+                    } else {
+                        const fxDef = AUDIO_FX.find(f => f.type === type);
+                        const entry = { type };
+                        if (fxDef) fxDef.params.forEach(p => { entry[p.key] = p.def; });
+                        track.soundEffects.push(entry);
+                    }
+                    S.dirty = true; _sfxRender();
+                });
+            });
+            paramsEl.querySelectorAll('input[data-efft]').forEach(rng => {
+                rng.addEventListener('input', () => {
+                    const eff = track.soundEffects.find(e => e.type === rng.dataset.efft);
+                    if (!eff) return;
+                    const val = parseFloat(rng.value);
+                    eff[rng.dataset.pk] = val;
+                    const vEl = $(`sfxv-${rng.dataset.efft}-${rng.dataset.pk}`);
+                    if (vEl) vEl.textContent = val;
+                    S.dirty = true;
+                });
+            });
+        }
+        _sfxRender();
+
         $('acp-split').addEventListener('click', () => {
             const t = S.currentTime;
             const st = track.startOffset || 0;
@@ -2911,46 +3004,129 @@ export async function init() {
 
     // ── Template Apply ────────────────────────────────────────────────────────
 
+    // Build a dropdown+upload widget for a single slot.
+    // existingItems: array of {id, label, url?}
+    // accept: file input accept string
+    // Returns container element; call .getSelection() to get {type:'existing'|'new'|'skip', id?, file?}
+    function _makeSlotWidget(existingItems, accept, placeholder) {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:4px';
+
+        const selEl = document.createElement('select');
+        selEl.className = 'ive-select';
+        selEl.style.width = '100%';
+        selEl.innerHTML =
+            `<option value="__skip__">— Пропустить (использовать из шаблона)</option>` +
+            `<option value="__new__">↑ Загрузить новый файл…</option>` +
+            existingItems.map(it => `<option value="${eh(it.id)}">${eh(it.label)}</option>`).join('');
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file'; fileInput.accept = accept;
+        fileInput.style.display = 'none';
+
+        const nameEl = document.createElement('div');
+        nameEl.style.cssText = 'font-size:11px;color:var(--text-dim,#999);min-height:14px';
+
+        selEl.onchange = () => {
+            if (selEl.value === '__new__') {
+                fileInput.click();
+            } else {
+                nameEl.textContent = selEl.value === '__skip__' ? '' :
+                    (existingItems.find(x => x.id === selEl.value)?.label || '');
+            }
+        };
+        fileInput.onchange = () => {
+            nameEl.textContent = fileInput.files?.[0]?.name || '';
+        };
+
+        wrap.appendChild(selEl);
+        wrap.appendChild(fileInput);
+        wrap.appendChild(nameEl);
+
+        wrap.getSelection = () => {
+            const v = selEl.value;
+            if (v === '__skip__')  return { type: 'skip' };
+            if (v === '__new__')   return { type: 'new',      file: fileInput.files?.[0] || null };
+            return                        { type: 'existing', id: v };
+        };
+        return wrap;
+    }
+
     function _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs }) {
         return new Promise((resolve) => {
             const modal = document.getElementById('ive-tmpl-apply-modal');
             if (!modal) { resolve(null); return; }
 
-            const name = tmpl.name.replace(/ \(шаблон\)$/, '');
-            const slideCount = (tmpl.slides || []).length;
+            document.getElementById('tmpl-modal-name').textContent =
+                tmpl.name.replace(/ \(шаблон\)$/, '');
 
-            document.getElementById('tmpl-modal-name').textContent = name;
-            document.getElementById('tmpl-media-count').textContent = slideCount
-                ? `(ожидается ${slideCount} файл${slideCount === 1 ? '' : slideCount < 5 ? 'а' : 'ов'})`
-                : '';
+            // ── Build existing-media lists ─────────────────────────────────
+            const existingMedia = S.clips.map(c => ({
+                id:    c.id,
+                label: `${c.type === 'video' ? '🎬' : '🖼'} ${c.original || c.file}`,
+            }));
+            const existingAudio = S.audioTracks.map(t => ({
+                id:    t.id,
+                label: `♪ ${t.original || t.file}`,
+                fileUrl: t.fileUrl,
+            }));
+            const existingPip = S.pipLayers.map(p => ({
+                id:    p.id,
+                label: `PIP ${p.original || p.file}`,
+            }));
 
-            document.getElementById('tmpl-media-section').style.display = hasSlides ? '' : 'none';
-            document.getElementById('tmpl-sub-section').style.display   = hasSubs   ? '' : 'none';
-            document.getElementById('tmpl-audio-section').style.display = hasAudio  ? '' : 'none';
-            document.getElementById('tmpl-pip-section').style.display   = hasPip    ? '' : 'none';
+            // ── Slides section ─────────────────────────────────────────────
+            const slotsSection = document.getElementById('tmpl-slots-section');
+            slotsSection.innerHTML = '';
+            const slideWidgets = [];
+            if (hasSlides) {
+                const header = document.createElement('div');
+                header.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:8px';
+                header.textContent = `Медиаслайды (${(tmpl.slides||[]).length})`;
+                slotsSection.appendChild(header);
 
-            const mediaInput = document.getElementById('tmpl-media-input');
-            const audioInput = document.getElementById('tmpl-audio-input');
-            const pipInput   = document.getElementById('tmpl-pip-input');
-            const mediaList  = document.getElementById('tmpl-media-file-list');
-            const audioName  = document.getElementById('tmpl-audio-filename');
-            const pipName    = document.getElementById('tmpl-pip-filename');
+                (tmpl.slides || []).forEach((slide, i) => {
+                    const isVid = slide.type === 'video';
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px';
 
-            mediaInput.value = ''; audioInput.value = ''; pipInput.value = '';
-            mediaList.innerHTML = ''; audioName.textContent = ''; pipName.textContent = '';
+                    const lbl = document.createElement('span');
+                    lbl.style.cssText = 'font-size:11px;color:var(--text-dim);min-width:90px;white-space:nowrap';
+                    lbl.textContent = `${i + 1}. ${isVid ? '🎬 Видео' : '🖼 Изображение'}`;
 
-            document.getElementById('tmpl-media-pick').onclick = () => mediaInput.click();
-            document.getElementById('tmpl-audio-pick').onclick = () => audioInput.click();
-            document.getElementById('tmpl-pip-pick').onclick   = () => pipInput.click();
+                    const accept = isVid ? 'video/*' : 'image/*,video/*';
+                    const widget = _makeSlotWidget(existingMedia, accept, `слайд ${i + 1}`);
+                    widget.style.flex = '1';
 
-            mediaInput.onchange = () => {
-                const files = Array.from(mediaInput.files || []);
-                mediaList.innerHTML = files.map((f, i) =>
-                    `<div style="padding:2px 0"><span style="color:var(--text-dim,#999)">${i + 1}.</span> ${eh(f.name)}</div>`
-                ).join('');
-            };
-            audioInput.onchange = () => { audioName.textContent = audioInput.files?.[0]?.name || ''; };
-            pipInput.onchange   = () => { pipName.textContent   = pipInput.files?.[0]?.name   || ''; };
+                    row.appendChild(lbl);
+                    row.appendChild(widget);
+                    slotsSection.appendChild(row);
+                    slideWidgets.push(widget);
+                });
+            }
+
+            // ── Subtitles info ─────────────────────────────────────────────
+            document.getElementById('tmpl-sub-section').style.display = hasSubs ? '' : 'none';
+
+            // ── Audio section ──────────────────────────────────────────────
+            document.getElementById('tmpl-audio-section').style.display = hasAudio ? '' : 'none';
+            const audioSlot = document.getElementById('tmpl-audio-slot');
+            audioSlot.innerHTML = '';
+            let audioWidget = null;
+            if (hasAudio) {
+                audioWidget = _makeSlotWidget(existingAudio, 'audio/*', 'аудиодорожка');
+                audioSlot.appendChild(audioWidget);
+            }
+
+            // ── PIP section ────────────────────────────────────────────────
+            document.getElementById('tmpl-pip-section').style.display = hasPip ? '' : 'none';
+            const pipSlot = document.getElementById('tmpl-pip-slot');
+            pipSlot.innerHTML = '';
+            let pipWidget = null;
+            if (hasPip) {
+                pipWidget = _makeSlotWidget(existingPip, 'image/*,video/*', 'PIP файл');
+                pipSlot.appendChild(pipWidget);
+            }
 
             const close = (val) => {
                 modal.hidden = true;
@@ -2962,9 +3138,9 @@ export async function init() {
 
             document.getElementById('tmpl-cancel-btn').onclick = () => close(null);
             document.getElementById('tmpl-apply-btn').onclick  = () => close({
-                mediaFiles: Array.from(mediaInput.files || []),
-                audioFile:  audioInput.files?.[0] || null,
-                pipFile:    pipInput.files?.[0]   || null,
+                slideSelections: slideWidgets.map(w => w.getSelection()),
+                audioSelection:  audioWidget ? audioWidget.getSelection() : { type: 'skip' },
+                pipSelection:    pipWidget   ? pipWidget.getSelection()   : { type: 'skip' },
             });
 
             modal.hidden = false;
@@ -2989,59 +3165,90 @@ export async function init() {
         const result = await _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs });
         if (!result) return;
 
-        const { mediaFiles, audioFile, pipFile } = result;
+        const { slideSelections, audioSelection, pipSelection } = result;
         _stopPlayback();
 
         const applyBtn = document.getElementById('tmpl-apply-btn');
         if (applyBtn) applyBtn.disabled = true;
         toast('Загрузка файлов…', 'info');
 
+        // Helper: upload a File and get back {name, url, thumb_url?, original, duration?}
+        async function _uploadFile(file, isVid) {
+            const fd = new FormData(); fd.append('file', file);
+            const r = await fetch(isVid ? '/api/imgvid/clips' : '/api/imgvid/images', { method: 'POST', body: fd });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Ошибка загрузки');
+            return d;
+        }
+
         try {
             // ── Slides ──────────────────────────────────────────────────────────
             const newClips = [];
-            if (mediaFiles.length > 0) {
-                const tmplSlides = tmpl.slides || [];
-                const count = Math.max(mediaFiles.length, tmplSlides.length);
-                for (let i = 0; i < count; i++) {
-                    const file      = mediaFiles[i];
+            const tmplSlides = tmpl.slides || [];
+            const anySlideSelected = slideSelections.some(s => s.type !== 'skip');
+
+            if (anySlideSelected) {
+                for (let i = 0; i < slideSelections.length; i++) {
+                    const sel       = slideSelections[i];
                     const tmplSlide = tmplSlides[i] || {};
 
-                    if (!file) {
-                        // No user file for this slot — skip (drop slot)
+                    if (sel.type === 'skip') {
+                        // Keep original template slide
+                        newClips.push({ ...tmplSlide, id: uid(), subtitles: [] });
                         continue;
                     }
 
-                    const isVid = file.type.startsWith('video/') ||
-                        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(file.name);
-                    const fd = new FormData(); fd.append('file', file);
-                    const r = await fetch(isVid ? '/api/imgvid/clips' : '/api/imgvid/images',
-                        { method: 'POST', body: fd });
-                    const d = await r.json();
-                    if (!r.ok) { toast(d.detail || 'Ошибка загрузки', 'err'); continue; }
+                    let fileData;
+                    let isVid;
+                    if (sel.type === 'existing') {
+                        const existing = S.clips.find(c => c.id === sel.id);
+                        if (!existing) { continue; }
+                        // Use existing clip data directly (no re-upload)
+                        const base = { ...tmplSlide, id: uid(), subtitles: [],
+                            type: existing.type, file: existing.file,
+                            fileUrl: existing.fileUrl, thumbUrl: existing.thumbUrl,
+                            original: existing.original };
+                        base.transition  = base.transition  || { type: 'none', duration: 0.5 };
+                        base.effects     = base.effects     || [];
+                        base.startEffect = base.startEffect || { type: 'none', duration: 1.0 };
+                        base.endEffect   = base.endEffect   || { type: 'none', duration: 1.0 };
+                        if (existing.type === 'video') {
+                            base.duration = tmplSlide.duration || existing.duration || 5;
+                            delete base.imgScale; delete base.imgOffsetX; delete base.imgOffsetY; delete base.crop;
+                        } else {
+                            base.duration = tmplSlide.duration || 3;
+                            delete base.trimIn; delete base.muteAudio;
+                            if (base.imgScale   === undefined) base.imgScale   = 100;
+                            if (base.imgOffsetX === undefined) base.imgOffsetX = 0;
+                            if (base.imgOffsetY === undefined) base.imgOffsetY = 0;
+                        }
+                        newClips.push(base);
+                        continue;
+                    }
+
+                    // type === 'new'
+                    if (!sel.file) continue;
+                    isVid = sel.file.type.startsWith('video/') ||
+                        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(sel.file.name);
+                    try { fileData = await _uploadFile(sel.file, isVid); }
+                    catch (e) { toast(e.message, 'err'); continue; }
 
                     const base = { ...tmplSlide, id: uid(), subtitles: [] };
                     base.type      = isVid ? 'video' : 'image';
-                    base.file      = d.name;
-                    base.fileUrl   = d.url;
-                    base.thumbUrl  = isVid ? (d.thumb_url || '') : d.url;
-                    base.original  = d.original;
-                    // Ensure structural defaults for slides beyond template slots
+                    base.file      = fileData.name;
+                    base.fileUrl   = fileData.url;
+                    base.thumbUrl  = isVid ? (fileData.thumb_url || '') : fileData.url;
+                    base.original  = fileData.original;
                     base.transition  = base.transition  || { type: 'none', duration: 0.5 };
                     base.effects     = base.effects     || [];
                     base.startEffect = base.startEffect || { type: 'none', duration: 1.0 };
                     base.endEffect   = base.endEffect   || { type: 'none', duration: 1.0 };
-
                     if (isVid) {
-                        // Keep template duration; fall back to actual video duration
-                        base.duration = tmplSlide.duration || d.duration || 5;
-                        // Clear image-only fields
-                        delete base.imgScale; delete base.imgOffsetX;
-                        delete base.imgOffsetY; delete base.crop;
+                        base.duration = tmplSlide.duration || fileData.duration || 5;
+                        delete base.imgScale; delete base.imgOffsetX; delete base.imgOffsetY; delete base.crop;
                     } else {
                         base.duration = tmplSlide.duration || 3;
-                        // Clear video-only fields
                         delete base.trimIn; delete base.muteAudio;
-                        // Ensure image defaults exist
                         if (base.imgScale   === undefined) base.imgScale   = 100;
                         if (base.imgOffsetX === undefined) base.imgOffsetX = 0;
                         if (base.imgOffsetY === undefined) base.imgOffsetY = 0;
@@ -3049,42 +3256,78 @@ export async function init() {
                     newClips.push(base);
                 }
             } else {
-                // No media selected — use template slides as-is (graceful fallback)
-                (tmpl.slides || []).forEach(s => newClips.push({ ...s, id: uid(), subtitles: [] }));
+                // All skipped or no slides in template — use template slides as-is
+                tmplSlides.forEach(s => newClips.push({ ...s, id: uid(), subtitles: [] }));
             }
 
             // ── Audio ────────────────────────────────────────────────────────────
             let newAudio = [];
-            if (audioFile && hasAudio) {
-                const fd = new FormData(); fd.append('file', audioFile);
-                const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
-                const d = await r.json();
-                if (r.ok) {
-                    const tmplA = tmpl.audio[0] || {};
-                    newAudio = [{ ...tmplA, id: uid(), file: d.name, fileUrl: d.url, original: d.original }];
+            if (hasAudio) {
+                const aSel = audioSelection || { type: 'skip' };
+                if (aSel.type === 'existing') {
+                    // Reuse existing track: apply template processing settings to it
+                    const existing = S.audioTracks.find(t => t.id === aSel.id);
+                    if (existing) {
+                        const tmplA = tmpl.audio[0] || {};
+                        // Copy processing settings from template, keep new file data
+                        newAudio = [{ ...tmplA, id: uid(),
+                            file: existing.file, fileUrl: existing.fileUrl, original: existing.original,
+                            originalDuration: existing.originalDuration,
+                            duration: existing.duration }];
+                    }
+                } else if (aSel.type === 'new' && aSel.file) {
+                    const fd = new FormData(); fd.append('file', aSel.file);
+                    const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
+                    const d = await r.json();
+                    if (r.ok) {
+                        const tmplA = tmpl.audio[0] || {};
+                        // Spread template processing settings but reset file-specific duration
+                        const track = { ...tmplA, id: uid(),
+                            file: d.name, fileUrl: d.url, original: d.original,
+                            duration: undefined, originalDuration: undefined };
+                        newAudio = [track];
+                        // Probe actual duration of new file asynchronously
+                        _probeAudioDuration(d.url).then(dur => {
+                            if (dur > 0) {
+                                track.originalDuration = dur;
+                                track.duration = dur;
+                                if ((track.trimIn || 0) >= dur) track.trimIn = 0;
+                                renderTimeline();
+                            }
+                        });
+                    }
+                } else {
+                    // 'skip' — preserve template audio tracks
+                    newAudio = (tmpl.audio || []).map(a => ({ ...a, id: uid() }));
                 }
-            } else if (!audioFile && hasAudio) {
-                // Fallback: preserve template audio tracks as-is
-                newAudio = (tmpl.audio || []).map(a => ({ ...a, id: uid() }));
             }
 
             // ── PIP ──────────────────────────────────────────────────────────────
             let newPip = [];
-            if (pipFile && hasPip) {
-                const isVid = pipFile.type.startsWith('video/') ||
-                    /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(pipFile.name);
-                const fd = new FormData(); fd.append('file', pipFile);
-                const r = await fetch(isVid ? '/api/imgvid/clips' : '/api/imgvid/images',
-                    { method: 'POST', body: fd });
-                const d = await r.json();
-                if (r.ok) {
-                    const tmplP = tmpl.pip[0] || {};
-                    newPip = [{ ...tmplP, id: uid(), type: isVid ? 'video' : 'image',
-                        file: d.name, fileUrl: d.url,
-                        thumbUrl: isVid ? (d.thumb_url || '') : d.url, original: d.original }];
+            if (hasPip) {
+                const pSel = pipSelection || { type: 'skip' };
+                if (pSel.type === 'existing') {
+                    const existing = S.pipLayers.find(p => p.id === pSel.id);
+                    if (existing) {
+                        const tmplP = tmpl.pip[0] || {};
+                        newPip = [{ ...tmplP, id: uid(), type: existing.type,
+                            file: existing.file, fileUrl: existing.fileUrl,
+                            thumbUrl: existing.thumbUrl, original: existing.original }];
+                    }
+                } else if (pSel.type === 'new' && pSel.file) {
+                    const isVid = pSel.file.type.startsWith('video/') ||
+                        /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(pSel.file.name);
+                    try {
+                        const d = await _uploadFile(pSel.file, isVid);
+                        const tmplP = tmpl.pip[0] || {};
+                        newPip = [{ ...tmplP, id: uid(), type: isVid ? 'video' : 'image',
+                            file: d.name, fileUrl: d.url,
+                            thumbUrl: isVid ? (d.thumb_url || '') : d.url, original: d.original }];
+                    } catch (e) { toast(e.message, 'err'); }
+                } else {
+                    // 'skip' — preserve template PIP layers
+                    newPip = (tmpl.pip || []).map(p => ({ ...p, id: uid() }));
                 }
-            } else if (!pipFile && hasPip) {
-                newPip = (tmpl.pip || []).map(p => ({ ...p, id: uid() }));
             }
 
             // ── Subtitles ────────────────────────────────────────────────────────

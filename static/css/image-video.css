@@ -638,3 +638,27 @@
 
 /* Multi-select clip highlighting */
 .ive-tl-clip.multi-sel { outline: 2px solid rgba(74,158,255,0.7); }
+
+/* Sound effects chips */
+.ive-sfx-chips {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px;
+}
+.ive-sfx-chip {
+    padding: 2px 8px; font-size: 10px; font-weight: 500;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg2); color: var(--text-dim);
+    cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+    line-height: 1.5;
+}
+.ive-sfx-chip:hover { background: var(--bg3); color: var(--text); }
+.ive-sfx-chip.active {
+    background: var(--accent, #4a9eff); color: #fff;
+    border-color: var(--accent, #4a9eff);
+}
+.ive-sfx-params-block {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 6px 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 3px;
+}
+.ive-sfx-params-label {
+    font-size: 10px; font-weight: 600; color: var(--text-dim); margin-bottom: 2px;
+}

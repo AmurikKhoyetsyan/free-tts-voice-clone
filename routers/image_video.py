@@ -849,6 +849,48 @@ async def export_video(
                 video_dur_for_audio = _compute_video_dur(slides)
                 total_dur = video_dur_for_audio
                 if valid_audio:
+                    def _sfx_filter(sfx_type, sfx):
+                        """Return FFmpeg audio filter string for one sound effect."""
+                        if sfx_type == "echo":
+                            d = int(sfx.get("delay", 500)); dc = float(sfx.get("decay", 0.5))
+                            return f"aecho=0.6:0.3:{d}:{dc}"
+                        if sfx_type == "reverb":
+                            d = int(sfx.get("delay", 1000)); dc = float(sfx.get("decay", 0.8))
+                            return f"aecho=0.8:0.9:{d}:{dc}"
+                        if sfx_type == "bassboost":
+                            g = float(sfx.get("gain", 10))
+                            return f"equalizer=f=60:t=o:w=1:g={g}"
+                        if sfx_type == "treble":
+                            g = float(sfx.get("gain", 8))
+                            return f"equalizer=f=8000:t=o:w=1:g={g}"
+                        if sfx_type == "compressor":
+                            r = float(sfx.get("ratio", 4))
+                            return f"acompressor=threshold=0.5:ratio={r}:attack=5:release=50"
+                        if sfx_type == "phone":
+                            return "highpass=f=300,lowpass=f=3400"
+                        if sfx_type == "radio":
+                            return "highpass=f=200,lowpass=f=3000"
+                        if sfx_type == "lowpass":
+                            return f"lowpass=f={int(sfx.get('freq', 500))}"
+                        if sfx_type == "highpass":
+                            return f"highpass=f={int(sfx.get('freq', 2000))}"
+                        if sfx_type == "chorus":
+                            return "chorus=0.7:0.9:55:0.4:0.25:2"
+                        if sfx_type == "flanger":
+                            return "flanger=delay=5:depth=2:speed=0.2:shape=sinusoidal"
+                        if sfx_type == "distortion":
+                            lv = float(sfx.get("level", 1.5))
+                            return f"acrusher=level_in={lv}:level_out=0.5:bits=8:mode=log"
+                        if sfx_type == "noise":
+                            return "afftdn=nf=-25"
+                        if sfx_type == "pitch":
+                            semi = float(sfx.get("semitones", 2))
+                            factor = 2 ** (semi / 12)
+                            rate = int(44100 * factor)
+                            inv = round(1.0 / factor, 4)
+                            return f"asetrate={rate},aresample=44100,atempo={inv}"
+                        return None
+
                     def _build_audio_filter(t, ai_idx, out_label, clip_to_total=True):
                         vol         = float(t.get("volume", 1.0))
                         fi          = float(t.get("fadeIn",  t.get("fade_in",  0)))
@@ -857,6 +899,8 @@ async def export_video(
                         start_off   = float(t.get("startOffset", 0))
                         track_dur   = t.get("duration")
                         track_dur_f = float(track_dur) if track_dur is not None else None
+                        speed       = float(t.get("speed", 1.0))
+                        sound_fx    = t.get("soundEffects") or []
                         af = []
                         # Trim file start and/or limit segment duration
                         if trim_in > 0 or track_dur_f is not None:
@@ -867,7 +911,21 @@ async def export_video(
                                 atrim_args.append(f"end={trim_in + track_dur_f:.3f}")
                             af.append(f"atrim={':'.join(atrim_args)}")
                             af.append("asetpts=PTS-STARTPTS")
+                        # Speed (atempo supports 0.5–2.0 per pass; chain for wider range)
+                        if abs(speed - 1.0) > 0.001:
+                            remaining = speed
+                            while remaining < 0.5:
+                                af.append("atempo=0.5"); remaining /= 0.5
+                            while remaining > 2.0:
+                                af.append("atempo=2.0"); remaining /= 2.0
+                            af.append(f"atempo={remaining:.6f}")
                         af.append(f"volume={vol}")
+                        # Sound effects
+                        for sfx in sound_fx:
+                            sfx_type = (sfx.get("type") or "").strip()
+                            f_str = _sfx_filter(sfx_type, sfx)
+                            if f_str:
+                                af.extend(f_str.split(","))
                         if fi > 0:
                             af.append(f"afade=t=in:ss=0:d={fi:.2f}")
                         if fo > 0:

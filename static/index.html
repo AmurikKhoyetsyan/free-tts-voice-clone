@@ -95,7 +95,7 @@
         <button class="tab" data-tab="history">История</button>
         <button class="tab" data-tab="subtitles">Субтитры</button>
         <button class="tab" data-tab="video">Видео</button>
-        <button class="tab" data-tab="imgvid">Image Video Editor</button>
+        <button class="tab" data-tab="imgvid">Редактор</button>
         <button class="tab" data-tab="logs">Логи</button>
     </nav>
 
@@ -317,7 +317,7 @@
                 <div id="hist-proj-list" class="hist-list"></div>
             </div>
 
-            <!-- Video Templates (Image Video Editor) -->
+            <!-- Video Templates (Редактор) -->
             <div class="hist-section" id="hist-section-vidtmpls" hidden>
                 <div class="grid-2">
                     <div class="col">
@@ -802,7 +802,7 @@
             </div>
         </section>
 
-        <!-- ══════════════ Image Video Editor ══════════════ -->
+        <!-- ══════════════ Редактор ══════════════ -->
         <section class="tab-panel" data-panel="imgvid">
             <div class="ive-layout">
 
@@ -1119,36 +1119,27 @@
 
     <!-- ══════════════ Template Apply Modal ══════════════ -->
     <div id="ive-tmpl-apply-modal" class="modal" hidden>
-        <div class="modal-box" style="max-width:520px;width:90%;max-height:85vh;overflow-y:auto">
-            <div style="font-weight:600;font-size:15px;margin-bottom:4px">Применить шаблон</div>
-            <div id="tmpl-modal-name" style="color:var(--text-dim,#999);font-size:13px;margin-bottom:16px"></div>
+        <div class="modal-box" style="max-width:560px;width:92%;max-height:88vh;overflow-y:auto">
+            <div style="font-weight:600;font-size:15px;margin-bottom:2px">Применить шаблон</div>
+            <div id="tmpl-modal-name" style="color:var(--text-dim,#999);font-size:13px;margin-bottom:14px"></div>
 
-            <div id="tmpl-media-section" style="margin-bottom:16px">
-                <div style="font-weight:600;font-size:13px;margin-bottom:4px">Медиафайлы <span id="tmpl-media-count" style="font-weight:400;color:var(--text-dim,#999)"></span></div>
-                <div style="font-size:12px;color:var(--text-dim,#999);margin-bottom:8px">Выберите файлы для слайдов шаблона по порядку (изображения или видео)</div>
-                <input type="file" id="tmpl-media-input" multiple accept="image/*,video/*" style="display:none">
-                <button class="btn btn-sm" id="tmpl-media-pick">Выбрать файлы</button>
-                <div id="tmpl-media-file-list" style="margin-top:8px;font-size:12px;color:var(--text,#e0e0e0);max-height:120px;overflow-y:auto"></div>
+            <!-- Dynamically filled slot selectors -->
+            <div id="tmpl-slots-section" style="margin-bottom:14px"></div>
+
+            <div id="tmpl-sub-section" style="display:none;margin-bottom:12px;padding:8px 10px;background:var(--bg2,#2a2d35);border-radius:6px;font-size:12px;color:var(--text-dim,#999)">
+                ℹ Настройки субтитров из шаблона применятся автоматически
             </div>
 
-            <div id="tmpl-sub-section" style="display:none;margin-bottom:14px;padding:8px 10px;background:var(--bg2,#2a2d35);border-radius:6px;font-size:12px;color:var(--text-dim,#999)">
-                ℹ Настройки субтитров из шаблона будут применены автоматически
+            <!-- Audio selector -->
+            <div id="tmpl-audio-section" style="display:none;margin-bottom:14px">
+                <div style="font-weight:600;font-size:13px;margin-bottom:6px">Аудиодорожка</div>
+                <div id="tmpl-audio-slot"></div>
             </div>
 
-            <div id="tmpl-audio-section" style="display:none;margin-bottom:16px">
-                <div style="font-weight:600;font-size:13px;margin-bottom:4px">Аудиофайл</div>
-                <div style="font-size:12px;color:var(--text-dim,#999);margin-bottom:8px">Выберите аудиофайл для этого шаблона</div>
-                <input type="file" id="tmpl-audio-input" accept="audio/*" style="display:none">
-                <button class="btn btn-sm" id="tmpl-audio-pick">Выбрать аудио</button>
-                <div id="tmpl-audio-filename" style="margin-top:6px;font-size:12px;color:var(--text,#e0e0e0)"></div>
-            </div>
-
-            <div id="tmpl-pip-section" style="display:none;margin-bottom:16px">
-                <div style="font-weight:600;font-size:13px;margin-bottom:4px">PIP файл</div>
-                <div style="font-size:12px;color:var(--text-dim,#999);margin-bottom:8px">Выберите PIP-видео или изображение для этого шаблона</div>
-                <input type="file" id="tmpl-pip-input" accept="image/*,video/*" style="display:none">
-                <button class="btn btn-sm" id="tmpl-pip-pick">Выбрать PIP файл</button>
-                <div id="tmpl-pip-filename" style="margin-top:6px;font-size:12px;color:var(--text,#e0e0e0)"></div>
+            <!-- PIP selector -->
+            <div id="tmpl-pip-section" style="display:none;margin-bottom:14px">
+                <div style="font-weight:600;font-size:13px;margin-bottom:6px">PIP слой</div>
+                <div id="tmpl-pip-slot"></div>
             </div>
 
             <div class="modal-actions">

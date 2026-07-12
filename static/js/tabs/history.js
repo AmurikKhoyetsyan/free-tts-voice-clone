@@ -391,7 +391,7 @@ export async function init() {
         }
     });
 
-    // ── Video Templates (Image Video Editor) ─────────────────────────────────
+    // ── Video Templates (Редактор) ───────────────────────────────────────────
     const vidTmplListEl      = document.getElementById('hist-vidtmpl-list');
     const vidTmplInfoBlock   = document.getElementById('hist-vidtmpl-info-block');
     const vidTmplInfoLabel   = document.getElementById('hist-vidtmpl-info-label');
