@@ -12,6 +12,19 @@ The browser opens automatically at **http://127.0.0.1:7860**. Stop with `Ctrl+C`
 
 ---
 
+## Audio Player
+
+The audio player appears after synthesis (Windows Voices, Cloning, Saved Voices tabs) and in the History tab. Controls:
+
+- **Waveform** — click or drag anywhere on the waveform to seek. Hover shows a time tooltip.
+- **Seekbar** — the orange-filled range slider below the waveform. Drag to seek; stays in sync with the waveform.
+- **Timestamps** — current position and total duration.
+- **Skip ±5 s** — skip back or forward 5 seconds.
+- **Speed** — cycle through 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×.
+- **Download** — save the audio file.
+
+---
+
 ## Tab: Windows Voices
 
 Synthesises text using built-in Windows SAPI voices (Irina, Pavel, Zira, David, …).
@@ -92,7 +105,7 @@ File browser with four sections (select in the top bar):
 
 ---
 
-## Tab: Image Video Editor
+## Tab: Редактор (Image Video Editor)
 
 A full non-linear video editor in the browser. See sections below.
 
@@ -178,7 +191,26 @@ Add audio tracks by dragging from the Audio media panel. Per track:
 - Fade-in / Fade-out (seconds)
 - Start Offset — where the track starts in the video timeline
 - Trim In — where playback starts within the audio file
-- Speed (0.5×–2×)
+- Speed — 0.25×, 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×, 3×, 4×, or a custom value
+
+**Sound effects** — toggle any combination of the 14 per-track effects:
+
+| Effect | Adjustable parameter |
+|--------|----------------------|
+| Эхо (Echo) | Delay (50–2000 ms), Decay (0.1–1) |
+| Реверб (Reverb) | Delay (50–3000 ms), Decay (0.1–1) |
+| Бас (Bass boost) | Gain (−20–+20 dB) |
+| Тембр (Treble) | Gain (−20–+20 dB) |
+| Компрессор | Ratio (1–20) |
+| Телефон | — |
+| Радио | — |
+| НЧ фильтр (Low-pass) | Frequency (100–8000 Hz) |
+| ВЧ фильтр (High-pass) | Frequency (200–12000 Hz) |
+| Хорус (Chorus) | — |
+| Флэнджер | — |
+| Дисторшн | Level (0.5–5) |
+| Шумодав (Noise gate) | — |
+| Питч (Pitch shift) | Semitones (−12–+12) |
 
 ### Export
 
@@ -194,12 +226,19 @@ Click **Экспорт** to open the export dialog:
 
 Progress streams in real time. The exported file appears in **История → Видео**.
 
-### Projects
+### Projects and Templates
 
 - **Сохранить** — saves the current project (JSON + all media packed into a `.project` archive).
 - **Загрузить** — open a saved project from the list.
 - **Сохранить как шаблон** — marks the project as a template; appears in the Templates section for future reuse.
 - **Обзор** — browse the file system for a `.project` file and load it.
+
+**Applying a template** — click **Применить шаблон** next to any template in the list. A modal opens with drag-and-drop zones:
+
+- One combined drop zone accepts multiple files for all slides at once (assigned in order).
+- Individual drop zones for the audio track and PIP layer.
+- Drag files in, or click the zone to browse. Leave a zone empty to keep the template's original file for that slot.
+- Click **Применить** to build the new project from the template layout with your media.
 
 ---
 

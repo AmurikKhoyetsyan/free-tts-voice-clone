@@ -104,15 +104,32 @@ Only the **Windows Voices** tab is initialised on page load. Every other tab ini
 |--------|------|
 | `api.js` | `apiFetch()` — thin `fetch` wrapper with JSON/FormData support. `synthesizeStream()` — reads SSE `ReadableStream`, dispatches `progress` / `done` / `error` handlers. |
 | `audio-manager.js` | Singleton. Each `AudioPlayer` subscribes on creation; when one starts playback, all others pause. |
-| `audio-player.js` | Custom `<audio>` wrapper — play / seek / download controls. |
+| `audio-player.js` | Custom `<audio>` wrapper — waveform canvas, drag-to-scrub, seekbar with progress fill, skip ±5 s, speed 0.5×–2×, download. Uses `WaveRenderer` internally. |
+| `wave-renderer.js` | Canvas waveform renderer. Decodes audio via Web Audio API, draws rounded bars, handles mousedown + document-level drag for seek, hover preview in lighter orange. |
 | `custom-select.js` | Dropdown component with optional icon actions (rename, delete). |
 | `file-upload.js` | Drag-and-drop single-file upload component. |
+| `loader.js` | `withLoader(host, asyncFn)` — shows a spinner overlay on an element while an async function runs. `makeSkeleton(host, kind)` — renders skeleton placeholders (list-rows / dropdown / lines). |
 | `events.js` | Module-level `EventTarget`. Events: `voices-changed`, `history-changed`, `video-changed`. |
 | `icons.js` | Single source of truth for all inline SVG strings. |
 | `logger.js` | Floating draggable log panel + synthesis progress bar. |
 | `modal.js` | `openConfirm(title, msg)` and `openPrompt(title, val)` — both return Promises. Escape closes, Enter confirms. |
 | `tabs.js` | Tab switching; calls `audioManager.stopAll()` on every switch. |
 | `toast.js` | Transient notifications: `info` / `ok` / `warn` / `err`. Auto-dismiss after 4 s. |
+
+### Tab modules (`static/js/tabs/`)
+
+| Module | Tab | Role |
+|--------|-----|------|
+| `windows.js` | Windows голоса | SAPI TTS synthesis + subtitle generation |
+| `cloning.js` | Клонирование | XTTS v2 reference upload + synthesis + voice save |
+| `saved.js` | Мои голоса | Saved voice profile CRUD + synthesis |
+| `history.js` | История | Section switcher: audio / subtitles / video / templates / projects |
+| `subtitles.js` | Субтитры | SRT editor + Whisper transcription |
+| `video.js` | Видео | Video upload + subtitle-burn workflow |
+| `ffmpeg.js` | Видео | FFmpeg-specific controls (used by Видео tab) |
+| `templates.js` | Видео | Subtitle style template CRUD (used by Видео tab) |
+| `logs.js` | Логи | Server log file viewer and editor |
+| `image-video.js` | Редактор | Full image/video editor — imports from `imgvid/` |
 
 ### Image Video Editor modules (`static/js/imgvid/`)
 

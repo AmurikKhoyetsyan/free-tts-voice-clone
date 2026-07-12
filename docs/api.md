@@ -191,7 +191,8 @@ data: {"status": "❌ Ошибка: ..."}
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/imgvid/templates` | List saved templates |
+| `GET` | `/api/imgvid/templates` | List project templates (projects marked as template) |
+| `POST` | `/api/imgvid/projects/{pid}/save-as-template` | Copy a project and mark it as a template |
 
 ### Project Files (`.project` format)
 
@@ -267,9 +268,15 @@ data: {"status": "❌ Ошибка: ..."}
   "trimIn": 0,
   "duration": 30.0,
   "speed": 1.0,
-  "originalDuration": 120.0
+  "originalDuration": 120.0,
+  "soundEffects": [
+    { "type": "echo", "delay": 500, "decay": 0.5 },
+    { "type": "pitch", "semitones": 2 }
+  ]
 }
 ```
+
+`speed` supports 0.25×–4× (and any custom value). `soundEffects` is an optional array of objects; each object must have a `type` field. Supported types: `echo`, `reverb`, `bassboost`, `treble`, `compressor`, `phone`, `radio`, `lowpass`, `highpass`, `chorus`, `flanger`, `distortion`, `noise`, `pitch`.
 
 ### Subtitle object
 

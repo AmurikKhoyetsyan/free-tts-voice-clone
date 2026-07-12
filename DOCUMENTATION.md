@@ -74,7 +74,11 @@ app.py
 │   ├── transcribe.py      /api/transcribe    — Whisper транскрипция
 │   ├── templates.py       /api/templates     — Пресеты стилей субтитров
 │   ├── log_router.py      /api/logs          — Просмотр и редактирование логов
-│   └── image_video.py     /api/imgvid        — Слайд-шоу редактор (Image Video)
+│   └── image_video.py     /api/imgvid        — Редактор (Image Video Editor)
+│       └── imgvid/        — сервисный пакет редактора
+│           ├── ffmpeg_utils.py  — FFmpeg-хелперы, карты переходов/эффектов
+│           ├── ass_writer.py    — генератор ASS-субтитров
+│           └── project_ops.py  — pack/unpack .project-архивов
 ├── services/
 │   ├── tts_windows.py     — pyttsx3 / SAPI5 синтез
 │   ├── tts_xtts.py        — Coqui XTTS v2 синтез
@@ -89,10 +93,37 @@ app.py
     ├── index.html         — SPA (одна страница, 8 вкладок)
     ├── css/               — Стили (base, tabs, forms, audio, ...)
     └── js/
-        ├── app.js         — Вход, ленивая инициализация вкладок
-        ├── api.js         — fetch-хелперы + SSE-парсер
-        ├── tabs/          — Логика каждой вкладки
-        └── ...            — Компоненты (audio-player, modal, toast, ...)
+        ├── app.js              — Вход, ленивая инициализация вкладок
+        ├── api.js              — fetch-хелперы + SSE-парсер
+        ├── audio-player.js     — плеер с waveform, seekbar, drag-to-scrub
+        ├── wave-renderer.js    — canvas-рендерер waveform (используется AudioPlayer)
+        ├── loader.js           — withLoader() / makeSkeleton() хелперы
+        ├── audio-manager.js    — синглтон: один плеер воспроизводит в один момент
+        ├── custom-select.js    — dropdown-компонент
+        ├── file-upload.js      — drag-and-drop загрузка файла
+        ├── events.js           — EventTarget-шина: voices-changed, history-changed
+        ├── icons.js            — SVG-иконки
+        ├── logger.js           — плавающая панель логов + прогресс-бар
+        ├── modal.js            — openConfirm() / openPrompt()
+        ├── tabs.js             — переключение вкладок
+        ├── toast.js            — уведомления
+        ├── tabs/
+        │   ├── windows.js      — Windows TTS
+        │   ├── cloning.js      — XTTS клонирование
+        │   ├── saved.js        — сохранённые голоса
+        │   ├── history.js      — История (браузер файлов)
+        │   ├── subtitles.js    — редактор субтитров
+        │   ├── video.js        — прожиг субтитров в видео
+        │   ├── ffmpeg.js       — FFmpeg-элементы управления (вкладка Видео)
+        │   ├── templates.js    — шаблоны стилей субтитров (вкладка Видео)
+        │   ├── logs.js         — просмотр логов
+        │   └── image-video.js  — Редактор (импортирует из imgvid/)
+        └── imgvid/
+            ├── constants.js    — TRANSITIONS (22), EFFECTS_DEF, FONTS, ANIMS
+            ├── utils.js        — uid, fmt, snap, totalDur, buildCSSFilter, ...
+            ├── waveform.js     — drawWaveform(), probeAudioDuration() c кэшем
+            ├── export.js       — заглушка (логика в image-video.js)
+            └── preview.js      — заглушка (логика в image-video.js)
 ```
 
 ### SSE-поток (стриминг синтеза)
@@ -119,6 +150,21 @@ data: {"status": "❌ Ошибка: голос не найден"}
 ---
 
 ## 3. Вкладки — руководство пользователя
+
+### Аудиоплеер (общий для всех вкладок)
+
+Кастомный плеер появляется после синтеза (Windows голоса, Клонирование, Мои голоса) и в разделе История → Аудио.
+
+| Элемент | Описание |
+|---|---|
+| Waveform | Кликните или перетащите для перемотки; при наведении — всплывающая подсказка со временем |
+| Seekbar | Оранжевая полоса под waveform — отражает прогресс; перетаскивание синхронизируется с waveform |
+| Временны́е метки | Текущая позиция и общая длительность |
+| Skip ±5 с | Перемотка назад/вперёд на 5 секунд |
+| Скорость | Цикл по 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2× |
+| Скачать | Сохранить WAV-файл |
+
+---
 
 ### 3.1 Windows голоса
 
@@ -419,6 +465,26 @@ data: {"status": "❌ Ошибка: голос не найден"}
 | Начальный сдвиг | Задержка старта дорожки (сек) |
 | Trim In | Обрезка начала дорожки |
 | Fade In / Fade Out | Плавное появление / исчезновение (сек) |
+| Скорость | 0.25×, 0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×, 3×, 4× или произвольное значение |
+
+**Звуковые эффекты** — 14 эффектов, переключаемые чипами. У каждого эффекта с параметрами отображаются ползунки после активации:
+
+| Эффект | Параметры |
+|---|---|
+| Эхо | Задержка (50–2000 мс), Затухание (0.1–1) |
+| Реверб | Задержка (50–3000 мс), Затухание (0.1–1) |
+| Бас | Усиление (−20–+20 дБ) |
+| Тембр | Усиление (−20–+20 дБ) |
+| Компрессор | Коэффициент (1–20) |
+| Телефон | — |
+| Радио | — |
+| НЧ фильтр | Частота (100–8000 Гц) |
+| ВЧ фильтр | Частота (200–12000 Гц) |
+| Хорус | — |
+| Флэнджер | — |
+| Дисторшн | Уровень (0.5–5) |
+| Шумодав | — |
+| Питч | Полутоны (−12–+12) |
 
 #### Субтитры (независимый трек)
 
@@ -480,14 +546,15 @@ data: {"status": "❌ Ошибка: голос не найден"}
 
 | Параметр | Варианты |
 |---|---|
-| Формат | MP4, MOV, MKV, WebM |
-| Разрешение | 1920×1080 / 1280×720 / 1080×1920 / 1080×1080 / Custom |
+| Формат | MP4, MOV, MKV, M4V, AVI, WebM, OGV, FLV, WMV, MPEG, GIF; аудио: MP3, WAV, FLAC, AAC, OGG, M4A, OPUS |
+| Кодек | Авто, H.264, H.265, VP9, VP8, AV1, ProRes, MPEG-4 |
+| Разрешение | 1280×720, 1920×1080, 2560×1440, 3840×2160, Custom (WxH) |
 | FPS | 24, 25, 30, 60 |
 | Качество | Низкое (CRF 28) / Среднее (CRF 22) / Высокое (CRF 18) / Без потерь (CRF 0) |
 
 Прогресс отображается в Logger-панели. Готовый файл сохраняется в `.output/imgvid/output/`.
 
-#### Проекты
+#### Проекты и шаблоны
 
 | Действие | Описание |
 |---|---|
@@ -498,6 +565,16 @@ data: {"status": "❌ Ошибка: голос не найден"}
 | Импортировать `.project` | Распаковать `.project`-архив и загрузить проект |
 | Сохранить на диск | Сохранить `.project` в произвольный путь ФС |
 | Загрузить с диска | Открыть `.project` с произвольного пути |
+| Сохранить как шаблон | Пометить проект как шаблон — доступен для многократного применения |
+
+**Применение шаблона** — кнопка «Применить шаблон» рядом с записью в списке шаблонов открывает модальное окно с зонами drag-and-drop:
+
+- Одна общая зона для всех слайдов (поддерживает несколько файлов — назначаются по порядку)
+- Отдельная зона для аудиодорожки
+- Отдельная зона для PIP-слоя
+- Пустая зона означает «оставить медиафайл из шаблона»
+
+После нажатия **Применить** создаётся новый проект с компоновкой шаблона и загруженными медиафайлами.
 
 ---
 
@@ -1032,28 +1109,39 @@ tts/
 │       ├── api.js
 │       ├── audio-manager.js
 │       ├── audio-player.js
+│       ├── wave-renderer.js
 │       ├── custom-select.js
 │       ├── events.js
 │       ├── file-upload.js
 │       ├── icons.js
+│       ├── loader.js
 │       ├── logger.js
 │       ├── modal.js
 │       ├── tabs.js
 │       ├── toast.js
-│       └── tabs/
-│           ├── windows.js
-│           ├── cloning.js
-│           ├── saved.js
-│           ├── history.js
-│           ├── subtitles.js
-│           ├── video.js
-│           ├── logs.js
-│           └── image-video.js
+│       ├── tabs/
+│       │   ├── windows.js
+│       │   ├── cloning.js
+│       │   ├── saved.js
+│       │   ├── history.js
+│       │   ├── subtitles.js
+│       │   ├── video.js
+│       │   ├── ffmpeg.js
+│       │   ├── templates.js
+│       │   ├── logs.js
+│       │   └── image-video.js
+│       └── imgvid/
+│           ├── constants.js
+│           ├── utils.js
+│           ├── waveform.js
+│           ├── export.js
+│           └── preview.js
 │
 ├── ffmpeg/                  # Локальный FFmpeg (авто-добавляется в PATH)
 │   └── ffmpeg.exe
 │
 ├── saved_voices/            # XTTS голосовые образцы (.wav)
+├── .logs/                   # Серверные логи (YYYY-MM-DD.log)
 │
 └── .output/
     ├── audio/               # Синтезированные WAV-файлы
@@ -1061,7 +1149,6 @@ tts/
     ├── video/
     │   └── src/             # Загруженные исходные видео
     ├── templates/           # JSON-пресеты стилей
-    ├── logs/                # Серверные логи (YYYY-MM-DD.log)
     └── imgvid/
         ├── images/          # Изображения для слайд-шоу (UUID)
         ├── clips/           # Видеоклипы (UUID)
@@ -1155,15 +1242,16 @@ async def my_synthesis(body: MyBody):
 
 ### Кросс-вкладочные события
 
+`events.js` экспортирует один `EventTarget`. Используется нативный API:
+
 ```js
-import { emitEvent } from '../events.js';
+import { events } from '../events.js';
 
 // Отправить событие
-emitEvent('history-changed');
+events.dispatchEvent(new CustomEvent('history-changed'));
 
 // Подписаться (в другой вкладке)
-import { onEvent } from '../events.js';
-onEvent('history-changed', () => loadAudioList());
+events.addEventListener('history-changed', () => loadAudioList());
 ```
 
 Доступные события: `voices-changed`, `history-changed`, `video-changed`.
@@ -1177,8 +1265,8 @@ app_log("Синтез завершён", level="INFO", source="Windows")
 app_log("Файл не найден", level="ERROR", source="Video")
 ```
 
-Логи пишутся в stdout и в `.output/logs/YYYY-MM-DD.log`.
+Логи пишутся в stdout и в `.logs/YYYY-MM-DD.log`.
 
 ---
 
-*Документация актуальна для коммита на ветке `images`. Сгенерировано: 2026-07-10.*
+*Документация актуальна для ветки `develop`. Обновлено: 2026-07-12.*
