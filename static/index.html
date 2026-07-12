@@ -1119,24 +1119,25 @@
 
     <!-- ══════════════ Template Apply Modal ══════════════ -->
     <div id="ive-tmpl-apply-modal" class="modal" hidden>
-        <div class="modal-box" style="max-width:560px;width:92%;max-height:88vh;overflow-y:auto">
+        <div class="modal-box" style="max-width:520px;width:92%;max-height:88vh;overflow-y:auto">
             <div style="font-weight:600;font-size:15px;margin-bottom:2px">Применить шаблон</div>
-            <div id="tmpl-modal-name" style="color:var(--text-dim,#999);font-size:13px;margin-bottom:14px"></div>
+            <div id="tmpl-modal-name" style="color:var(--text-dim,#999);font-size:13px;margin-bottom:4px"></div>
+            <div style="font-size:11px;color:var(--text-dim,#999);margin-bottom:14px">Добавьте файлы. Незаполненные слоты используют файлы из шаблона.</div>
 
-            <!-- Dynamically filled slot selectors -->
+            <!-- Per-slot DnD upload areas (slides) -->
             <div id="tmpl-slots-section" style="margin-bottom:14px"></div>
 
             <div id="tmpl-sub-section" style="display:none;margin-bottom:12px;padding:8px 10px;background:var(--bg2,#2a2d35);border-radius:6px;font-size:12px;color:var(--text-dim,#999)">
                 ℹ Настройки субтитров из шаблона применятся автоматически
             </div>
 
-            <!-- Audio selector -->
+            <!-- Audio DnD slot -->
             <div id="tmpl-audio-section" style="display:none;margin-bottom:14px">
                 <div style="font-weight:600;font-size:13px;margin-bottom:6px">Аудиодорожка</div>
                 <div id="tmpl-audio-slot"></div>
             </div>
 
-            <!-- PIP selector -->
+            <!-- PIP DnD slot -->
             <div id="tmpl-pip-section" style="display:none;margin-bottom:14px">
                 <div style="font-weight:600;font-size:13px;margin-bottom:6px">PIP слой</div>
                 <div id="tmpl-pip-slot"></div>

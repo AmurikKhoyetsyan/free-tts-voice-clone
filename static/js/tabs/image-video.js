@@ -3006,50 +3006,203 @@ export async function init() {
 
     // Build a dropdown+upload widget for a single slot.
     // existingItems: array of {id, label, url?}
-    // accept: file input accept string
-    // Returns container element; call .getSelection() to get {type:'existing'|'new'|'skip', id?, file?}
-    function _makeSlotWidget(existingItems, accept, placeholder) {
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:4px';
+    // Drag-and-drop file upload slot for template apply modal.
+    // Returns element with .getSelection() → {type:'new', file:File} | {type:'skip'}
+    function _makeDndSlot(accept, icon, hintLabel) {
+        let selectedFile = null;
 
-        const selEl = document.createElement('select');
-        selEl.className = 'ive-select';
-        selEl.style.width = '100%';
-        selEl.innerHTML =
-            `<option value="__skip__">— Пропустить (использовать из шаблона)</option>` +
-            `<option value="__new__">↑ Загрузить новый файл…</option>` +
-            existingItems.map(it => `<option value="${eh(it.id)}">${eh(it.label)}</option>`).join('');
+        const wrap = document.createElement('div');
+        wrap.className = 'tmpl-dnd-slot';
 
         const fileInput = document.createElement('input');
         fileInput.type = 'file'; fileInput.accept = accept;
         fileInput.style.display = 'none';
-
-        const nameEl = document.createElement('div');
-        nameEl.style.cssText = 'font-size:11px;color:var(--text-dim,#999);min-height:14px';
-
-        selEl.onchange = () => {
-            if (selEl.value === '__new__') {
-                fileInput.click();
-            } else {
-                nameEl.textContent = selEl.value === '__skip__' ? '' :
-                    (existingItems.find(x => x.id === selEl.value)?.label || '');
-            }
-        };
-        fileInput.onchange = () => {
-            nameEl.textContent = fileInput.files?.[0]?.name || '';
-        };
-
-        wrap.appendChild(selEl);
         wrap.appendChild(fileInput);
-        wrap.appendChild(nameEl);
 
-        wrap.getSelection = () => {
-            const v = selEl.value;
-            if (v === '__skip__')  return { type: 'skip' };
-            if (v === '__new__')   return { type: 'new',      file: fileInput.files?.[0] || null };
-            return                        { type: 'existing', id: v };
-        };
+        function _clearContent() {
+            Array.from(wrap.children).forEach(c => { if (c !== fileInput) c.remove(); });
+        }
+
+        function _renderEmpty() {
+            selectedFile = null;
+            wrap.classList.remove('has-file', 'drag-over');
+            _clearContent();
+            const zone = document.createElement('div');
+            zone.className = 'tmpl-dnd-zone';
+            const iconEl = document.createElement('div');
+            iconEl.className = 'tmpl-dnd-icon'; iconEl.textContent = icon;
+            const hint = document.createElement('div');
+            hint.className = 'tmpl-dnd-hint'; hint.textContent = `Перетащите или выберите ${hintLabel}`;
+            const pickBtn = document.createElement('button');
+            pickBtn.className = 'btn btn-sm'; pickBtn.type = 'button';
+            pickBtn.textContent = 'Выбрать';
+            pickBtn.onclick = e => { e.stopPropagation(); fileInput.click(); };
+            zone.append(iconEl, hint, pickBtn);
+            wrap.appendChild(zone);
+        }
+
+        function _renderFile(file) {
+            selectedFile = file;
+            _clearContent();
+            wrap.classList.add('has-file'); wrap.classList.remove('drag-over');
+            const isImg = file.type.startsWith('image/');
+            const isVid = file.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(file.name);
+            const isAud = !isVid && (file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(file.name));
+
+            if (isImg || isVid) {
+                const thumb = document.createElement(isVid ? 'video' : 'img');
+                thumb.className = 'tmpl-dnd-thumb';
+                if (isVid) { thumb.muted = true; thumb.preload = 'metadata'; }
+                thumb.src = URL.createObjectURL(file);
+                wrap.appendChild(thumb);
+            }
+
+            const info = document.createElement('div');
+            info.className = 'tmpl-dnd-file-info';
+            const fname = document.createElement('div');
+            fname.className = 'tmpl-dnd-fname'; fname.textContent = file.name;
+            info.appendChild(fname);
+
+            if (isAud || isVid) {
+                const durEl = document.createElement('div');
+                durEl.className = 'tmpl-dnd-dur'; durEl.textContent = '…';
+                info.appendChild(durEl);
+                const tmp = document.createElement(isVid ? 'video' : 'audio');
+                tmp.preload = 'metadata';
+                tmp.onloadedmetadata = () => { durEl.textContent = `${tmp.duration.toFixed(1)} с`; };
+                tmp.src = URL.createObjectURL(file);
+            }
+
+            const replBtn = document.createElement('button');
+            replBtn.className = 'btn btn-sm'; replBtn.type = 'button';
+            replBtn.textContent = 'Заменить'; replBtn.style.flexShrink = '0';
+            replBtn.onclick = e => { e.stopPropagation(); fileInput.value = ''; fileInput.click(); };
+            wrap.appendChild(info);
+            wrap.appendChild(replBtn);
+        }
+
+        wrap.addEventListener('dragover', e => { e.preventDefault(); wrap.classList.add('drag-over'); });
+        wrap.addEventListener('dragleave', e => { if (!wrap.contains(e.relatedTarget)) wrap.classList.remove('drag-over'); });
+        wrap.addEventListener('drop', e => {
+            e.preventDefault(); wrap.classList.remove('drag-over');
+            const f = e.dataTransfer.files?.[0]; if (f) _renderFile(f);
+        });
+        fileInput.onchange = () => { const f = fileInput.files?.[0]; if (f) _renderFile(f); };
+
+        _renderEmpty();
+        wrap.getSelection = () => selectedFile ? { type: 'new', file: selectedFile } : { type: 'skip' };
         return wrap;
+    }
+
+    // One shared drop zone for all slides + per-slot row list below.
+    // Returns element with .getSelections() → [{type:'new',file}|{type:'skip'}, ...]
+    function _makeSlidesDndArea(slides) {
+        const count = slides.length;
+        const assigned = new Array(count).fill(null);
+
+        const container = document.createElement('div');
+
+        // ── Top drop zone (accepts multiple files) ──────────────────────────
+        const dropZone = document.createElement('div');
+        dropZone.className = 'tmpl-dnd-slot';
+        const multiInput = document.createElement('input');
+        multiInput.type = 'file'; multiInput.multiple = true;
+        multiInput.accept = 'image/*,video/*'; multiInput.style.display = 'none';
+        dropZone.appendChild(multiInput);
+        const zone = document.createElement('div');
+        zone.className = 'tmpl-dnd-zone';
+        const zIcon = document.createElement('div');
+        zIcon.className = 'tmpl-dnd-icon'; zIcon.textContent = '📂';
+        const zHint = document.createElement('div');
+        zHint.className = 'tmpl-dnd-hint';
+        zHint.textContent = `Перетащите сюда до ${count} файл${count===1?'':'ов'} для слайдов`;
+        const zBtn = document.createElement('button');
+        zBtn.className = 'btn btn-sm'; zBtn.type = 'button'; zBtn.textContent = 'Выбрать файлы';
+        zBtn.onclick = e => { e.stopPropagation(); multiInput.click(); };
+        zone.append(zIcon, zHint, zBtn);
+        dropZone.appendChild(zone);
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault(); dropZone.classList.remove('drag-over');
+            _assignFiles(Array.from(e.dataTransfer.files));
+        });
+        multiInput.onchange = () => _assignFiles(Array.from(multiInput.files || []));
+        container.appendChild(dropZone);
+
+        // ── Per-slide assignment list ────────────────────────────────────────
+        const listEl = document.createElement('div');
+        listEl.className = 'tmpl-slide-list';
+        container.appendChild(listEl);
+
+        function _assignFiles(files) {
+            for (let i = 0; i < Math.min(files.length, count); i++) assigned[i] = files[i];
+            _renderList();
+        }
+
+        function _renderList() {
+            listEl.innerHTML = '';
+            slides.forEach((slide, i) => {
+                const file = assigned[i];
+                const row = document.createElement('div');
+                row.className = 'tmpl-slide-row';
+
+                const lbl = document.createElement('div');
+                lbl.className = 'tmpl-slide-row-lbl';
+                lbl.textContent = `${i + 1}. ${slide.type === 'video' ? '🎬' : '🖼'}`;
+                row.appendChild(lbl);
+
+                if (file) {
+                    const isVid = file.type.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v|wmv|flv)$/i.test(file.name);
+                    const isImg = !isVid && file.type.startsWith('image/');
+                    if (isImg || isVid) {
+                        const thumb = document.createElement(isVid ? 'video' : 'img');
+                        thumb.className = 'tmpl-dnd-thumb';
+                        if (isVid) { thumb.muted = true; thumb.preload = 'metadata'; }
+                        thumb.src = URL.createObjectURL(file);
+                        row.appendChild(thumb);
+                    }
+                    const info = document.createElement('div');
+                    info.className = 'tmpl-dnd-file-info';
+                    const fn = document.createElement('div');
+                    fn.className = 'tmpl-dnd-fname'; fn.textContent = file.name;
+                    info.appendChild(fn);
+                    if (isVid) {
+                        const durEl = document.createElement('div');
+                        durEl.className = 'tmpl-dnd-dur'; durEl.textContent = '…';
+                        info.appendChild(durEl);
+                        const tmp = document.createElement('video');
+                        tmp.preload = 'metadata';
+                        tmp.onloadedmetadata = () => { durEl.textContent = `${tmp.duration.toFixed(1)} с`; };
+                        tmp.src = URL.createObjectURL(file);
+                    }
+                    row.appendChild(info);
+                    const clrBtn = document.createElement('button');
+                    clrBtn.className = 'btn btn-sm'; clrBtn.type = 'button'; clrBtn.textContent = '×';
+                    clrBtn.title = 'Убрать файл'; clrBtn.style.flexShrink = '0';
+                    clrBtn.onclick = () => { assigned[i] = null; _renderList(); };
+                    row.appendChild(clrBtn);
+                } else {
+                    const ph = document.createElement('div');
+                    ph.className = 'tmpl-slide-row-empty'; ph.textContent = 'из шаблона';
+                    row.appendChild(ph);
+                    const fi = document.createElement('input');
+                    fi.type = 'file'; fi.style.display = 'none';
+                    fi.accept = slide.type === 'video' ? 'video/*' : 'image/*,video/*';
+                    fi.onchange = () => { if (fi.files?.[0]) { assigned[i] = fi.files[0]; _renderList(); } };
+                    row.appendChild(fi);
+                    const pb = document.createElement('button');
+                    pb.className = 'btn btn-sm'; pb.type = 'button'; pb.textContent = 'Выбрать';
+                    pb.style.flexShrink = '0'; pb.onclick = () => fi.click();
+                    row.appendChild(pb);
+                }
+                listEl.appendChild(row);
+            });
+        }
+        _renderList();
+
+        container.getSelections = () => assigned.map(f => f ? { type: 'new', file: f } : { type: 'skip' });
+        return container;
     }
 
     function _tmplApplyModal(tmpl, { hasSlides, hasAudio, hasPip, hasSubs }) {
@@ -3060,71 +3213,39 @@ export async function init() {
             document.getElementById('tmpl-modal-name').textContent =
                 tmpl.name.replace(/ \(шаблон\)$/, '');
 
-            // ── Build existing-media lists ─────────────────────────────────
-            const existingMedia = S.clips.map(c => ({
-                id:    c.id,
-                label: `${c.type === 'video' ? '🎬' : '🖼'} ${c.original || c.file}`,
-            }));
-            const existingAudio = S.audioTracks.map(t => ({
-                id:    t.id,
-                label: `♪ ${t.original || t.file}`,
-                fileUrl: t.fileUrl,
-            }));
-            const existingPip = S.pipLayers.map(p => ({
-                id:    p.id,
-                label: `PIP ${p.original || p.file}`,
-            }));
-
-            // ── Slides section ─────────────────────────────────────────────
+            // ── Slides ──────────────────────────────────────────────────────
             const slotsSection = document.getElementById('tmpl-slots-section');
             slotsSection.innerHTML = '';
-            const slideWidgets = [];
+            let slidesDndArea = null;
             if (hasSlides) {
                 const header = document.createElement('div');
                 header.style.cssText = 'font-weight:600;font-size:13px;margin-bottom:8px';
                 header.textContent = `Медиаслайды (${(tmpl.slides||[]).length})`;
                 slotsSection.appendChild(header);
-
-                (tmpl.slides || []).forEach((slide, i) => {
-                    const isVid = slide.type === 'video';
-                    const row = document.createElement('div');
-                    row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px';
-
-                    const lbl = document.createElement('span');
-                    lbl.style.cssText = 'font-size:11px;color:var(--text-dim);min-width:90px;white-space:nowrap';
-                    lbl.textContent = `${i + 1}. ${isVid ? '🎬 Видео' : '🖼 Изображение'}`;
-
-                    const accept = isVid ? 'video/*' : 'image/*,video/*';
-                    const widget = _makeSlotWidget(existingMedia, accept, `слайд ${i + 1}`);
-                    widget.style.flex = '1';
-
-                    row.appendChild(lbl);
-                    row.appendChild(widget);
-                    slotsSection.appendChild(row);
-                    slideWidgets.push(widget);
-                });
+                slidesDndArea = _makeSlidesDndArea(tmpl.slides || []);
+                slotsSection.appendChild(slidesDndArea);
             }
 
-            // ── Subtitles info ─────────────────────────────────────────────
+            // ── Subtitles info ───────────────────────────────────────────────
             document.getElementById('tmpl-sub-section').style.display = hasSubs ? '' : 'none';
 
-            // ── Audio section ──────────────────────────────────────────────
+            // ── Audio ────────────────────────────────────────────────────────
             document.getElementById('tmpl-audio-section').style.display = hasAudio ? '' : 'none';
             const audioSlot = document.getElementById('tmpl-audio-slot');
             audioSlot.innerHTML = '';
             let audioWidget = null;
             if (hasAudio) {
-                audioWidget = _makeSlotWidget(existingAudio, 'audio/*', 'аудиодорожка');
+                audioWidget = _makeDndSlot('audio/*', '🎵', 'аудиофайл');
                 audioSlot.appendChild(audioWidget);
             }
 
-            // ── PIP section ────────────────────────────────────────────────
+            // ── PIP ──────────────────────────────────────────────────────────
             document.getElementById('tmpl-pip-section').style.display = hasPip ? '' : 'none';
             const pipSlot = document.getElementById('tmpl-pip-slot');
             pipSlot.innerHTML = '';
             let pipWidget = null;
             if (hasPip) {
-                pipWidget = _makeSlotWidget(existingPip, 'image/*,video/*', 'PIP файл');
+                pipWidget = _makeDndSlot('image/*,video/*', '📽', 'PIP файл');
                 pipSlot.appendChild(pipWidget);
             }
 
@@ -3138,7 +3259,7 @@ export async function init() {
 
             document.getElementById('tmpl-cancel-btn').onclick = () => close(null);
             document.getElementById('tmpl-apply-btn').onclick  = () => close({
-                slideSelections: slideWidgets.map(w => w.getSelection()),
+                slideSelections: slidesDndArea ? slidesDndArea.getSelections() : [],
                 audioSelection:  audioWidget ? audioWidget.getSelection() : { type: 'skip' },
                 pipSelection:    pipWidget   ? pipWidget.getSelection()   : { type: 'skip' },
             });
