@@ -69,15 +69,21 @@
     outline: none;
     cursor: pointer;
     border: none;
-    background: var(--border);
-    accent-color: var(--accent);
     display: block;
+    --seek-fill: 0%;
+    /* Fallback for browsers where the track pseudo-element doesn't inherit custom props */
+    background: linear-gradient(to right,
+        var(--accent) 0%, var(--accent) var(--seek-fill),
+        var(--border) var(--seek-fill), var(--border) 100%);
 }
 
+/* Chrome/Safari: track pseudo-element reads --seek-fill from parent input */
 .audio-player .ap-seek-bar::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: 2px;
-    background: var(--border);
+    background: linear-gradient(to right,
+        var(--accent) 0%, var(--accent) var(--seek-fill),
+        var(--border) var(--seek-fill), var(--border) 100%);
 }
 
 .audio-player .ap-seek-bar::-webkit-slider-thumb {
@@ -98,11 +104,18 @@
     transform: scale(1.25);
 }
 
+/* Firefox: native progress fill via -moz-range-progress */
 .audio-player .ap-seek-bar::-moz-range-track {
     height: 4px;
     border-radius: 2px;
     background: var(--border);
     border: none;
+}
+
+.audio-player .ap-seek-bar::-moz-range-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--accent);
 }
 
 .audio-player .ap-seek-bar::-moz-range-thumb {

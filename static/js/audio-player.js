@@ -130,12 +130,21 @@ export class AudioPlayer {
         this._wave = wave;
         wave.load(url);
 
+        // ── Seek bar fill ────────────────────────────────────────────────────
+        // Uses a CSS custom property so the gradient reaches the
+        // ::-webkit-slider-runnable-track pseudo-element (inline style can't).
+        const _setSeekFill = (ratio) => {
+            seekBar.style.setProperty('--seek-fill', (ratio * 100).toFixed(3) + '%');
+        };
+        _setSeekFill(0);
+
         // ── Unified UI sync ──────────────────────────────────────────────────
         // Called with actual currentTime + duration; updates all visual elements.
         const _syncUI = (cur, dur) => {
             const r = dur > 0 ? cur / dur : 0;
             wave.setProgress(r);
             seekBar.value = r;
+            _setSeekFill(r);
             curEl.textContent = fmt(cur);
         };
 
@@ -152,25 +161,17 @@ export class AudioPlayer {
         };
 
         // ── Seek bar (range input) ───────────────────────────────────────────
-        // `input` fires continuously during drag → preview waveform + time.
-        // `change` fires on release → commit to audio.currentTime.
-        let seekBarDragging = false;
-        seekBar.addEventListener('mousedown', () => { seekBarDragging = true; });
+        // `input` fires on every drag pixel — set currentTime immediately so
+        // the RAF reads the same position and doesn't snap back.
         seekBar.addEventListener('input', () => {
             const dur = audio.duration;
             if (!isFinite(dur) || dur <= 0) return;
             const ratio = parseFloat(seekBar.value);
+            audio.currentTime = ratio * dur;   // ← keep audio in sync with slider
             wave.setProgress(ratio);
+            _setSeekFill(ratio);
             curEl.textContent = fmt(ratio * dur);
         });
-        seekBar.addEventListener('change', () => {
-            const dur = audio.duration;
-            if (!isFinite(dur) || dur <= 0) return;
-            audio.currentTime = parseFloat(seekBar.value) * dur;
-            seekBarDragging = false;
-        });
-        // Safety: clear drag flag on mouseup anywhere
-        document.addEventListener('mouseup', () => { seekBarDragging = false; }, { once: false });
 
         // ── Waveform hover ───────────────────────────────────────────────────
         wave.onHover((ratio) => {
@@ -218,20 +219,19 @@ export class AudioPlayer {
             playBtn.setAttribute('aria-label', 'Воспроизвести');
             wave.setProgress(0);
             seekBar.value = 0;
+            _setSeekFill(0);
             curEl.textContent = '0:00';
             audioManager.stop(this);
             this._emit('ended');
         });
 
-        // Fired by browser on seek (even while paused) — keeps UI in sync
-        // after skip-back/forward clicks when audio is paused.
+        // Keeps UI in sync after skip-back/forward when audio is paused
+        // (RAF is stopped when paused, so timeupdate is the only update path).
         audio.addEventListener('timeupdate', () => {
-            if (!seekBarDragging) {
-                const dur = audio.duration;
-                const cur = audio.currentTime;
-                if (isFinite(dur) && dur > 0 && audio.paused) {
-                    _syncUI(cur, dur);
-                }
+            const dur = audio.duration;
+            const cur = audio.currentTime;
+            if (isFinite(dur) && dur > 0 && audio.paused) {
+                _syncUI(cur, dur);
             }
         });
 
