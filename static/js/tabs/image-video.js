@@ -1,7 +1,7 @@
 import { log }             from '../logger.js';
 import { toast }           from '../toast.js';
 import { synthesizeStream } from '../api.js';
-import { openConfirm }     from '../modal.js';
+import { openConfirm, openPrompt } from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
@@ -28,6 +28,8 @@ const S = {
     pipLayers: [],
     // Preview dimensions (set by _updatePreviewSize, used for subtitle scaling)
     previewH: 0, previewW: 0,
+    // Template edit mode
+    isTemplateMode: false, editingTemplateId: null,
 };
 
 // ── Audio element pool ────────────────────────────────────────────────────────
@@ -504,12 +506,20 @@ export async function init() {
     $('ive-save-template-btn')?.addEventListener('click', async () => {
         if (!S.projectId) { await _saveProject(); }
         if (!S.projectId) { toast('Сначала сохраните проект', 'warn'); return; }
+        const suggestedName = (S.projectName || 'Шаблон').trim();
+        const name = await openPrompt({ title: 'Сохранить как шаблон', initial: suggestedName, confirmLabel: 'Сохранить' });
+        if (name === null) return;
         try {
-            const r = await fetch(`/api/imgvid/projects/${S.projectId}/save-as-template`, { method: 'POST' });
+            const r = await fetch(`/api/imgvid/projects/${S.projectId}/save-as-template`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() || suggestedName }),
+            });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            toast('Сохранено как шаблон: ' + d.name, 'ok');
+            toast('Шаблон сохранён: ' + d.name, 'ok');
             await loadTemplatesList();
+            _switchSidebarTab('templates');
         } catch (e) { toast(e.message, 'err'); }
     });
     // .amur save/open
@@ -604,6 +614,19 @@ export async function init() {
             case 'Delete': case 'Backspace':
                 if (S.selIdx >= 0) { e.preventDefault(); _deleteSelectedClip(); }             break;
         }
+    });
+
+    // ── Sidebar sub-tabs (Projects / Templates) ───────────────────────────────
+    function _switchSidebarTab(name) {
+        document.querySelectorAll('.ive-stab').forEach(b => {
+            b.classList.toggle('active', b.dataset.stab === name);
+        });
+        document.querySelectorAll('.ive-stab-pane').forEach(p => {
+            p.style.display = p.dataset.stabpane === name ? '' : 'none';
+        });
+    }
+    document.querySelectorAll('.ive-stab').forEach(b => {
+        b.addEventListener('click', () => _switchSidebarTab(b.dataset.stab));
     });
 
     // ── Boot ──────────────────────────────────────────────────────────────────
@@ -2944,7 +2967,7 @@ export async function init() {
     async function _applyTemplate(tid) {
         let tmpl;
         try {
-            const r = await fetch(`/api/imgvid/projects/${tid}`);
+            const r = await fetch(`/api/imgvid/templates/${tid}`);
             if (!r.ok) { toast('Ошибка загрузки шаблона', 'err'); return; }
             tmpl = await r.json();
         } catch (err) { toast(err.message, 'err'); return; }
@@ -3074,6 +3097,7 @@ export async function init() {
             // ── Apply to state ───────────────────────────────────────────────────
             S.projectId   = null;
             S.projectName = tmpl.name.replace(/ \(шаблон\)$/, '');
+            S.isTemplateMode = false; S.editingTemplateId = null;
             S.clips       = newClips;
             S.audioTracks = newAudio;
             S.subtitles   = newSubs;
@@ -3085,6 +3109,7 @@ export async function init() {
             S.dirty       = true;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(tmpl.export_settings);
+            _updateSaveBtn();
             renderAll();
             log('Шаблон применён: ' + S.projectName, 'done');
             toast('Шаблон применён: ' + S.projectName, 'ok');
@@ -3096,6 +3121,14 @@ export async function init() {
         }
     }
 
+    function _fmtDate(iso) {
+        if (!iso) return '';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        } catch { return ''; }
+    }
+
     async function loadTemplatesList() {
         const listEl = $('ive-templates-list');
         if (!listEl) return;
@@ -3105,11 +3138,14 @@ export async function init() {
             const tmpls = data.templates || [];
             if (!tmpls.length) { listEl.innerHTML = '<div class="ive-empty">Нет шаблонов</div>'; return; }
             listEl.innerHTML = tmpls.map(t => `
-            <div class="ive-proj-row" data-tid="${t.id}">
+            <div class="ive-proj-row${S.isTemplateMode && S.editingTemplateId === t.id ? ' active' : ''}" data-tid="${t.id}">
                 <div class="ive-proj-name">${eh(t.name)}</div>
-                <div class="ive-proj-meta">${t.slide_count} · ${t.total_duration}с</div>
+                <div class="ive-proj-meta">${t.slide_count} сл. · ${t.total_duration}с · ${_fmtDate(t.updated_at)}</div>
                 <div class="ive-proj-btns">
-                    <button class="hist-btn accent" data-tact="use" title="Использовать шаблон">${ICONS.edit}</button>
+                    <button class="hist-btn accent" data-tact="use" title="Применить шаблон">${ICONS.edit}</button>
+                    <button class="hist-btn" data-tact="edit" title="Редактировать шаблон">${ICONS.open}</button>
+                    <button class="hist-btn" data-tact="rename" title="Переименовать">${ICONS.pencil}</button>
+                    <button class="hist-btn" data-tact="dup" title="Дублировать">${ICONS.copy}</button>
                     <button class="hist-btn danger" data-tact="del" title="Удалить">${ICONS.trash}</button>
                 </div>
             </div>`).join('');
@@ -3134,6 +3170,7 @@ export async function init() {
             const d = await r.json();
             _stopPlayback();
             S.projectId = d.id; S.projectName = d.name;
+            S.isTemplateMode = false; S.editingTemplateId = null;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
             // Load independent subtitles
             S.subtitles = d.subtitles || [];
@@ -3163,6 +3200,7 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
+            _updateSaveBtn();
             renderAll(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -3175,17 +3213,97 @@ export async function init() {
         if (act === 'del') {
             const ok = await openConfirm({ title: 'Удалить', message: 'Удалить шаблон?', confirmLabel: 'Удалить' });
             if (!ok) return;
-            await fetch(`/api/imgvid/projects/${tid}`, { method: 'DELETE' });
+            await fetch(`/api/imgvid/templates/${tid}`, { method: 'DELETE' });
             log('Шаблон удалён', 'done');
+            if (S.editingTemplateId === tid) { S.isTemplateMode = false; S.editingTemplateId = null; _updateSaveBtn(); }
             await loadTemplatesList(); return;
         }
         if (act === 'use') {
-            await _applyTemplate(tid);
+            await _applyTemplate(tid); return;
+        }
+        if (act === 'edit') {
+            await _editTemplate(tid); return;
+        }
+        if (act === 'rename') {
+            const tmplName = row.querySelector('.ive-proj-name')?.textContent || '';
+            const newName = await openPrompt({ title: 'Переименовать шаблон', initial: tmplName, confirmLabel: 'Сохранить' });
+            if (newName === null || !newName.trim()) return;
+            try {
+                const r = await fetch(`/api/imgvid/templates/${tid}/rename`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName.trim() }),
+                });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                toast('Шаблон переименован: ' + d.name, 'ok');
+                await loadTemplatesList();
+            } catch (err) { toast(err.message, 'err'); }
+            return;
+        }
+        if (act === 'dup') {
+            try {
+                const r = await fetch(`/api/imgvid/templates/${tid}/duplicate`, { method: 'POST' });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                toast('Шаблон продублирован: ' + d.name, 'ok');
+                await loadTemplatesList();
+            } catch (err) { toast(err.message, 'err'); }
+            return;
         }
     });
 
     // ── Save ──────────────────────────────────────────────────────────────────
+    function _updateSaveBtn() {
+        if (saveBtn) saveBtn.textContent = S.isTemplateMode ? 'Сохранить шаблон' : 'Сохранить';
+    }
+
+    async function _editTemplate(tid) {
+        if (S.dirty && !confirm('Несохранённые изменения. Открыть шаблон для редактирования?')) return;
+        try {
+            const r = await fetch(`/api/imgvid/templates/${tid}`);
+            if (!r.ok) { toast('Шаблон не найден', 'err'); return; }
+            const d = await r.json();
+            _stopPlayback();
+            S.projectId = null;
+            S.isTemplateMode = true;
+            S.editingTemplateId = tid;
+            S.projectName = d.name;
+            S.clips = d.slides || [];
+            S.audioTracks = d.audio || [];
+            S.subtitles = d.subtitles || [];
+            _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
+            _pipEls.clear();
+            S.pipLayers = d.pip || d.pipLayers || [];
+            S.selPipIdx = -1; S.selIdxs = new Set();
+            S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
+            _applyExportSettings(d.export_settings);
+            _updateSaveBtn();
+            renderAll();
+            await loadTemplatesList();
+            toast('Шаблон открыт для редактирования', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+    }
+
     async function _saveProject() {
+        if (S.isTemplateMode && S.editingTemplateId) {
+            // Save back to template
+            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, export_settings: _getExportSettings() };
+            try {
+                const r = await fetch(`/api/imgvid/templates/${S.editingTemplateId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const d = await r.json();
+                if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+                S.dirty = false;
+                toast('Шаблон сохранён', 'ok'); log('Шаблон сохранён: ' + S.projectName, 'done');
+                await loadTemplatesList();
+            } catch (err) { toast(err.message, 'err'); }
+            return;
+        }
         const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, export_settings: _getExportSettings() };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
@@ -3334,9 +3452,11 @@ export async function init() {
         S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
         S.selPipIdx = -1; S.selIdxs = new Set();
         S.pipLayers = [];
+        S.isTemplateMode = false; S.editingTemplateId = null;
         S.dirty = false; S.currentTime = 0;
         _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
         _pipEls.clear();
+        _updateSaveBtn();
     }
 
     // → imgvid/export.js (getExportSettings)

@@ -25,10 +25,11 @@ AUDIO_DIR    = os.path.join(IMGVID_DIR, "audio")
 CLIPS_DIR    = os.path.join(IMGVID_DIR, "clips")
 THUMBS_DIR   = os.path.join(IMGVID_DIR, "thumbs")
 PROJECTS_DIR = os.path.join(IMGVID_DIR, "projects")
+TEMPLATES_DIR       = os.path.join(IMGVID_DIR, "templates")
 OUTPUT_DIR          = os.path.join(IMGVID_DIR, "output")
 SAVED_PROJECTS_DIR  = os.path.join(BASE_DIR, ".outputs", "saved_projects")
 
-for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, OUTPUT_DIR, SAVED_PROJECTS_DIR]:
+for _d in [IMAGES_DIR, AUDIO_DIR, CLIPS_DIR, THUMBS_DIR, PROJECTS_DIR, TEMPLATES_DIR, OUTPUT_DIR, SAVED_PROJECTS_DIR]:
     os.makedirs(_d, exist_ok=True)
 
 _proj_ops.IMAGES_DIR   = IMAGES_DIR
@@ -237,8 +238,12 @@ async def delete_project(pid: str):
     return {"ok": True}
 
 
+class TemplateSaveBody(BaseModel):
+    name: str = ""
+
+
 @router.post("/projects/{pid}/save-as-template")
-async def save_project_as_template(pid: str):
+async def save_project_as_template(pid: str, body: TemplateSaveBody = TemplateSaveBody()):
     src = os.path.join(PROJECTS_DIR, f"{pid}.json")
     if not os.path.exists(src):
         raise HTTPException(404, "Проект не найден")
@@ -246,37 +251,147 @@ async def save_project_as_template(pid: str):
         data = json.load(f)
     new_id = uuid.uuid4().hex
     now = datetime.datetime.now().isoformat()
+    given_name = (body.name or "").strip() or (data.get("name", "Шаблон") + " (шаблон)")
     template = {**data, "id": new_id, "is_template": True,
                 "created_at": now, "updated_at": now,
-                "name": data.get("name", "Шаблон") + " (шаблон)"}
-    tpath = os.path.join(PROJECTS_DIR, f"{new_id}.json")
+                "name": given_name}
+    tpath = os.path.join(TEMPLATES_DIR, f"{new_id}.json")
     with open(tpath, "w", encoding="utf-8") as f:
         json.dump(template, f, ensure_ascii=False, indent=2)
     app_log(f"Project saved as template: {template['name']}", "INFO", "ImgVid")
     return {"id": new_id, "name": template["name"]}
 
 
+def _tmpl_path(tid: str) -> str:
+    """Return path to template file, checking TEMPLATES_DIR first then PROJECTS_DIR for backward compat."""
+    p = os.path.join(TEMPLATES_DIR, f"{tid}.json")
+    if os.path.exists(p):
+        return p
+    p2 = os.path.join(PROJECTS_DIR, f"{tid}.json")
+    if os.path.exists(p2):
+        return p2
+    return p  # non-existent path in new dir
+
+
 @router.get("/templates")
 async def list_templates():
     items = []
-    for fn in sorted(os.listdir(PROJECTS_DIR), reverse=True):
-        if not fn.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(PROJECTS_DIR, fn), encoding="utf-8") as f:
-                d = json.load(f)
-            if not d.get("is_template"):
+    seen = set()
+    # New directory first
+    for folder in [TEMPLATES_DIR, PROJECTS_DIR]:
+        for fn in sorted(os.listdir(folder), reverse=True):
+            if not fn.endswith(".json"):
                 continue
-            items.append({
-                "id":             d.get("id", fn[:-5]),
-                "name":           d.get("name", "Шаблон"),
-                "updated_at":     d.get("updated_at", ""),
-                "slide_count":    len(d.get("slides", [])),
-                "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
-            })
+            try:
+                with open(os.path.join(folder, fn), encoding="utf-8") as f:
+                    d = json.load(f)
+                if folder == PROJECTS_DIR and not d.get("is_template"):
+                    continue
+                tid = d.get("id", fn[:-5])
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                items.append({
+                    "id":             tid,
+                    "name":           d.get("name", "Шаблон"),
+                    "created_at":     d.get("created_at", ""),
+                    "updated_at":     d.get("updated_at", ""),
+                    "slide_count":    len(d.get("slides", [])),
+                    "total_duration": round(sum(s.get("duration", 3) for s in d.get("slides", [])), 1),
+                })
+            except Exception:
+                pass
+    return {"templates": items}
+
+
+@router.get("/templates/{tid}")
+async def get_template(tid: str):
+    path = _tmpl_path(tid)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Шаблон не найден")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@router.put("/templates/{tid}")
+async def update_template(tid: str, body: ProjectBody):
+    path = _tmpl_path(tid)
+    now = datetime.datetime.now().isoformat()
+    existing_created = now
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing_created = json.load(f).get("created_at", now)
         except Exception:
             pass
-    return {"templates": items}
+    # Always write to TEMPLATES_DIR
+    dest = os.path.join(TEMPLATES_DIR, f"{tid}.json")
+    data = {
+        "id": tid, "name": body.name,
+        "created_at": existing_created, "updated_at": now,
+        "slides": body.slides, "audio": body.audio,
+        "subtitles": body.subtitles,
+        "pip": body.pip,
+        "export_settings": body.export_settings,
+        "is_template": True,
+    }
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    # Remove from old PROJECTS_DIR if it was there
+    old = os.path.join(PROJECTS_DIR, f"{tid}.json")
+    if os.path.exists(old):
+        os.remove(old)
+    app_log(f"Template saved: {body.name}", "INFO", "ImgVid")
+    return {"id": tid, "status": f"Шаблон сохранён: {body.name}"}
+
+
+@router.delete("/templates/{tid}")
+async def delete_template(tid: str):
+    for folder in [TEMPLATES_DIR, PROJECTS_DIR]:
+        p = os.path.join(folder, f"{tid}.json")
+        if os.path.exists(p):
+            os.remove(p)
+    app_log(f"Template deleted: {tid}", "INFO", "ImgVid")
+    return {"ok": True}
+
+
+@router.patch("/templates/{tid}/rename")
+async def rename_template(tid: str, body: dict):
+    path = _tmpl_path(tid)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Шаблон не найден")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["name"] = body.get("name", data["name"])
+    data["updated_at"] = datetime.datetime.now().isoformat()
+    # Write to TEMPLATES_DIR
+    dest = os.path.join(TEMPLATES_DIR, f"{tid}.json")
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    # Clean up old location if different
+    if path != dest and os.path.exists(path):
+        os.remove(path)
+    app_log(f"Template renamed: {data['name']}", "INFO", "ImgVid")
+    return {"id": tid, "name": data["name"]}
+
+
+@router.post("/templates/{tid}/duplicate")
+async def duplicate_template(tid: str):
+    path = _tmpl_path(tid)
+    if not os.path.exists(path):
+        raise HTTPException(404, "Шаблон не найден")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    new_id = uuid.uuid4().hex
+    now = datetime.datetime.now().isoformat()
+    copy = {**data, "id": new_id,
+            "name": data.get("name", "Шаблон") + " (копия)",
+            "created_at": now, "updated_at": now, "is_template": True}
+    dest = os.path.join(TEMPLATES_DIR, f"{new_id}.json")
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(copy, f, ensure_ascii=False, indent=2)
+    app_log(f"Template duplicated: {copy['name']}", "INFO", "ImgVid")
+    return {"id": new_id, "name": copy["name"]}
 
 # ── .project format (pack/unpack) ─────────────────────────────────────────────
 

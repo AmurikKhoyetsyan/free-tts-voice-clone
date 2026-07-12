@@ -778,24 +778,19 @@
                 <aside class="ive-sidebar">
                     <div class="ive-sidebar-inner">
 
-                        <!-- Projects -->
+                        <!-- Projects / Templates tabbed panel -->
                         <div class="ive-panel">
-                            <div class="ive-panel-hdr">
-                                <span>Проекты</span>
-                                <div style="display:flex;gap:3px">
+                            <div class="ive-panel-hdr" style="flex-direction:column;align-items:stretch;gap:4px">
+                                <div style="display:flex;align-items:center;justify-content:space-between">
+                                    <div class="ive-sidebar-tabs">
+                                        <button class="ive-stab active" id="ive-stab-projects" data-stab="projects">Проекты</button>
+                                        <button class="ive-stab" id="ive-stab-templates" data-stab="templates">Шаблоны</button>
+                                    </div>
                                     <button class="btn btn-sm" id="ive-new-btn">+ Новый</button>
-                                    <button class="btn btn-sm" id="ive-save-template-btn" title="Сохранить как шаблон">💾 Шаблон</button>
                                 </div>
                             </div>
-                            <div id="ive-projects-list" class="ive-projects-list"></div>
-                        </div>
-
-                        <!-- Templates -->
-                        <div class="ive-panel">
-                            <div class="ive-panel-hdr">
-                                <span>Шаблоны</span>
-                            </div>
-                            <div id="ive-templates-list" class="ive-projects-list"></div>
+                            <div id="ive-projects-list" class="ive-projects-list ive-stab-pane" data-stabpane="projects"></div>
+                            <div id="ive-templates-list" class="ive-projects-list ive-stab-pane" data-stabpane="templates" style="display:none"></div>
                         </div>
 
                         <!-- Media library -->
@@ -917,6 +912,7 @@
                         <div class="ive-project-name-wrap">
                             <input class="ive-input" type="text" id="ive-project-name" placeholder="Название проекта" value="Новый проект">
                             <button class="btn" id="ive-save-btn">Сохранить</button>
+                            <button class="btn btn-sm" id="ive-save-template-btn" title="Сохранить как шаблон">+ Шаблон</button>
                             <button class="btn btn-sm" id="ive-save-amur-btn" title="Сохранить проект как .project">⬇ .project</button>
                             <button class="btn btn-sm" id="ive-open-amur-btn" title="Открыть .project проект">↑ .project</button>
                         </div>
