@@ -158,8 +158,12 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
 }
-.ive-sub-text-inner { display: block; width: 100%; }
+.ive-sub-overlay:active { cursor: grabbing; }
+.ive-sub-text-inner { display: block; width: 100%; user-select: none; -webkit-user-select: none; }
 .ive-sub-overlay.selected {
     outline: 2px dashed rgba(255, 210, 0, 0.95);
     outline-offset: 8px;

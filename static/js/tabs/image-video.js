@@ -33,6 +33,10 @@ const S = {
     isTemplateMode: false, editingTemplateId: null,
 };
 
+// ── Undo/Redo history ────────────────────────────────────────────────────────
+const _historyStack = [];
+let _historyIdx = -1;
+
 // ── Audio element pool ────────────────────────────────────────────────────────
 const _audioEls = new Map(); // trackId → HTMLAudioElement
 
@@ -356,6 +360,7 @@ export async function init() {
     subRhE.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
+        _pushHistory();
         const rect = previewContent.getBoundingClientRect();
         const sx = e.clientX;
         const w0 = sub.w > 0 ? sub.w : 50;
@@ -373,6 +378,7 @@ export async function init() {
     subRhS.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
+        _pushHistory();
         const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
         const sy = e.clientY;
@@ -391,6 +397,7 @@ export async function init() {
     subRhSE.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
+        _pushHistory();
         const rect = previewContent.getBoundingClientRect();
         const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
@@ -418,6 +425,7 @@ export async function init() {
         const sub = subOverlay._activeSub;
         if (!sub) return;
         e.stopPropagation(); e.preventDefault();
+        _pushHistory();
         _subDragging = true;
         _subDx0 = e.clientX; _subDy0 = e.clientY;
         _subX0 = sub.x ?? 50; _subY0 = sub.y ?? 88;
@@ -573,7 +581,7 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
-            renderAll(); await loadProjectsList();
+            renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
     });
@@ -595,7 +603,7 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
-            renderAll(); await loadProjectsList();
+            renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
     });
@@ -741,6 +749,12 @@ export async function init() {
             if (hasAnySelection) { e.preventDefault(); _deleteSelectedClip(); }
             break;
         }
+        case 'z': case 'Z':
+            if (e.ctrlKey && e.shiftKey) { e.preventDefault(); _redo(); }
+            else if (e.ctrlKey) { e.preventDefault(); _undo(); }
+            break;
+        case 'y': case 'Y':
+            if (e.ctrlKey) { e.preventDefault(); _redo(); }                                    break;
         case 'a': case 'A':
             if (e.ctrlKey) { e.preventDefault(); _selectAll(); }                               break;
         case 'Escape':
@@ -777,6 +791,8 @@ export async function init() {
     await loadProjectsList();
     await loadTemplatesList();
     renderAll();
+    // Initialize history with empty baseline so first Ctrl+Z has a state to return to
+    _pushHistory();
 
     // Size the preview content to match the selected export resolution aspect ratio
     // → imgvid/preview.js (updateCustomResVis)
@@ -825,6 +841,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/images', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
+                _pushHistory();
                 S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
                 S.dirty = true; log('Изображение добавлено: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
@@ -841,6 +858,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/clips', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
+                _pushHistory();
                 S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
                 S.dirty = true; log('Видеоклип добавлен: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
@@ -855,6 +873,7 @@ export async function init() {
             const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            _pushHistory();
             const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: 0, trimIn: 0 };
             S.audioTracks.push(track);
             S.dirty = true; log('Аудио добавлено: ' + d.original, 'done');
@@ -1180,6 +1199,7 @@ export async function init() {
                 const del = e.target.closest('[data-mdel]');
                 if (del) {
                     const k = del.dataset.mdel, i = +del.dataset.mdi;
+                    _pushHistory();
                     if (k === 'clip') { S.clips.splice(i, 1); if (S.selIdx >= S.clips.length) S.selIdx = S.clips.length - 1; }
                     else { S.audioTracks.splice(i, 1); if (S.selAudioIdx >= S.audioTracks.length) S.selAudioIdx = -1; }
                     S.dirty = true; renderAll(); return;
@@ -1296,6 +1316,7 @@ export async function init() {
                         cur2 += S.clips[j].duration || 3;
                     }
                     if (dropIdx !== i && dropIdx !== i + 1) {
+                        _pushHistory();
                         const [moved2] = S.clips.splice(i, 1);
                         const finalIdx = dropIdx > i ? dropIdx - 1 : dropIdx;
                         S.clips.splice(finalIdx, 0, moved2);
@@ -1307,6 +1328,7 @@ export async function init() {
             });
             div.querySelector('.ive-tl-clip-resize')?.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
+                _pushHistory();
                 const sx = e.clientX, sd = clip.duration;
                 const onMove = ev => {
                     clip.duration = Math.max(0.5, Math.round((sd + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
@@ -1320,6 +1342,7 @@ export async function init() {
             if (clip.type === 'video') {
                 div.querySelector('.ive-tl-clip-resize-left')?.addEventListener('mousedown', e => {
                     e.stopPropagation(); e.preventDefault();
+                    _pushHistory();
                     const sx = e.clientX, sTrimIn = clip.trimIn || 0, sDur = clip.duration;
                     const outPt = sTrimIn + sDur;
                     const onMove = ev => {
@@ -1425,17 +1448,27 @@ export async function init() {
                     S.activeTab = 'slide'; renderTimeline(); renderProps();
                     return;
                 }
-                S.selAudioIdx = i; S.selAudioIdxs = new Set([i]);
-                S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                // Preserve multi-selection if the clicked item is already selected
+                if (!S.selAudioIdxs.has(i)) {
+                    S.selAudioIdx = i; S.selAudioIdxs = new Set([i]);
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
+                } else {
+                    S.selAudioIdx = i;
+                }
                 S.activeTab = 'slide'; renderTimeline(); renderProps();
-                const sx = e.clientX, sOff = track.startOffset || 0;
+                const sx = e.clientX;
+                const _dragIds = [...S.selAudioIdxs];
+                const _dragOffs = _dragIds.map(idx => S.audioTracks[idx]?.startOffset || 0);
                 let moved = false;
                 const onMove = ev => {
                     if (!moved && Math.abs(ev.clientX - sx) < 4) return;
+                    if (!moved) _pushHistory();
                     moved = true;
                     const dx = (ev.clientX - sx) / S.pxPerSec;
-                    track.startOffset = Math.max(0, Math.round((sOff + dx) * 10) / 10);
-                    S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
+                    _dragIds.forEach((idx, j) => {
+                        if (S.audioTracks[idx]) S.audioTracks[idx].startOffset = Math.max(0, Math.round((_dragOffs[j] + dx) * 10) / 10);
+                    });
+                    S.dirty = true; renderTimeline(); renderProps();
                 };
                 const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
                 document.addEventListener('mousemove', onMove);
@@ -1443,6 +1476,7 @@ export async function init() {
             });
             lh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
+                _pushHistory();
                 const sx = e.clientX, sOff = track.startOffset || 0, sTrimIn = track.trimIn || 0;
                 const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - sOff);
                 const outPt = sOff + sDur;  // keep out-point fixed
@@ -1462,6 +1496,7 @@ export async function init() {
             });
             rh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
+                _pushHistory();
                 const sx = e.clientX;
                 const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
                 const onMove = ev => {
@@ -1517,15 +1552,29 @@ export async function init() {
                 if (e.button !== 0) return;
                 if (e.ctrlKey) return; // Ctrl+click handled by click event
                 e.stopPropagation(); e.preventDefault();
-                const sx = e.clientX, s0 = sub.start || 0, e0 = sub.end || 3;
-                const dur = e0 - s0;
+                const sx = e.clientX;
                 const snapTargets = _getSnapTargets(si, 'sub');
+                // Capture initial positions of all selected subs for group drag
+                const _dragSubIds = S.selSubIdxs.has(si) && S.selSubIdxs.size > 1
+                    ? [...S.selSubIdxs]
+                    : [si];
+                const _dragSubData = _dragSubIds.map(idx => {
+                    const s2 = S.subtitles[idx] || {};
+                    return { idx, start0: s2.start || 0, dur: (s2.end || 3) - (s2.start || 0) };
+                });
+                let moved = false;
                 const onMove = ev => {
+                    if (!moved && Math.abs(ev.clientX - sx) < 3) return;
+                    if (!moved) _pushHistory();
+                    moved = true;
                     const dx = (ev.clientX - sx) / S.pxPerSec;
-                    let newStart = Math.max(0, s0 + dx);
-                    newStart = _snap(newStart, snapTargets);
-                    sub.start = Math.round(newStart * 10) / 10;
-                    sub.end   = Math.round((newStart + dur) * 10) / 10;
+                    _dragSubData.forEach(({ idx, start0, dur: d }) => {
+                        const s2 = S.subtitles[idx]; if (!s2) return;
+                        let newStart = Math.max(0, start0 + dx);
+                        if (_dragSubIds.length === 1) newStart = _snap(newStart, snapTargets);
+                        s2.start = Math.round(newStart * 10) / 10;
+                        s2.end   = Math.round((newStart + d) * 10) / 10;
+                    });
                     S.dirty = true; renderTimeline();
                 };
                 const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
@@ -1537,6 +1586,7 @@ export async function init() {
             rh.className = 'ive-tl-clip-resize';
             rh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
+                _pushHistory();
                 const sx = e.clientX, e0 = sub.end || 3;
                 const onMove = ev => {
                     sub.end = Math.max((sub.start || 0) + 0.1, Math.round((e0 + (ev.clientX - sx) / S.pxPerSec) * 10) / 10);
@@ -2092,6 +2142,7 @@ export async function init() {
         });
 
         $('pv-add-sub').addEventListener('click', () => {
+            _pushHistory();
             const t = S.currentTime;
             S.subtitles.push({ id: uid(), text: '', start: Math.round(t * 10) / 10, end: Math.round((t + 3) * 10) / 10,
                 x: 50, y: 88, w: 0, h: 0, fontFamily: 'Arial', fontSize: 40, color: '#ffffff',
@@ -2766,21 +2817,37 @@ export async function init() {
             e.stopPropagation(); e.preventDefault();
             const rect = previewContent.getBoundingClientRect();
             const sx = e.clientX, sy = e.clientY;
-            const x0 = pip.x || 0, y0 = pip.y || 0;
-            let moved = false;
-            S.selPipIdx = S.pipLayers.indexOf(pip);
+            const pipIdx = S.pipLayers.indexOf(pip);
+            // Preserve multi-selection if this pip is already part of it
+            if (!S.selPipIdxs.has(pipIdx)) {
+                S.selPipIdx = pipIdx;
+                S.selPipIdxs = new Set([pipIdx]);
+            } else {
+                S.selPipIdx = pipIdx;
+            }
             S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
             renderTimeline(); renderProps();
             _positionPipEl(pip, el);
+            // Capture initial positions of all selected PIPs for group drag
+            const _dragPipData = [...S.selPipIdxs].map(pi2 => {
+                const p2 = S.pipLayers[pi2] || {};
+                return { pi: pi2, x0: p2.x || 0, y0: p2.y || 0 };
+            });
+            let moved = false;
             const onMove = ev => {
                 const dx = ev.clientX - sx;
                 const dy = ev.clientY - sy;
                 if (!moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+                if (!moved) _pushHistory();
                 moved = true;
-                pip.x = Math.max(0, Math.min(100, x0 + dx / rect.width * 100));
-                pip.y = Math.max(0, Math.min(100, y0 + dy / rect.height * 100));
+                _dragPipData.forEach(({ pi: pi2, x0: px0, y0: py0 }) => {
+                    const p2 = S.pipLayers[pi2]; if (!p2) return;
+                    p2.x = Math.max(0, Math.min(100, px0 + dx / rect.width * 100));
+                    p2.y = Math.max(0, Math.min(100, py0 + dy / rect.height * 100));
+                    const e2 = _pipEls.get(p2.id);
+                    if (e2) _positionPipEl(p2, e2);
+                });
                 S.dirty = true;
-                _positionPipEl(pip, el);
                 renderTimeline();
             };
             const onUp = () => {
@@ -2809,6 +2876,7 @@ export async function init() {
         wrapper.querySelectorAll('.ive-pip-rh').forEach(handle => {
             handle.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
+                _pushHistory();
                 const dir = handle.dataset.rhdir;
                 const rect = previewContent.getBoundingClientRect();
                 const sx = e.clientX, sy = e.clientY;
@@ -2947,18 +3015,36 @@ export async function init() {
                 renderTimeline(); renderProps(); renderPreview();
             });
 
-            // Drag to move pip
+            // Drag to move pip timing (and all selected PIPs together)
             item.addEventListener('mousedown', e => {
                 if (e.button !== 0 || e.target === rh) return;
                 if (e.ctrlKey) return; // Ctrl+click handled by click event
                 e.preventDefault(); e.stopPropagation();
+                // Preserve multi-selection if this pip is already selected
+                if (!S.selPipIdxs.has(pi)) {
+                    S.selPipIdx = pi; S.selPipIdxs = new Set([pi]);
+                    S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
+                } else {
+                    S.selPipIdx = pi;
+                }
+                renderTimeline(); renderProps();
                 const sx = e.clientX;
-                const s0 = pip.startTime || 0;
-                const dur = (pip.endTime ?? (s0 + 5)) - s0;
+                const _dragPipTL = [...S.selPipIdxs].map(pi2 => {
+                    const p2 = S.pipLayers[pi2] || {};
+                    const st = p2.startTime || 0;
+                    return { pi: pi2, start0: st, dur: (p2.endTime ?? (st + 5)) - st };
+                });
+                let moved = false;
                 const onMove = ev => {
                     const dx = (ev.clientX - sx) / S.pxPerSec;
-                    pip.startTime = Math.max(0, s0 + dx);
-                    pip.endTime   = pip.startTime + dur;
+                    if (!moved && Math.abs(dx * S.pxPerSec) < 3) return;
+                    if (!moved) _pushHistory();
+                    moved = true;
+                    _dragPipTL.forEach(({ pi: pi2, start0, dur: d }) => {
+                        const p2 = S.pipLayers[pi2]; if (!p2) return;
+                        p2.startTime = Math.max(0, start0 + dx);
+                        p2.endTime   = p2.startTime + d;
+                    });
                     S.dirty = true; _renderPipTrack(total);
                 };
                 const onUp = () => {
@@ -2972,6 +3058,7 @@ export async function init() {
             // Resize end time
             rh.addEventListener('mousedown', e => {
                 e.stopPropagation(); e.preventDefault();
+                _pushHistory();
                 const sx = e.clientX;
                 const end0 = pip.endTime ?? ((pip.startTime || 0) + 5);
                 const onMove = ev => {
@@ -3212,6 +3299,7 @@ export async function init() {
             const r = await fetch(endpoint, { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
+            _pushHistory();
             const pip = {
                 id: uid(), file: d.name, fileUrl: d.url, type: isVideo ? 'video' : 'image',
                 original: d.original, startTime: S.currentTime, endTime: S.currentTime + 5,
@@ -4057,7 +4145,51 @@ export async function init() {
         renderMediaList(); _renderVideoTrack(totalDur()); renderProps();
     }
 
+    // ── Undo/Redo ─────────────────────────────────────────────────────────────
+
+    function _pushHistory() {
+        _historyStack.length = _historyIdx + 1;
+        _historyStack.push({
+            clips:       JSON.parse(JSON.stringify(S.clips)),
+            audioTracks: JSON.parse(JSON.stringify(S.audioTracks)),
+            subtitles:   JSON.parse(JSON.stringify(S.subtitles)),
+            pipLayers:   JSON.parse(JSON.stringify(S.pipLayers)),
+        });
+        if (_historyStack.length > 50) { _historyStack.shift(); _historyIdx = 49; }
+        else { _historyIdx = _historyStack.length - 1; }
+    }
+
+    function _restoreSnapshot(snap) {
+        S.clips       = JSON.parse(JSON.stringify(snap.clips));
+        S.audioTracks = JSON.parse(JSON.stringify(snap.audioTracks));
+        S.subtitles   = JSON.parse(JSON.stringify(snap.subtitles));
+        S.pipLayers   = JSON.parse(JSON.stringify(snap.pipLayers));
+        // Remove DOM wrappers for PIPs that no longer exist
+        const validIds = new Set(S.pipLayers.map(p => p.id));
+        for (const [id, el] of [..._pipEls]) {
+            if (!validIds.has(id)) { el.wrapper?.remove(); _pipEls.delete(id); }
+        }
+        _clearAllSelections();
+        S.dirty = true;
+        renderAll();
+    }
+
+    function _undo() {
+        if (_historyIdx <= 0) { toast('Нечего отменять', 'info'); return; }
+        _historyIdx--;
+        _restoreSnapshot(_historyStack[_historyIdx]);
+        toast('Отменено', 'ok');
+    }
+
+    function _redo() {
+        if (_historyIdx >= _historyStack.length - 1) { toast('Нечего повторять', 'info'); return; }
+        _historyIdx++;
+        _restoreSnapshot(_historyStack[_historyIdx]);
+        toast('Повторено', 'ok');
+    }
+
     function _deleteSelectedClip() {
+        _pushHistory();
         let deleted = false;
         // Delete selected clips (all in selIdxs)
         if (S.selIdxs.size > 0) {
@@ -4122,75 +4254,88 @@ export async function init() {
     }
 
     function _selectAll() {
-        if (S.selSubIdx >= 0 || S.selSubIdxs.size > 0 || S.activeTab === 'subs') {
-            if (!S.subtitles.length) return;
-            S.selSubIdxs = new Set(S.subtitles.map((_, i) => i));
-            S.selSubIdx = 0;
-            S.selIdx = -1; S.selIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
-            S.activeTab = 'subs';
-            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
-            document.querySelector('[data-ptab="subs"]')?.classList.add('active');
-        } else if (S.selPipIdx >= 0 || S.selPipIdxs.size > 0) {
-            if (!S.pipLayers.length) return;
-            S.selPipIdxs = new Set(S.pipLayers.map((_, i) => i));
-            S.selPipIdx = 0;
-            S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
-        } else if (S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0) {
-            if (!S.audioTracks.length) return;
-            S.selAudioIdxs = new Set(S.audioTracks.map((_, i) => i));
-            S.selAudioIdx = 0;
-            S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
-        } else {
-            if (!S.clips.length) return;
-            S.selIdxs = new Set(S.clips.map((_, i) => i));
-            S.selIdx = 0;
-            S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
-        }
+        const total = S.clips.length + S.audioTracks.length + S.subtitles.length + S.pipLayers.length;
+        if (!total) return;
+        S.selIdxs = new Set(S.clips.map((_, i) => i));
+        S.selIdx = S.clips.length ? 0 : -1;
+        S.selAudioIdxs = new Set(S.audioTracks.map((_, i) => i));
+        S.selAudioIdx = S.audioTracks.length ? 0 : -1;
+        S.selSubIdxs = new Set(S.subtitles.map((_, i) => i));
+        S.selSubIdx = S.subtitles.length ? 0 : -1;
+        S.selPipIdxs = new Set(S.pipLayers.map((_, i) => i));
+        S.selPipIdx = S.pipLayers.length ? 0 : -1;
         renderTimeline(); renderProps();
     }
 
     let _clipboard = null;
 
     function _copySelected() {
-        if (S.selIdxs.size > 0) {
-            _clipboard = { type: 'clips', items: [...S.selIdxs].sort((a,b)=>a-b).map(i => JSON.parse(JSON.stringify(S.clips[i]))) };
-            toast('Скопировано ' + S.selIdxs.size + ' клип(а)', 'ok');
-        } else if (S.selIdx >= 0) {
-            _clipboard = { type: 'clips', items: [JSON.parse(JSON.stringify(S.clips[S.selIdx]))] };
-            toast('Клип скопирован', 'ok');
-        } else if (S.selSubIdxs.size > 0) {
-            _clipboard = { type: 'subs', items: [...S.selSubIdxs].sort((a,b)=>a-b).map(i => JSON.parse(JSON.stringify(S.subtitles[i]))) };
-            toast('Скопировано ' + S.selSubIdxs.size + ' субтитр(а)', 'ok');
-        } else if (S.selSubIdx >= 0) {
-            _clipboard = { type: 'subs', items: [JSON.parse(JSON.stringify(S.subtitles[S.selSubIdx]))] };
-            toast('Субтитр скопирован', 'ok');
-        } else {
-            toast('Ничего не выбрано', 'info');
+        const data = {};
+        let count = 0;
+        if (S.selIdxs.size > 0 || S.selIdx >= 0) {
+            const idxs = S.selIdxs.size > 0 ? [...S.selIdxs].sort((a,b)=>a-b) : [S.selIdx];
+            data.clips = idxs.filter(i => i >= 0 && i < S.clips.length).map(i => JSON.parse(JSON.stringify(S.clips[i])));
+            count += data.clips.length;
         }
+        if (S.selAudioIdxs.size > 0 || S.selAudioIdx >= 0) {
+            const idxs = S.selAudioIdxs.size > 0 ? [...S.selAudioIdxs].sort((a,b)=>a-b) : [S.selAudioIdx];
+            data.audio = idxs.filter(i => i >= 0 && i < S.audioTracks.length).map(i => JSON.parse(JSON.stringify(S.audioTracks[i])));
+            count += data.audio.length;
+        }
+        if (S.selSubIdxs.size > 0 || S.selSubIdx >= 0) {
+            const idxs = S.selSubIdxs.size > 0 ? [...S.selSubIdxs].sort((a,b)=>a-b) : [S.selSubIdx];
+            data.subs = idxs.filter(i => i >= 0 && i < S.subtitles.length).map(i => JSON.parse(JSON.stringify(S.subtitles[i])));
+            count += data.subs.length;
+        }
+        if (S.selPipIdxs.size > 0 || S.selPipIdx >= 0) {
+            const idxs = S.selPipIdxs.size > 0 ? [...S.selPipIdxs].sort((a,b)=>a-b) : [S.selPipIdx];
+            data.pip = idxs.filter(i => i >= 0 && i < S.pipLayers.length).map(i => JSON.parse(JSON.stringify(S.pipLayers[i])));
+            count += data.pip.length;
+        }
+        if (count === 0) { toast('Ничего не выбрано', 'info'); return; }
+        _clipboard = data;
+        toast('Скопировано объектов: ' + count, 'ok');
     }
 
     function _pasteSelected() {
         if (!_clipboard) { toast('Буфер обмена пуст', 'info'); return; }
-        if (_clipboard.type === 'clips') {
-            const newClips = _clipboard.items.map(c => ({ ...c, id: uid() }));
+        _pushHistory();
+        let count = 0;
+        if (_clipboard.clips?.length) {
+            const newClips = _clipboard.clips.map(c => ({ ...c, id: uid() }));
             const insertAt = S.selIdxs.size > 0 ? Math.max(...S.selIdxs) + 1 : (S.selIdx >= 0 ? S.selIdx + 1 : S.clips.length);
             S.clips.splice(insertAt, 0, ...newClips);
             S.selIdxs = new Set(newClips.map((_, j) => insertAt + j));
             S.selIdx = insertAt + newClips.length - 1;
-            S.dirty = true; renderAll();
-            toast('Вставлено ' + newClips.length + ' клип(а)', 'ok');
-        } else if (_clipboard.type === 'subs') {
-            const newSubs = _clipboard.items.map(s => ({ ...s, id: uid(), start: s.start + 0.5, end: s.end + 0.5 }));
+            count += newClips.length;
+        }
+        if (_clipboard.audio?.length) {
+            const newAudio = _clipboard.audio.map(a => ({ ...a, id: uid(), startOffset: (a.startOffset || 0) + 0.5 }));
+            newAudio.forEach(a => S.audioTracks.push(a));
+            S.selAudioIdxs = new Set(newAudio.map((_, j) => S.audioTracks.length - newAudio.length + j));
+            S.selAudioIdx = S.audioTracks.length - 1;
+            count += newAudio.length;
+        }
+        if (_clipboard.subs?.length) {
+            const newSubs = _clipboard.subs.map(s => ({ ...s, id: uid(), start: s.start + 0.5, end: s.end + 0.5 }));
             const insertAt = S.selSubIdxs.size > 0 ? Math.max(...S.selSubIdxs) + 1 : (S.selSubIdx >= 0 ? S.selSubIdx + 1 : S.subtitles.length);
             S.subtitles.splice(insertAt, 0, ...newSubs);
             S.selSubIdxs = new Set(newSubs.map((_, j) => insertAt + j));
             S.selSubIdx = insertAt + newSubs.length - 1;
-            S.dirty = true; renderAll();
-            toast('Вставлено ' + newSubs.length + ' субтитр(а)', 'ok');
+            count += newSubs.length;
         }
+        if (_clipboard.pip?.length) {
+            const newPip = _clipboard.pip.map(p => ({ ...p, id: uid(), x: Math.min(90, (p.x || 0) + 2), y: Math.min(90, (p.y || 0) + 2) }));
+            newPip.forEach(p => S.pipLayers.push(p));
+            S.selPipIdxs = new Set(newPip.map((_, j) => S.pipLayers.length - newPip.length + j));
+            S.selPipIdx = S.pipLayers.length - 1;
+            count += newPip.length;
+        }
+        if (count > 0) { S.dirty = true; renderAll(); toast('Вставлено объектов: ' + count, 'ok'); }
     }
 
     function _resetState() {
+        _pushHistory();
         S.projectId = null; S.projectName = 'Новый проект';
         S.clips = []; S.audioTracks = []; S.subtitles = [];
         S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
