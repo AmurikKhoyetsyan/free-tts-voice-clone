@@ -449,8 +449,8 @@
 }
 .ive-project-name-wrap { display: flex; gap: 6px; align-items: center; }
 .ive-project-name-wrap input { flex: 1; }
-.ive-export-settings { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.ive-export-settings select { flex: 1; min-width: 90px; font-size: 12px; }
+.ive-export-settings { display: flex; gap: 8px; align-items: center; }
+.ive-exp-summary-chip { flex: 1; font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ive-export-progress { display: flex; align-items: center; gap: 10px; }
 .ive-export-progress .vid-progress-bar { flex: 1; }
 .ive-export-progress .status { font-size: 12px; white-space: nowrap; }

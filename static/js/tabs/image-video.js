@@ -9,6 +9,7 @@ import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS } fr
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
+import { createExpModal } from '../imgvid/exp-modal.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -124,10 +125,7 @@ export async function init() {
     const zoomDisplay   = $('ive-zoom-display');
     const zoomPct       = $('ive-zoom-pct');
     const zoomSign      = $('ive-zoom-sign');
-    const resEl         = $('ive-exp-res');
-    const resWEl        = document.getElementById('ive-exp-res-w');
-    const resHEl        = document.getElementById('ive-exp-res-h');
-    const resXEl        = document.getElementById('ive-exp-res-x');
+    const expSummaryEl  = $('ive-exp-summary');
     // Timeline
     const totalDurEl    = $('ive-total-dur');
     const videoTrackEl  = $('ive-video-track');
@@ -394,7 +392,7 @@ export async function init() {
     subRhS.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
-        const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
+        const _resPH = parseInt((_getResolution() || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
         const sy = e.clientY;
         const h0 = sub.h > 0 ? sub.h : 80;
@@ -418,7 +416,7 @@ export async function init() {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
         const rect = previewContent.getBoundingClientRect();
-        const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
+        const _resPH = parseInt((_getResolution() || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
         const sx = e.clientX, sy = e.clientY;
         const w0 = sub.w > 0 ? sub.w : 50;
@@ -831,39 +829,14 @@ export async function init() {
     // Initialize history with empty baseline so first Ctrl+Z has a state to return to
     _pushHistory();
 
-    // Size the preview content to match the selected export resolution aspect ratio
-    // → imgvid/preview.js (updateCustomResVis)
-    function _updateCustomResVis() {
-        const isCustom = resEl?.value === 'custom';
-        if (resWEl) resWEl.style.display = isCustom ? '' : 'none';
-        if (resHEl) resHEl.style.display = isCustom ? '' : 'none';
-        if (resXEl) resXEl.style.display = isCustom ? '' : 'none';
-    }
+    // ── Export Modal ──────────────────────────────────────────────────────────
+    const expModal = createExpModal({
+        summaryEl: expSummaryEl,
+        onResolutionChange: () => { _updatePreviewSize(); renderPreview(); },
+    });
+    $('ive-exp-settings-btn')?.addEventListener('click', () => expModal.open());
 
-    // → imgvid/export.js (updateExportModePanels)
-    function _updateExportModePanels() {
-        const fmtVal = $('ive-exp-format')?.value || 'mp4';
-        const isAudio = fmtVal.startsWith('audio:');
-        const hide = isAudio ? 'none' : '';
-        const codecEl = $('ive-exp-codec');
-        if (codecEl) codecEl.style.display = hide;
-        if (resEl)   resEl.style.display   = hide;
-        if (resWEl)  resWEl.style.display  = isAudio ? 'none' : (resEl?.value === 'custom' ? '' : 'none');
-        if (resHEl)  resHEl.style.display  = isAudio ? 'none' : (resEl?.value === 'custom' ? '' : 'none');
-        if (resXEl)  resXEl.style.display  = isAudio ? 'none' : (resEl?.value === 'custom' ? '' : 'none');
-        const fpsEl = $('ive-exp-fps');
-        const qualEl = $('ive-exp-quality');
-        if (fpsEl)  fpsEl.style.display  = hide;
-        if (qualEl) qualEl.style.display = hide;
-    }
-
-    _updateCustomResVis();
-    _updateExportModePanels();
     _updatePreviewSize();
-    resEl?.addEventListener('change', () => { _updateCustomResVis(); _updatePreviewSize(); renderPreview(); });
-    $('ive-exp-format')?.addEventListener('change', _updateExportModePanels);
-    resWEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
-    resHEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); });
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -1027,13 +1000,8 @@ export async function init() {
     }
 
     function _getResolution() {
-        const v = resEl ? resEl.value : '1920x1080';
-        if (v === 'custom') {
-            const w = parseInt(resWEl?.value) || 1920;
-            const h = parseInt(resHEl?.value) || 1080;
-            return `${w}x${h}`;
-        }
-        return v;
+        const { w, h } = expModal.getResolution();
+        return `${w}x${h}`;
     }
 
     // → imgvid/preview.js (updatePreviewSize)
@@ -4169,7 +4137,8 @@ export async function init() {
     async function _startExport() {
         if (!S.clips.length) { toast('Нет клипов для экспорта', 'warn'); return; }
 
-        const fmtVal = $('ive-exp-format').value;
+        const settings    = expModal.getSettings();
+        const fmtVal      = settings.format;
         const isAudioOnly = fmtVal.startsWith('audio:');
         const audioFmt    = isAudioOnly ? fmtVal.slice(6) : '';
 
@@ -4217,12 +4186,16 @@ export async function init() {
         }
 
         const fd = new FormData();
-        fd.append('project_json',  projectPayload);
-        fd.append('output_format', fmtVal);
-        fd.append('codec',         $('ive-exp-codec')?.value || '');
-        fd.append('resolution',    _getResolution());
-        fd.append('fps',           $('ive-exp-fps').value);
-        fd.append('quality',       $('ive-exp-quality').value);
+        fd.append('project_json',   projectPayload);
+        fd.append('output_format',  fmtVal);
+        fd.append('codec',          settings.codec);
+        fd.append('resolution',     settings.resolution);
+        fd.append('fps',            settings.fps);
+        fd.append('quality',        settings.quality);
+        fd.append('audio_codec',    settings.audioCodec);
+        fd.append('audio_bitrate',  settings.audioBitrate);
+        fd.append('audio_sr',       settings.audioSR);
+        fd.append('audio_ch',       settings.audioCh);
         try {
             await synthesizeStream('/api/imgvid/export', { method: 'POST', body: fd }, {
                 progress(val, desc) {
@@ -4552,38 +4525,13 @@ export async function init() {
 
     // → imgvid/export.js (getExportSettings)
     function _getExportSettings() {
-        return {
-            format:     $('ive-exp-format')?.value  || 'mp4',
-            codec:      $('ive-exp-codec')?.value   || '',
-            resolution: _getResolution(),
-            fps:        $('ive-exp-fps')?.value      || '30',
-            quality:    $('ive-exp-quality')?.value  || 'medium',
-        };
+        return expModal.getSettings();
     }
 
     // → imgvid/export.js (applyExportSettings)
     function _applyExportSettings(s) {
         if (!s) return;
-        const fmtEl   = $('ive-exp-format');
-        const codecEl = $('ive-exp-codec');
-        const fpsEl   = $('ive-exp-fps');
-        const qualEl  = $('ive-exp-quality');
-        if (s.format  && fmtEl)   fmtEl.value   = s.format;
-        if (s.codec   && codecEl) codecEl.value = s.codec;
-        if (s.fps     && fpsEl)   fpsEl.value   = String(s.fps);
-        if (s.quality && qualEl)  qualEl.value  = s.quality;
-        if (s.resolution && resEl) {
-            const knownVals = [...resEl.options].map(o => o.value).filter(v => v !== 'custom');
-            if (knownVals.includes(s.resolution)) {
-                resEl.value = s.resolution;
-            } else {
-                resEl.value = 'custom';
-                const [w, h] = s.resolution.split('x').map(Number);
-                if (resWEl && w) resWEl.value = w;
-                if (resHEl && h) resHEl.value = h;
-            }
-            _updateCustomResVis();
-        }
+        expModal.applySettings(s);
         _updatePreviewSize();
     }
 }

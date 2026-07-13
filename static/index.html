@@ -17,6 +17,7 @@
     <link rel="stylesheet" href="/static/css/loader.css">
     <link rel="stylesheet" href="/static/css/subtitles.css">
     <link rel="stylesheet" href="/static/css/image-video.css">
+    <link rel="stylesheet" href="/static/css/exp-modal.css">
     <style>
         .logs-layout {
             display: flex;
@@ -952,63 +953,8 @@
                             <button class="btn btn-sm" id="ive-open-amur-btn" title="Открыть .project проект">↑ .project</button>
                         </div>
                         <div class="ive-export-settings">
-                            <select class="ive-select" id="ive-exp-format">
-                                <optgroup label="Видео">
-                                    <option value="mp4">MP4 (H.264)</option>
-                                    <option value="mov">MOV</option>
-                                    <option value="mkv">MKV</option>
-                                    <option value="m4v">M4V</option>
-                                    <option value="avi">AVI</option>
-                                    <option value="webm">WebM (VP9)</option>
-                                    <option value="ogv">OGV (Theora)</option>
-                                    <option value="flv">FLV</option>
-                                    <option value="wmv">WMV</option>
-                                    <option value="mpeg">MPEG</option>
-                                    <option value="gif">GIF (анимация)</option>
-                                </optgroup>
-                                <optgroup label="Только аудио">
-                                    <option value="audio:mp3">Аудио MP3</option>
-                                    <option value="audio:wav">Аудио WAV</option>
-                                    <option value="audio:flac">Аудио FLAC</option>
-                                    <option value="audio:aac">Аудио AAC</option>
-                                    <option value="audio:ogg">Аудио OGG</option>
-                                    <option value="audio:m4a">Аудио M4A</option>
-                                    <option value="audio:opus">Аудио OPUS</option>
-                                </optgroup>
-                            </select>
-                            <select class="ive-select" id="ive-exp-codec" title="Видеокодек">
-                                <option value="">Авто</option>
-                                <option value="h264">H.264</option>
-                                <option value="h265">H.265 (HEVC)</option>
-                                <option value="vp9">VP9</option>
-                                <option value="vp8">VP8</option>
-                                <option value="av1">AV1</option>
-                                <option value="prores">ProRes</option>
-                                <option value="mpeg4">MPEG-4</option>
-                            </select>
-                            <select class="ive-select" id="ive-exp-res">
-                                <option value="1920x1080">YouTube (1920×1080)</option>
-                                <option value="1280x720">HD (1280×720)</option>
-                                <option value="1080x1920">TikTok / Reels / Shorts (1080×1920)</option>
-                                <option value="1080x1080">Instagram Post (1080×1080)</option>
-                                <option value="3840x2160">4K (3840×2160)</option>
-                                <option value="custom">Своё разрешение…</option>
-                            </select>
-                            <input class="ive-input" type="number" id="ive-exp-res-w" placeholder="Ш" title="Ширина" style="display:none;width:64px" min="1" max="7680">
-                            <span id="ive-exp-res-x" style="display:none;color:var(--text-dim)">×</span>
-                            <input class="ive-input" type="number" id="ive-exp-res-h" placeholder="В" title="Высота" style="display:none;width:64px" min="1" max="7680">
-                            <select class="ive-select" id="ive-exp-fps">
-                                <option value="24">24 fps</option>
-                                <option value="25">25 fps</option>
-                                <option value="30" selected>30 fps</option>
-                                <option value="60">60 fps</option>
-                            </select>
-                            <select class="ive-select" id="ive-exp-quality">
-                                <option value="low">Низкое</option>
-                                <option value="medium" selected>Среднее</option>
-                                <option value="high">Высокое</option>
-                                <option value="lossless">Без потерь</option>
-                            </select>
+                            <button class="btn btn-sm" id="ive-exp-settings-btn">⚙ Настройки</button>
+                            <span id="ive-exp-summary" class="ive-exp-summary-chip"></span>
                             <button class="btn accent" id="ive-export-btn">▶ Экспорт</button>
                         </div>
                         <div id="ive-export-progress" hidden>
