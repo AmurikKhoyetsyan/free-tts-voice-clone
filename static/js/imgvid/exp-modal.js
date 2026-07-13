@@ -115,11 +115,10 @@ function _buildHTML() {
     ).join('');
 
     const fmtGrid = _FORMATS.map(f =>
-        `<button class="expm-fmt-btn${f.isAudio ? ' is-audio' : ''}" data-fmt="${f.val}">
+        `<button class="expm-fmt-btn${f.isAudio ? ' expm-fmt-audio' : ''}" data-fmt="${f.val}">
             <div class="expm-fmt-name">${f.label}</div>
             <div class="expm-fmt-desc">${f.desc}</div>
             ${f.badge ? `<div class="expm-fmt-badge">${f.badge}</div>` : ''}
-            ${f.isAudio ? '<div class="expm-fmt-audio-tag">Аудио</div>' : ''}
         </button>`
     ).join('');
 

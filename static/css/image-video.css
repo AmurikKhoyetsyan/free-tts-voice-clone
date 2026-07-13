@@ -1,5 +1,21 @@
 /* ── Image Video Editor ──────────────────────────────────────────────────── */
 
+/* Dark theme variables — bg1/2/3 not in base.css, defined here for the editor */
+:root {
+    --bg1: #1a1d23;
+    --bg2: #22252d;
+    --bg3: #2a2d35;
+}
+/* Override light-theme vars inside the editor section */
+[data-panel="imgvid"] {
+    --border:   #333a45;
+    --text:     #e0e0e0;
+    --text-dim: #888;
+    --text-muted: #666;
+    --accent:   #4a9eff;
+    --accent-hover: #3a8aef;
+}
+
 .ive-layout {
     display: grid;
     grid-template-columns: 260px 1fr 260px;
