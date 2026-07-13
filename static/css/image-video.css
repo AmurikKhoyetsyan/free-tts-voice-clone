@@ -449,8 +449,8 @@
 }
 .ive-project-name-wrap { display: flex; gap: 6px; align-items: center; }
 .ive-project-name-wrap input { flex: 1; }
-.ive-export-settings { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.ive-export-settings select { flex: 1; min-width: 90px; font-size: 12px; }
+.ive-export-settings { display: flex; gap: 8px; align-items: center; }
+.ive-exp-summary-chip { flex: 1; font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ive-export-progress { display: flex; align-items: center; gap: 10px; }
 .ive-export-progress .vid-progress-bar { flex: 1; }
 .ive-export-progress .status { font-size: 12px; white-space: nowrap; }
@@ -737,3 +737,171 @@
 .ive-sfx-params-label {
     font-size: 10px; font-weight: 600; color: var(--text-dim); margin-bottom: 2px;
 }
+
+/* ── Export Settings Modal ───────────────────────────────────────────────── */
+.ive-exp-modal-overlay {
+    position: fixed; inset: 0; z-index: 9100;
+    background: rgba(0,0,0,.72); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+}
+.ive-exp-modal-box {
+    background: var(--bg1); border: 1px solid var(--border);
+    border-radius: 12px; width: min(860px, 100%); max-height: 90vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0,0,0,.55);
+}
+.ive-exp-modal-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    font-size: 15px; font-weight: 700; flex-shrink: 0; color: var(--text);
+}
+.ive-exp-modal-close-btn {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 16px; padding: 2px 8px; border-radius: 4px;
+    transition: background .12s, color .12s; line-height: 1;
+}
+.ive-exp-modal-close-btn:hover { background: var(--bg3); color: var(--text); }
+.ive-exp-modal-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+.ive-exp-tabs {
+    width: 130px; flex-shrink: 0; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 8px 0; background: var(--bg2);
+}
+.ive-exp-tab {
+    padding: 10px 16px; background: none; border: none; border-left: 3px solid transparent;
+    text-align: left; font-size: 13px; color: var(--text-dim);
+    cursor: pointer; transition: background .12s, color .12s;
+}
+.ive-exp-tab:hover { background: var(--bg3); color: var(--text); }
+.ive-exp-tab.active { color: var(--accent, #4a9eff); border-left-color: var(--accent, #4a9eff); background: rgba(74,158,255,.08); font-weight: 600; }
+.ive-exp-content { flex: 1; overflow-y: auto; padding: 20px; }
+.ive-exp-pane { display: none; }
+.ive-exp-pane.active { display: block; }
+.ive-exp-section { margin-bottom: 24px; }
+.ive-exp-sh {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-dim); margin-bottom: 12px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Quality slider */
+.ive-exp-q-track { margin-bottom: 8px; }
+.ive-exp-q-slider {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 6px;
+    border-radius: 3px; background: var(--bg3); outline: none; cursor: pointer;
+    accent-color: var(--accent, #4a9eff);
+}
+.ive-exp-q-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent, #4a9eff); cursor: pointer;
+    border: 3px solid var(--bg1); box-shadow: 0 0 0 1px var(--accent, #4a9eff);
+}
+.ive-exp-q-slider::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent, #4a9eff); cursor: pointer; border: 3px solid var(--bg1);
+}
+.ive-exp-q-labels {
+    display: flex; justify-content: space-between;
+    font-size: 9px; color: var(--text-dim); margin-top: 6px;
+}
+.ive-exp-q-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px; margin-top: 10px;
+    border-left: 3px solid var(--accent, #4a9eff);
+}
+.ive-exp-q-card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ive-exp-q-badge {
+    font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 20px;
+    background: var(--accent, #4a9eff); color: #fff; white-space: nowrap; flex-shrink: 0;
+}
+.ive-exp-q-meta { font-size: 11px; color: var(--text-dim); }
+.ive-exp-q-desc { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+
+/* Preset list */
+.ive-exp-preset-list { display: flex; flex-direction: column; gap: 6px; }
+.ive-exp-preset-btn {
+    width: 100%; padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; text-align: left; cursor: pointer; color: var(--text);
+    transition: background .12s, border-color .12s; display: flex; align-items: center; gap: 10px;
+}
+.ive-exp-preset-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.ive-exp-preset-name { font-size: 13px; font-weight: 600; }
+.ive-exp-preset-desc { font-size: 11px; color: var(--text-dim); }
+
+/* Resolution grid */
+.ive-exp-res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 4px; }
+.ive-exp-res-card {
+    padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer; transition: background .12s, border-color .12s;
+}
+.ive-exp-res-card:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.ive-exp-res-card.active { border-color: var(--accent, #4a9eff); background: rgba(74,158,255,.12); }
+.ive-exp-res-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.ive-exp-res-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.ive-exp-res-hint { font-size: 10px; color: var(--text-dim); margin-top: 4px; font-style: italic; display: none; }
+.ive-exp-res-card.active .ive-exp-res-hint { display: block; }
+
+/* Social presets */
+.ive-exp-social { display: flex; flex-direction: column; gap: 10px; }
+.ive-exp-social-plat-name { font-size: 11px; font-weight: 700; color: var(--text-dim); margin-bottom: 5px; }
+.ive-exp-social-items { display: flex; flex-wrap: wrap; gap: 5px; }
+.ive-exp-social-btn {
+    padding: 4px 12px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 5px; cursor: pointer; font-size: 11px; color: var(--text);
+    transition: background .12s, border-color .12s;
+}
+.ive-exp-social-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.ive-exp-social-btn.active { border-color: var(--accent, #4a9eff); background: rgba(74,158,255,.15); color: var(--accent, #4a9eff); font-weight: 600; }
+
+/* Custom resolution */
+.ive-exp-custom-res { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.ive-exp-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); }
+.ive-exp-res-sep { color: var(--text-dim); align-self: flex-end; margin-bottom: 6px; font-size: 14px; }
+.ive-exp-res-cur { font-size: 11px; color: var(--text-dim); margin-top: 8px; font-weight: 500; }
+
+/* Codec cards */
+.ive-exp-codec-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ive-exp-codec-btn {
+    padding: 6px 14px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text);
+    transition: background .12s, border-color .12s;
+}
+.ive-exp-codec-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.ive-exp-codec-btn.active { border-color: var(--accent, #4a9eff); background: rgba(74,158,255,.15); color: var(--accent, #4a9eff); }
+.ive-exp-codec-hint { font-size: 11px; color: var(--text-dim); font-style: italic; min-height: 16px; }
+
+/* FPS buttons */
+.ive-exp-fps-row { display: flex; gap: 6px; }
+.ive-exp-fps-btn {
+    flex: 1; padding: 10px 4px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; color: var(--text); text-align: center;
+    transition: background .12s, border-color .12s; font-size: 13px; font-weight: 700;
+}
+.ive-exp-fps-btn .fps-sub { display: block; font-size: 9px; color: var(--text-dim); font-weight: 400; margin-top: 2px; }
+.ive-exp-fps-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.ive-exp-fps-btn.active { border-color: var(--accent, #4a9eff); background: rgba(74,158,255,.15); color: var(--accent, #4a9eff); }
+
+/* Audio grid */
+.ive-exp-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ive-exp-field { display: flex; flex-direction: column; gap: 4px; }
+
+/* Format grid */
+.ive-exp-fmt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.ive-exp-fmt-btn {
+    padding: 12px 8px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer; text-align: center;
+    transition: background .12s, border-color .12s; position: relative;
+}
+.ive-exp-fmt-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.ive-exp-fmt-btn.active { border-color: var(--accent, #4a9eff); background: rgba(74,158,255,.12); }
+.ive-exp-fmt-name { font-size: 15px; font-weight: 800; color: var(--text); }
+.ive-exp-fmt-desc { font-size: 10px; color: var(--text-dim); margin-top: 2px; line-height: 1.3; }
+.ive-exp-fmt-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--accent, #4a9eff); color: #fff; margin-top: 4px; display: inline-block; }
+.ive-exp-fmt-audio-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: #8b5cf6; color: #fff; margin-top: 4px; display: inline-block; }
+
+/* Modal footer */
+.ive-exp-modal-footer {
+    display: flex; align-items: center; gap: 8px; padding: 12px 20px;
+    border-top: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; flex-wrap: wrap;
+}
+.ive-exp-footer-sum { flex: 1; font-size: 11px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

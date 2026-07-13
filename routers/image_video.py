@@ -542,6 +542,10 @@ async def export_video(
     quality:       str = Form("medium"),
     codec:         str = Form(""),   # "" means auto; or "h264","h265","vp9","vp8","av1","prores","mpeg4"
     audio_only:    bool = Form(False),
+    audio_codec:   str = Form("aac"),   # aac, mp3, opus, vorbis, pcm
+    audio_bitrate: str = Form("192k"),  # 96k, 128k, 192k, 256k, 320k
+    audio_sr:      str = Form("44100"), # 44100, 48000
+    audio_ch:      str = Form("2"),     # 1 or 2
 ):
     try:
         project = json.loads(project_json)
@@ -587,12 +591,22 @@ async def export_video(
     except Exception:
         width, height = 1920, 1080
 
-    crf = {"low": 28, "medium": 22, "high": 18, "lossless": 0}.get(quality, 22)
+    crf = {"vlow": 35, "low": 28, "medium": 22, "high": 18, "vhigh": 14, "max": 8, "lossless": 0}.get(quality, 22)
 
 
 
     q: queue.Queue = queue.Queue()
     _NO_WIN = 0x08000000 if os.name == "nt" else 0
+
+    def _build_acodec(acodec_name, abitrate):
+        _amap = {
+            "aac":     ["-c:a", "aac",      "-b:a", abitrate],
+            "mp3":     ["-c:a", "libmp3lame", "-b:a", abitrate],
+            "opus":    ["-c:a", "libopus",  "-b:a", abitrate],
+            "vorbis":  ["-c:a", "libvorbis", "-b:a", abitrate],
+            "pcm":     ["-c:a", "pcm_s16le"],
+        }
+        return _amap.get(acodec_name, ["-c:a", "aac", "-b:a", abitrate])
 
     def worker():
         try:
@@ -991,7 +1005,7 @@ async def export_video(
                     audio_map = []  # GIF container does not support audio
                 elif vcodec_name in ("libx264", "libx265"):
                     vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
-                    acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
+                    acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
                 elif vcodec_name == "libvpx-vp9":
                     vp9_crf = max(0, min(63, crf * 63 // 51))
                     vcodec = ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", str(vp9_crf), "-pix_fmt", "yuv420p"]
@@ -1020,7 +1034,7 @@ async def export_video(
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
                 else:
                     vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
-                    acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
+                    acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
 
                 filter_complex = ";\n".join(filter_parts)
 
