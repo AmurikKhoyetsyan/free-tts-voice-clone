@@ -9,6 +9,7 @@ import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS } fr
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
+import { createExpModal } from '../imgvid/exp-modal.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const S = {
@@ -124,10 +125,6 @@ export async function init() {
     const zoomDisplay   = $('ive-zoom-display');
     const zoomPct       = $('ive-zoom-pct');
     const zoomSign      = $('ive-zoom-sign');
-    const resEl         = null; // removed — resolution now uses direct W/H inputs in modal
-    const resWEl        = document.getElementById('ive-exp-res-w');
-    const resHEl        = document.getElementById('ive-exp-res-h');
-    const resXEl        = null; // removed
     const expSummaryEl  = $('ive-exp-summary');
     // Timeline
     const totalDurEl    = $('ive-total-dur');
@@ -395,7 +392,7 @@ export async function init() {
     subRhS.addEventListener('mousedown', e => {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
-        const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
+        const _resPH = parseInt((_getResolution() || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
         const sy = e.clientY;
         const h0 = sub.h > 0 ? sub.h : 80;
@@ -419,7 +416,7 @@ export async function init() {
         const sub = S.subtitles[S.selSubIdx]; if (!sub) return;
         e.stopPropagation(); e.preventDefault();
         const rect = previewContent.getBoundingClientRect();
-        const _resPH = parseInt((resEl?.value || '1920x1080').split('x')[1] || 1080, 10);
+        const _resPH = parseInt((_getResolution() || '1920x1080').split('x')[1] || 1080, 10);
         const sc = (previewContent.clientHeight || _resPH) / _resPH;
         const sx = e.clientX, sy = e.clientY;
         const w0 = sub.w > 0 ? sub.w : 50;
@@ -832,355 +829,15 @@ export async function init() {
     // Initialize history with empty baseline so first Ctrl+Z has a state to return to
     _pushHistory();
 
-    function _updateCustomResVis() { /* no-op: resolution inputs always visible in modal */ }
-    function _updateExportModePanels() { /* no-op: handled by modal tab visibility */ }
+    // ── Export Modal ──────────────────────────────────────────────────────────
+    const expModal = createExpModal({
+        summaryEl: expSummaryEl,
+        onResolutionChange: () => { _updatePreviewSize(); renderPreview(); },
+    });
+    $('ive-exp-settings-btn')?.addEventListener('click', () => expModal.open());
 
     _updatePreviewSize();
-    resWEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); _updateExpResCur(); });
-    resHEl?.addEventListener('change', () => { _updatePreviewSize(); renderPreview(); _updateExpResCur(); });
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
-
-    // ── Export Modal ──────────────────────────────────────────────────────────
-    const _Q_LEVELS = [
-        { val: 'vlow',    label: 'Очень низкое',  crf: 35, mbpm: '~0.5 МБ/мин', time: '⚡ Очень быстро',   color: '#ef4444', desc: 'Минимальное качество. Подходит только для превью или быстрых тестов.' },
-        { val: 'low',     label: 'Низкое',         crf: 28, mbpm: '~1.5 МБ/мин', time: '⚡ Быстро',          color: '#f97316', desc: 'Заметные артефакты сжатия. Подходит для мобильных с ограниченным хранилищем.' },
-        { val: 'medium',  label: 'Среднее',        crf: 22, mbpm: '~4 МБ/мин',   time: '⏱ Быстро',           color: '#eab308', desc: 'Хороший баланс между качеством и размером файла. Подходит для большинства задач.' },
-        { val: 'high',    label: 'Высокое',        crf: 18, mbpm: '~8 МБ/мин',   time: '⏱ Умеренно',         color: '#22c55e', desc: 'Высокое качество. Отлично подходит для YouTube, Instagram и TikTok.' },
-        { val: 'vhigh',   label: 'Очень высокое', crf: 14, mbpm: '~15 МБ/мин',  time: '🐢 Медленно',         color: '#06b6d4', desc: 'Очень высокое качество. Рекомендуется для профессиональных проектов.' },
-        { val: 'max',     label: 'Максимальное',   crf: 8,  mbpm: '~30 МБ/мин',  time: '🐢 Медленно',         color: '#8b5cf6', desc: 'Почти без потерь. Очень большой файл. Для архивного хранения.' },
-        { val: 'lossless',label: 'Без потерь',    crf: 0,  mbpm: '~100+ МБ/мин', time: '🐌 Очень медленно',  color: '#ec4899', desc: 'Полное отсутствие потерь (если поддерживается кодеком). Огромный размер файла.' },
-    ];
-    const _RES_PRESETS = [
-        { label: '360p',      w: 640,  h: 360,  ar: '16:9', hint: 'Мобильные устройства, медленный интернет' },
-        { label: '480p SD',   w: 854,  h: 480,  ar: '16:9', hint: 'Стандартное качество DVD' },
-        { label: '720p HD',   w: 1280, h: 720,  ar: '16:9', hint: 'Хороший баланс для YouTube' },
-        { label: '1080p FHD', w: 1920, h: 1080, ar: '16:9', hint: 'Идеально для YouTube, Instagram, большинства устройств' },
-        { label: '1440p 2K',  w: 2560, h: 1440, ar: '16:9', hint: 'Высокое разрешение для качественного контента' },
-        { label: '2160p 4K',  w: 3840, h: 2160, ar: '16:9', hint: 'Максимальная детализация, большой файл и долгий экспорт' },
-        { label: '4320p 8K',  w: 7680, h: 4320, ar: '16:9', hint: 'Только для специального оборудования' },
-    ];
-    const _SOCIAL_GROUPS = [
-        { name: 'YouTube',          items: [{ label: '1080p · 16:9', w: 1920, h: 1080 }, { label: '1440p · 16:9', w: 2560, h: 1440 }, { label: '4K · 16:9', w: 3840, h: 2160 }] },
-        { name: 'YouTube Shorts',   items: [{ label: '1080×1920', w: 1080, h: 1920 }] },
-        { name: 'TikTok',           items: [{ label: '1080×1920', w: 1080, h: 1920 }] },
-        { name: 'Instagram Reels',  items: [{ label: '1080×1920', w: 1080, h: 1920 }] },
-        { name: 'Instagram Feed',   items: [{ label: '1:1', w: 1080, h: 1080 }, { label: '4:5', w: 1080, h: 1350 }] },
-        { name: 'Instagram Stories',items: [{ label: '1080×1920', w: 1080, h: 1920 }] },
-        { name: 'Facebook',         items: [{ label: '1:1', w: 1080, h: 1080 }, { label: '16:9', w: 1920, h: 1080 }] },
-        { name: 'Telegram',         items: [{ label: '720p', w: 1280, h: 720 }, { label: '1080p', w: 1920, h: 1080 }] },
-        { name: 'X (Twitter)',      items: [{ label: '720p', w: 1280, h: 720 }, { label: '1080p', w: 1920, h: 1080 }] },
-        { name: 'Square (1:1)',     items: [{ label: '720×720', w: 720, h: 720 }, { label: '1080×1080', w: 1080, h: 1080 }] },
-        { name: 'Vertical (9:16)',  items: [{ label: '720×1280', w: 720, h: 1280 }, { label: '1080×1920', w: 1080, h: 1920 }] },
-        { name: 'Cinema (21:9)',    items: [{ label: '2560×1080', w: 2560, h: 1080 }, { label: '3440×1440', w: 3440, h: 1440 }] },
-    ];
-    const _CODECS = [
-        { val: '', label: 'Авто',       hint: 'Оптимальный кодек выбирается автоматически исходя из формата' },
-        { val: 'h264',   label: 'H.264',    hint: 'Универсальный стандарт. Поддерживается всеми устройствами. Рекомендуется.' },
-        { val: 'h265',   label: 'H.265',    hint: 'В 2× эффективнее H.264, но медленнее кодируется. Не поддерживается старыми устройствами.' },
-        { val: 'vp9',    label: 'VP9',      hint: 'Открытый кодек Google. Хорошее качество для WebM и YouTube.' },
-        { val: 'av1',    label: 'AV1',      hint: 'Современный кодек с высокой эффективностью. Очень медленное кодирование.' },
-        { val: 'vp8',    label: 'VP8',      hint: 'Старый кодек Google. Используйте VP9 вместо него.' },
-        { val: 'prores', label: 'ProRes',   hint: 'Профессиональный кодек Apple. Большой файл, идеален для постпродакшена.' },
-        { val: 'mpeg4',  label: 'MPEG-4',   hint: 'Широкая совместимость со старыми устройствами.' },
-    ];
-    const _FPS_OPTIONS = [
-        { val: '24', label: '24 fps', sub: 'Кино' },
-        { val: '25', label: '25 fps', sub: 'PAL' },
-        { val: '30', label: '30 fps', sub: 'Стандарт' },
-        { val: '60', label: '60 fps', sub: 'Плавный' },
-    ];
-    const _FORMATS = [
-        { val: 'mp4',        label: 'MP4',   desc: 'H.264 · Универсальный', badge: 'Рекомендуется' },
-        { val: 'mov',        label: 'MOV',   desc: 'Apple · QuickTime' },
-        { val: 'mkv',        label: 'MKV',   desc: 'Открытый контейнер' },
-        { val: 'webm',       label: 'WebM',  desc: 'VP9 · Веб' },
-        { val: 'avi',        label: 'AVI',   desc: 'Классика' },
-        { val: 'gif',        label: 'GIF',   desc: 'Анимация' },
-        { val: 'audio:mp3',  label: 'MP3',   desc: 'Только аудио', isAudio: true },
-        { val: 'audio:wav',  label: 'WAV',   desc: 'Без потерь', isAudio: true },
-        { val: 'audio:flac', label: 'FLAC',  desc: 'Без потерь · Компактнее', isAudio: true },
-        { val: 'audio:aac',  label: 'AAC',   desc: 'Высокое качество', isAudio: true },
-        { val: 'audio:ogg',  label: 'OGG',   desc: 'Открытый формат', isAudio: true },
-        { val: 'audio:opus', label: 'OPUS',  desc: 'Современный', isAudio: true },
-    ];
-    const _QUALITY_PRESETS = [
-        { key: 'speed',    label: '⚡ Максимальная скорость',    desc: 'Минимальное время, сниженное качество', quality: 'vlow',   codec: 'h264', fps: '30', audioBitrate: '128k' },
-        { key: 'balanced', label: '⚖ Оптимальное качество',      desc: 'Лучший баланс качества и скорости',    quality: 'medium', codec: '',     fps: '30', audioBitrate: '192k' },
-        { key: 'quality',  label: '🎬 Максимальное качество',    desc: 'Высокое качество, большой файл',       quality: 'vhigh',  codec: 'h264', fps: '30', audioBitrate: '320k' },
-        { key: 'small',    label: '📦 Минимальный размер файла', desc: 'Малый размер, сниженное качество',     quality: 'low',    codec: 'h264', fps: '24', audioBitrate: '128k' },
-        { key: 'social',   label: '📱 Для социальных сетей',    desc: 'Оптимально для YouTube, TikTok, Instagram', quality: 'high', codec: 'h264', fps: '30', audioBitrate: '192k' },
-    ];
-
-    function _gcd(a, b) { return b === 0 ? a : _gcd(b, a % b); }
-    function _aspectRatio(w, h) {
-        if (!w || !h) return '';
-        const g = _gcd(w, h);
-        const ar = `${w/g}:${h/g}`;
-        const known = { '16:9':'16:9', '9:16':'9:16', '4:3':'4:3', '3:4':'3:4', '1:1':'1:1', '4:5':'4:5', '5:4':'5:4', '21:9':'21:9', '2:1':'2:1' };
-        return known[ar] || ar;
-    }
-
-    function _updateExpResCur() {
-        const w = parseInt(resWEl?.value) || 1920;
-        const h = parseInt(resHEl?.value) || 1080;
-        const el = $('ive-exp-res-cur');
-        if (el) el.textContent = `Текущее: ${w} × ${h} (${_aspectRatio(w, h)})`;
-        _syncResCards();
-        _updateExpSummary();
-    }
-
-    function _updateExpSummary() {
-        const fmt    = $('ive-exp-format')?.value || 'mp4';
-        const fmtLbl = fmt.startsWith('audio:') ? fmt.slice(6).toUpperCase() : fmt.toUpperCase();
-        const w      = parseInt(resWEl?.value) || 1920;
-        const h      = parseInt(resHEl?.value) || 1080;
-        const fps    = $('ive-exp-fps')?.value || '30';
-        const qVal   = $('ive-exp-quality')?.value || 'medium';
-        const qInfo  = _Q_LEVELS.find(q => q.val === qVal) || _Q_LEVELS[2];
-        const sumText = fmt.startsWith('audio:')
-            ? `${fmtLbl} · ${$('ive-exp-audio-bitrate')?.value || '192k'}`
-            : `${fmtLbl} · ${w}×${h} · ${fps}fps · ${qInfo.label}`;
-        if (expSummaryEl) expSummaryEl.textContent = sumText;
-        const footEl = $('ive-exp-footer-sum');
-        if (footEl) footEl.textContent = sumText;
-    }
-
-    function _syncQSlider() {
-        const qualEl = $('ive-exp-quality');
-        const slider = $('ive-exp-q-slider');
-        if (!qualEl || !slider) return;
-        const idx = _Q_LEVELS.findIndex(q => q.val === qualEl.value);
-        if (idx >= 0) slider.value = idx;
-        _updateQCard(idx >= 0 ? idx : 2);
-    }
-
-    function _updateQCard(idx) {
-        const info = _Q_LEVELS[idx] || _Q_LEVELS[2];
-        const badge = $('ive-exp-q-badge'); if (badge) { badge.textContent = info.label; badge.style.background = info.color; }
-        const meta  = $('ive-exp-q-meta');  if (meta)  meta.textContent  = `CRF ${info.crf} · ${info.mbpm} · ${info.time}`;
-        const desc  = $('ive-exp-q-desc');  if (desc)  desc.textContent  = info.desc;
-        const card  = $('ive-exp-q-card');  if (card)  card.style.borderLeftColor = info.color;
-        const qualEl = $('ive-exp-quality'); if (qualEl) qualEl.value = info.val;
-    }
-
-    function _syncResCards() {
-        const w = parseInt(resWEl?.value) || 1920;
-        const h = parseInt(resHEl?.value) || 1080;
-        document.querySelectorAll('.ive-exp-res-card').forEach(card => {
-            card.classList.toggle('active', +card.dataset.w === w && +card.dataset.h === h);
-        });
-        document.querySelectorAll('.ive-exp-social-btn').forEach(btn => {
-            btn.classList.toggle('active', +btn.dataset.w === w && +btn.dataset.h === h);
-        });
-    }
-
-    function _syncCodecCards() {
-        const codecEl = $('ive-exp-codec');
-        const val = codecEl?.value ?? '';
-        document.querySelectorAll('.ive-exp-codec-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.codec === val);
-        });
-        const info = _CODECS.find(c => c.val === val);
-        const hint = $('ive-exp-codec-hint'); if (hint) hint.textContent = info?.hint || '';
-    }
-
-    function _syncFpsCards() {
-        const fpsEl = $('ive-exp-fps');
-        const val = fpsEl?.value || '30';
-        document.querySelectorAll('.ive-exp-fps-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.fps === val);
-        });
-    }
-
-    function _syncFmtCards() {
-        const fmtEl = $('ive-exp-format');
-        const val = fmtEl?.value || 'mp4';
-        document.querySelectorAll('.ive-exp-fmt-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.fmt === val);
-        });
-    }
-
-    function _setResolution(w, h) {
-        if (resWEl) resWEl.value = w;
-        if (resHEl) resHEl.value = h;
-        _updateExpResCur();
-        _updatePreviewSize();
-        renderPreview();
-    }
-
-    function _initExpModal() {
-        const modal = $('ive-exp-modal');
-        if (!modal) return;
-
-        // Tab switching
-        modal.querySelectorAll('.ive-exp-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                modal.querySelectorAll('.ive-exp-tab').forEach(t => t.classList.remove('active'));
-                modal.querySelectorAll('.ive-exp-pane').forEach(p => p.classList.remove('active'));
-                tab.classList.add('active');
-                const pane = modal.querySelector(`[data-exppane="${tab.dataset.exptab}"]`);
-                if (pane) pane.classList.add('active');
-            });
-        });
-
-        // Quality slider
-        const slider = $('ive-exp-q-slider');
-        if (slider) {
-            slider.addEventListener('input', () => {
-                _updateQCard(+slider.value);
-                _updateExpSummary();
-            });
-        }
-
-        // Resolution grid
-        const resGrid = $('ive-exp-res-grid');
-        if (resGrid) {
-            resGrid.innerHTML = _RES_PRESETS.map(p =>
-                `<div class="ive-exp-res-card" data-w="${p.w}" data-h="${p.h}">
-                    <div class="ive-exp-res-label">${eh(p.label)}</div>
-                    <div class="ive-exp-res-sub">${p.w}×${p.h} · ${p.ar}</div>
-                    <div class="ive-exp-res-hint">${eh(p.hint)}</div>
-                </div>`
-            ).join('');
-            resGrid.addEventListener('click', e => {
-                const card = e.target.closest('.ive-exp-res-card');
-                if (!card) return;
-                _setResolution(+card.dataset.w, +card.dataset.h);
-            });
-        }
-
-        // Social presets
-        const socialEl = $('ive-exp-social');
-        if (socialEl) {
-            socialEl.innerHTML = _SOCIAL_GROUPS.map(g =>
-                `<div class="ive-exp-social-group">
-                    <div class="ive-exp-social-plat-name">${eh(g.name)}</div>
-                    <div class="ive-exp-social-items">${g.items.map(it =>
-                        `<button class="ive-exp-social-btn" data-w="${it.w}" data-h="${it.h}">${eh(it.label)}</button>`
-                    ).join('')}</div>
-                </div>`
-            ).join('');
-            socialEl.addEventListener('click', e => {
-                const btn = e.target.closest('.ive-exp-social-btn');
-                if (!btn) return;
-                _setResolution(+btn.dataset.w, +btn.dataset.h);
-            });
-        }
-
-        // Custom resolution apply button
-        $('ive-exp-res-apply')?.addEventListener('click', () => {
-            const w = parseInt(resWEl?.value) || 1920;
-            const h = parseInt(resHEl?.value) || 1080;
-            _setResolution(w, h);
-        });
-
-        // Codec cards
-        const codecGrid = $('ive-exp-codec-grid');
-        if (codecGrid) {
-            codecGrid.innerHTML = _CODECS.map(c =>
-                `<button class="ive-exp-codec-btn" data-codec="${c.val}">${eh(c.label)}</button>`
-            ).join('');
-            codecGrid.addEventListener('click', e => {
-                const btn = e.target.closest('.ive-exp-codec-btn');
-                if (!btn) return;
-                const codecEl = $('ive-exp-codec');
-                if (codecEl) codecEl.value = btn.dataset.codec;
-                _syncCodecCards();
-                _updateExpSummary();
-            });
-        }
-
-        // FPS buttons
-        const fpsRow = $('ive-exp-fps-row');
-        if (fpsRow) {
-            fpsRow.innerHTML = _FPS_OPTIONS.map(f =>
-                `<button class="ive-exp-fps-btn" data-fps="${f.val}">${f.label}<span class="fps-sub">${f.sub}</span></button>`
-            ).join('');
-            fpsRow.addEventListener('click', e => {
-                const btn = e.target.closest('.ive-exp-fps-btn');
-                if (!btn) return;
-                const fpsEl = $('ive-exp-fps');
-                if (fpsEl) fpsEl.value = btn.dataset.fps;
-                _syncFpsCards();
-                _updateExpSummary();
-            });
-        }
-
-        // Format cards
-        const fmtGrid = $('ive-exp-fmt-grid');
-        if (fmtGrid) {
-            fmtGrid.innerHTML = _FORMATS.map(f =>
-                `<button class="ive-exp-fmt-btn" data-fmt="${f.val}">
-                    <div class="ive-exp-fmt-name">${eh(f.label)}</div>
-                    <div class="ive-exp-fmt-desc">${eh(f.desc)}</div>
-                    ${f.badge ? `<div class="ive-exp-fmt-badge">${eh(f.badge)}</div>` : ''}
-                    ${f.isAudio ? '<div class="ive-exp-fmt-audio-tag">Аудио</div>' : ''}
-                </button>`
-            ).join('');
-            fmtGrid.addEventListener('click', e => {
-                const btn = e.target.closest('.ive-exp-fmt-btn');
-                if (!btn) return;
-                const fmtEl = $('ive-exp-format');
-                if (fmtEl) fmtEl.value = btn.dataset.fmt;
-                _syncFmtCards();
-                _updateExpSummary();
-            });
-        }
-
-        // Preset buttons
-        const presetList = $('ive-exp-preset-list');
-        if (presetList) {
-            presetList.innerHTML = _QUALITY_PRESETS.map(p =>
-                `<button class="ive-exp-preset-btn" data-preset="${p.key}">
-                    <div>
-                        <div class="ive-exp-preset-name">${eh(p.label)}</div>
-                        <div class="ive-exp-preset-desc">${eh(p.desc)}</div>
-                    </div>
-                </button>`
-            ).join('');
-            presetList.addEventListener('click', e => {
-                const btn = e.target.closest('.ive-exp-preset-btn');
-                if (!btn) return;
-                const preset = _QUALITY_PRESETS.find(p => p.key === btn.dataset.preset);
-                if (!preset) return;
-                const qIdx = _Q_LEVELS.findIndex(q => q.val === preset.quality);
-                if (qIdx >= 0) { const sl = $('ive-exp-q-slider'); if (sl) sl.value = qIdx; _updateQCard(qIdx); }
-                const codecEl = $('ive-exp-codec'); if (codecEl) codecEl.value = preset.codec;
-                const fpsEl   = $('ive-exp-fps');   if (fpsEl)   fpsEl.value   = preset.fps;
-                const abEl    = $('ive-exp-audio-bitrate'); if (abEl) abEl.value = preset.audioBitrate;
-                _syncCodecCards(); _syncFpsCards(); _updateExpSummary();
-                toast(`Пресет применён: ${preset.label}`, 'ok');
-            });
-        }
-
-        // Audio bitrate change → update summary
-        $('ive-exp-audio-bitrate')?.addEventListener('change', _updateExpSummary);
-
-        // Open modal button
-        $('ive-exp-settings-btn')?.addEventListener('click', () => {
-            _syncQSlider(); _syncResCards(); _syncCodecCards(); _syncFpsCards(); _syncFmtCards();
-            _updateExpResCur(); _updateExpSummary();
-            modal.hidden = false;
-        });
-
-        // Close modal
-        $('ive-exp-modal-close')?.addEventListener('click', () => { modal.hidden = true; });
-        $('ive-exp-modal-cancel')?.addEventListener('click', () => { modal.hidden = true; });
-        $('ive-exp-modal-ok')?.addEventListener('click', () => {
-            _updatePreviewSize(); renderPreview();
-            modal.hidden = true;
-            _updateExpSummary();
-        });
-
-        // Close on overlay click
-        modal.addEventListener('click', e => { if (e.target === modal) modal.hidden = true; });
-
-        // Initial sync
-        _syncQSlider(); _syncResCards(); _syncCodecCards(); _syncFpsCards(); _syncFmtCards();
-        _updateExpResCur(); _updateExpSummary();
-    }
-
-    _initExpModal();
 
     // ══════════════════════════════════════════════════════════════════════════
     // Upload helpers
@@ -1343,8 +1000,7 @@ export async function init() {
     }
 
     function _getResolution() {
-        const w = parseInt(resWEl?.value) || 1920;
-        const h = parseInt(resHEl?.value) || 1080;
+        const { w, h } = expModal.getResolution();
         return `${w}x${h}`;
     }
 
@@ -4481,7 +4137,8 @@ export async function init() {
     async function _startExport() {
         if (!S.clips.length) { toast('Нет клипов для экспорта', 'warn'); return; }
 
-        const fmtVal = $('ive-exp-format').value;
+        const settings    = expModal.getSettings();
+        const fmtVal      = settings.format;
         const isAudioOnly = fmtVal.startsWith('audio:');
         const audioFmt    = isAudioOnly ? fmtVal.slice(6) : '';
 
@@ -4531,14 +4188,14 @@ export async function init() {
         const fd = new FormData();
         fd.append('project_json',   projectPayload);
         fd.append('output_format',  fmtVal);
-        fd.append('codec',          $('ive-exp-codec')?.value || '');
-        fd.append('resolution',     _getResolution());
-        fd.append('fps',            $('ive-exp-fps')?.value || '30');
-        fd.append('quality',        $('ive-exp-quality')?.value || 'medium');
-        fd.append('audio_codec',    $('ive-exp-audio-codec')?.value || 'aac');
-        fd.append('audio_bitrate',  $('ive-exp-audio-bitrate')?.value || '192k');
-        fd.append('audio_sr',       $('ive-exp-audio-sr')?.value || '44100');
-        fd.append('audio_ch',       $('ive-exp-audio-ch')?.value || '2');
+        fd.append('codec',          settings.codec);
+        fd.append('resolution',     settings.resolution);
+        fd.append('fps',            settings.fps);
+        fd.append('quality',        settings.quality);
+        fd.append('audio_codec',    settings.audioCodec);
+        fd.append('audio_bitrate',  settings.audioBitrate);
+        fd.append('audio_sr',       settings.audioSR);
+        fd.append('audio_ch',       settings.audioCh);
         try {
             await synthesizeStream('/api/imgvid/export', { method: 'POST', body: fd }, {
                 progress(val, desc) {
@@ -4868,41 +4525,13 @@ export async function init() {
 
     // → imgvid/export.js (getExportSettings)
     function _getExportSettings() {
-        return {
-            format:       $('ive-exp-format')?.value       || 'mp4',
-            codec:        $('ive-exp-codec')?.value        || '',
-            resolution:   _getResolution(),
-            fps:          $('ive-exp-fps')?.value          || '30',
-            quality:      $('ive-exp-quality')?.value      || 'medium',
-            audioCodec:   $('ive-exp-audio-codec')?.value || 'aac',
-            audioBitrate: $('ive-exp-audio-bitrate')?.value || '192k',
-            audioSR:      $('ive-exp-audio-sr')?.value    || '44100',
-            audioCh:      $('ive-exp-audio-ch')?.value    || '2',
-        };
+        return expModal.getSettings();
     }
 
     // → imgvid/export.js (applyExportSettings)
     function _applyExportSettings(s) {
         if (!s) return;
-        const fmtEl   = $('ive-exp-format');
-        const codecEl = $('ive-exp-codec');
-        const fpsEl   = $('ive-exp-fps');
-        const qualEl  = $('ive-exp-quality');
-        if (s.format  && fmtEl)   fmtEl.value   = s.format;
-        if (s.codec   !== undefined && codecEl) codecEl.value = s.codec || '';
-        if (s.fps     && fpsEl)   fpsEl.value   = String(s.fps);
-        if (s.quality && qualEl)  qualEl.value  = s.quality;
-        if (s.resolution) {
-            const [w, h] = s.resolution.split('x').map(Number);
-            if (resWEl && w) resWEl.value = w;
-            if (resHEl && h) resHEl.value = h;
-        }
-        if (s.audioCodec   && $('ive-exp-audio-codec'))   $('ive-exp-audio-codec').value   = s.audioCodec;
-        if (s.audioBitrate && $('ive-exp-audio-bitrate')) $('ive-exp-audio-bitrate').value = s.audioBitrate;
-        if (s.audioSR      && $('ive-exp-audio-sr'))      $('ive-exp-audio-sr').value      = s.audioSR;
-        if (s.audioCh      && $('ive-exp-audio-ch'))      $('ive-exp-audio-ch').value      = s.audioCh;
-        _syncQSlider(); _syncResCards(); _syncCodecCards(); _syncFpsCards(); _syncFmtCards();
-        _updateExpResCur(); _updateExpSummary();
+        expModal.applySettings(s);
         _updatePreviewSize();
     }
 }

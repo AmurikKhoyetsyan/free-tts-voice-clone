@@ -1,0 +1,251 @@
+/* ── Export Settings Modal Component ─────────────────────────────────────── */
+/* Uses expm- prefix; hidden by default via :not([hidden]) fix */
+
+@keyframes expmIn {
+    from { opacity: 0; transform: scale(.96); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+/* Overlay */
+.expm-overlay { display: none; position: fixed; inset: 0; z-index: 9100; }
+.expm-overlay:not([hidden]) {
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.78); backdrop-filter: blur(6px); padding: 16px;
+}
+
+/* Box */
+.expm-box {
+    background: var(--bg1); border: 1px solid var(--border);
+    border-radius: 14px; width: min(900px, 100%); max-height: 90vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 32px 80px rgba(0,0,0,.6);
+    animation: expmIn .18s ease both;
+}
+
+/* Header */
+.expm-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 22px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.expm-title {
+    font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: .01em;
+}
+.expm-close {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 16px; padding: 4px 9px; border-radius: 6px;
+    transition: background .12s, color .12s; line-height: 1;
+}
+.expm-close:hover { background: var(--bg3); color: var(--text); }
+
+/* Layout: sidebar nav + content */
+.expm-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+/* Nav sidebar */
+.expm-nav {
+    width: 140px; flex-shrink: 0; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 10px 0;
+    background: var(--bg2);
+}
+.expm-tab {
+    padding: 11px 18px; background: none; border: none;
+    border-left: 3px solid transparent;
+    text-align: left; font-size: 13px; color: var(--text-dim);
+    cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.expm-tab:hover { background: var(--bg3); color: var(--text); }
+.expm-tab.active {
+    color: var(--accent, #4a9eff);
+    border-left-color: var(--accent, #4a9eff);
+    background: rgba(74,158,255,.09);
+    font-weight: 600;
+}
+
+/* Content area */
+.expm-content { flex: 1; overflow-y: auto; padding: 22px 24px; }
+
+/* Panes */
+.expm-pane { display: none; }
+.expm-pane.active { display: block; }
+
+/* Section */
+.expm-section { margin-bottom: 26px; }
+.expm-sh {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-dim); margin-bottom: 14px; padding-bottom: 7px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ── Quality slider ──────────────────────────────────────────────────────── */
+.expm-q-track { margin-bottom: 6px; }
+.expm-q-slider {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 7px;
+    border-radius: 4px; outline: none; cursor: pointer;
+    /* gradient track: red→orange→yellow→green→cyan→purple→pink */
+    background: linear-gradient(to right,
+        #ef4444 0%, #f97316 17%, #eab308 33%, #22c55e 50%,
+        #06b6d4 67%, #8b5cf6 83%, #ec4899 100%);
+}
+.expm-q-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--expm-thumb-color, #eab308); cursor: pointer;
+    border: 3px solid var(--bg1);
+    box-shadow: 0 0 0 2px var(--expm-thumb-color, #eab308),
+                0 2px 8px rgba(0,0,0,.4);
+    transition: box-shadow .15s, background .15s;
+}
+.expm-q-slider::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--expm-thumb-color, #eab308); cursor: pointer;
+    border: 3px solid var(--bg1);
+    box-shadow: 0 0 0 2px var(--expm-thumb-color, #eab308);
+}
+.expm-q-labels {
+    display: flex; justify-content: space-between;
+    font-size: 9px; margin-top: 8px; gap: 2px;
+}
+.expm-q-lbl { flex: 1; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+
+/* Quality card */
+.expm-q-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 13px 16px; margin-top: 12px;
+    border-left: 4px solid var(--accent, #4a9eff);
+    transition: border-left-color .2s;
+}
+.expm-q-card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.expm-q-badge {
+    font-size: 12px; font-weight: 700; padding: 3px 12px; border-radius: 20px;
+    color: #fff; white-space: nowrap; flex-shrink: 0;
+    transition: background .2s;
+}
+.expm-q-meta { font-size: 11px; color: var(--text-dim); }
+.expm-q-desc { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+
+/* Preset list */
+.expm-preset-list { display: flex; flex-direction: column; gap: 7px; }
+.expm-preset-btn {
+    width: 100%; padding: 11px 15px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 9px; text-align: left; cursor: pointer; color: var(--text);
+    transition: background .12s, border-color .12s;
+    display: flex; align-items: center; gap: 12px;
+}
+.expm-preset-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.expm-preset-icon { font-size: 20px; flex-shrink: 0; }
+.expm-preset-body { flex: 1; min-width: 0; }
+.expm-preset-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.expm-preset-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+/* ── Resolution grid ─────────────────────────────────────────────────────── */
+.expm-res-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 4px;
+}
+.expm-res-card {
+    padding: 11px 13px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 9px; cursor: pointer; transition: background .12s, border-color .12s;
+}
+.expm-res-card:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.expm-res-card.active {
+    border-color: var(--accent, #4a9eff);
+    background: rgba(74,158,255,.12);
+}
+.expm-res-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.expm-res-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.expm-res-hint { font-size: 10px; color: var(--text-dim); margin-top: 4px; font-style: italic; display: none; }
+.expm-res-card.active .expm-res-hint { display: block; }
+
+/* Social presets */
+.expm-social { display: flex; flex-direction: column; gap: 11px; }
+.expm-social-group { display: flex; align-items: flex-start; gap: 10px; }
+.expm-social-plat { font-size: 11px; font-weight: 700; color: var(--text-dim); min-width: 130px; padding-top: 5px; }
+.expm-social-items { display: flex; flex-wrap: wrap; gap: 5px; }
+.expm-social-btn {
+    padding: 4px 13px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 20px; cursor: pointer; font-size: 11px; color: var(--text);
+    transition: background .12s, border-color .12s;
+}
+.expm-social-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.expm-social-btn.active {
+    border-color: var(--accent, #4a9eff);
+    background: rgba(74,158,255,.15);
+    color: var(--accent, #4a9eff); font-weight: 600;
+}
+
+/* Custom resolution */
+.expm-custom-res { display: flex; align-items: flex-end; gap: 9px; flex-wrap: wrap; }
+.expm-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); }
+.expm-res-sep { color: var(--text-dim); align-self: flex-end; margin-bottom: 7px; font-size: 14px; }
+.expm-res-cur { font-size: 11px; color: var(--text-dim); margin-top: 9px; font-weight: 500; }
+
+/* ── Codec pills ─────────────────────────────────────────────────────────── */
+.expm-codec-grid { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 9px; }
+.expm-codec-btn {
+    padding: 6px 16px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text);
+    transition: background .12s, border-color .12s, color .12s;
+}
+.expm-codec-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.expm-codec-btn.active {
+    border-color: var(--accent, #4a9eff);
+    background: rgba(74,158,255,.15);
+    color: var(--accent, #4a9eff);
+}
+.expm-codec-hint { font-size: 11px; color: var(--text-dim); font-style: italic; min-height: 18px; }
+
+/* ── FPS tiles ───────────────────────────────────────────────────────────── */
+.expm-fps-row { display: flex; gap: 8px; }
+.expm-fps-btn {
+    flex: 1; padding: 14px 4px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 9px; cursor: pointer; color: var(--text); text-align: center;
+    transition: background .12s, border-color .12s, color .12s;
+    font-size: 15px; font-weight: 800;
+}
+.expm-fps-num { display: block; }
+.expm-fps-sub { display: block; font-size: 9px; color: var(--text-dim); font-weight: 400; margin-top: 3px; }
+.expm-fps-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.expm-fps-btn.active {
+    border-color: var(--accent, #4a9eff);
+    background: rgba(74,158,255,.15);
+    color: var(--accent, #4a9eff);
+}
+.expm-fps-btn.active .expm-fps-sub { color: var(--accent, #4a9eff); opacity: .7; }
+
+/* ── Audio grid ──────────────────────────────────────────────────────────── */
+.expm-audio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.expm-field { display: flex; flex-direction: column; gap: 5px; }
+.expm-field-lbl { font-size: 11px; color: var(--text-dim); font-weight: 500; }
+
+/* ── Format grid ─────────────────────────────────────────────────────────── */
+.expm-fmt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 9px; }
+.expm-fmt-btn {
+    padding: 13px 8px; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 9px; cursor: pointer; text-align: center;
+    transition: background .12s, border-color .12s; position: relative;
+}
+.expm-fmt-btn:hover { background: var(--bg3); border-color: var(--accent, #4a9eff); }
+.expm-fmt-btn.active { border-color: var(--accent, #4a9eff); background: rgba(74,158,255,.12); }
+.expm-fmt-btn.is-audio { background: rgba(139,92,246,.06); border-color: rgba(139,92,246,.3); }
+.expm-fmt-btn.is-audio:hover { background: rgba(139,92,246,.12); border-color: #8b5cf6; }
+.expm-fmt-btn.is-audio.active { background: rgba(139,92,246,.18); border-color: #8b5cf6; }
+.expm-fmt-name { font-size: 16px; font-weight: 800; color: var(--text); }
+.expm-fmt-desc { font-size: 10px; color: var(--text-dim); margin-top: 3px; line-height: 1.3; }
+.expm-fmt-badge {
+    font-size: 9px; padding: 2px 6px; border-radius: 4px;
+    background: var(--accent, #4a9eff); color: #fff;
+    margin-top: 5px; display: inline-block;
+}
+.expm-fmt-audio-tag {
+    font-size: 9px; padding: 2px 6px; border-radius: 4px;
+    background: #8b5cf6; color: #fff; margin-top: 5px; display: inline-block;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.expm-footer {
+    display: flex; align-items: center; gap: 10px; padding: 13px 22px;
+    border-top: 1px solid var(--border); background: var(--bg2);
+    flex-shrink: 0; flex-wrap: wrap;
+}
+.expm-footer-sum {
+    flex: 1; font-size: 11px; color: var(--text-dim);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
