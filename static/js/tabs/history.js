@@ -567,7 +567,7 @@ export async function init() {
             </div>
             <div class="hist-btns">
                 <button class="hist-btn accent" data-paction="open"   title="Открыть в редакторе">${ICONS.edit}</button>
-                <button class="hist-btn"        data-paction="amur"   title="Скачать .amur">${ICONS.download}</button>
+                <button class="hist-btn"        data-paction="amur"   title="Скачать .project">${ICONS.download}</button>
                 <button class="hist-btn"        data-paction="rename" title="Переименовать">${ICONS.pencil}</button>
                 <button class="hist-btn danger" data-paction="delete" title="Удалить">${ICONS.trash}</button>
             </div>
@@ -600,16 +600,20 @@ export async function init() {
         }
         if (action === 'amur') {
             try {
-                const r = await fetch(`/api/imgvid/projects/${pid}/pack`);
-                if (!r.ok) { toast('Ошибка загрузки', 'err'); return; }
+                const r = await fetch(`/api/imgvid/projects/${encodeURIComponent(pid)}/pack`);
+                if (!r.ok) {
+                    let msg = 'Ошибка загрузки';
+                    try { const d = await r.json(); msg = d.detail || msg; } catch (_) {}
+                    toast(msg, 'err'); return;
+                }
                 const blob = await r.blob();
                 const pName = row.querySelector('.hist-name')?.textContent || 'project';
-                const fname = pName.replace(/[^\wа-яА-Я\-]/g, '_') + '.amur';
+                const fname = pName.replace(/[^\wа-яА-Я\-]/g, '_') + '.project';
                 const url = URL.createObjectURL(blob);
                 const a = Object.assign(document.createElement('a'), { href: url, download: fname });
                 document.body.appendChild(a); a.click(); a.remove();
                 URL.revokeObjectURL(url);
-                toast('Проект скачан как .amur', 'ok');
+                toast('Проект скачан как .project', 'ok');
             } catch (e2) { toast(e2.message, 'err'); }
             return;
         }

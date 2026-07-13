@@ -1,4 +1,4 @@
-import os, re, json, uuid, shutil, subprocess, tempfile, threading, queue, datetime, io, zipfile
+import os, re, json, uuid, shutil, subprocess, tempfile, threading, queue, datetime, io, zipfile, urllib.parse
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -403,12 +403,15 @@ async def pack_project(pid: str):
     with open(path, encoding="utf-8") as f:
         project = json.load(f)
     buf = _proj_ops._make_project_buf(project)
-    safe_name = re.sub(r'[^\w\-]', '_', project.get("name", "project"))
+    raw_name = project.get("name", "project")
+    # ASCII fallback (latin-1 safe) + RFC 5987 UTF-8 encoded filename for Cyrillic/Unicode support
+    ascii_name = re.sub(r'[^\w\-]', '_', raw_name, flags=re.ASCII) or "project"
+    utf8_name  = urllib.parse.quote(raw_name + ".project", safe="")
     app_log(f"Project packed as .project: {pid}", "INFO", "ImgVid")
     return Response(
         content=buf.read(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.project"'},
+        headers={"Content-Disposition": f'attachment; filename="{ascii_name}.project"; filename*=UTF-8\'\'{utf8_name}'},
     )
 
 
