@@ -139,6 +139,7 @@ export async function init() {
     const playheadEl    = $('ive-playhead');
     const timeRulerEl   = $('ive-time-ruler');
     const audioLblEl    = $('ive-audio-lbl');
+    const labelsScroll  = $('ive-labels-scroll');
     const propsBody     = $('ive-props-body');
     // Transition preview elements
     const previewContentNext = $('ive-preview-content-next');
@@ -493,6 +494,11 @@ export async function init() {
     });
 
     // ── Timeline interaction ──────────────────────────────────────────────────
+    // Sync labels column vertical scroll with tracks area
+    tracksScroll.addEventListener('scroll', () => {
+        if (labelsScroll) labelsScroll.scrollTop = tracksScroll.scrollTop;
+    }, { passive: true });
+
     tracksScroll.addEventListener('click', e => {
         if (e.target.closest('.ive-tl-clip') || e.target.closest('.ive-tl-audio-item') || e.target.closest('.ive-tl-sub-item') || e.target.closest('.ive-tl-pip-item')) return;
         const rect = tracksInner.getBoundingClientRect();
@@ -790,6 +796,8 @@ export async function init() {
             _clearAllSelections();                                                              break;
         case 'c': case 'C':
             if (e.ctrlKey) { e.preventDefault(); _copySelected(); }                            break;
+        case 'x': case 'X':
+            if (e.ctrlKey) { e.preventDefault(); _cutSelected(); }                             break;
         case 'v': case 'V':
             if (e.ctrlKey) { e.preventDefault(); _pasteSelected(); }                           break;
         }
@@ -896,13 +904,24 @@ export async function init() {
         renderAll();
     }
 
+    function _findFreeAudioOffset() {
+        if (!S.audioTracks.length) return 0;
+        let maxEnd = 0;
+        for (const track of S.audioTracks) {
+            const start = track.startOffset || 0;
+            const dur = track.duration !== undefined ? track.duration : (track.originalDuration || 5);
+            maxEnd = Math.max(maxEnd, start + dur);
+        }
+        return maxEnd;
+    }
+
     async function _uploadAudio(file) {
         try {
             const fd = new FormData(); fd.append('file', file);
             const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: 0, trimIn: 0 };
+            const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(), trimIn: 0 };
             S.audioTracks.push(track);
             _pushHistory();
             S.dirty = true; log('Аудио добавлено: ' + d.original, 'done');
@@ -2647,7 +2666,7 @@ export async function init() {
                     });
                     const d = await r.json();
                     if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-                    const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: 0, trimIn: 0, originalDuration: d.duration || undefined };
+                    const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(), trimIn: 0, originalDuration: d.duration || undefined };
                     S.audioTracks.push(track);
                     _pushHistory();
                     S.dirty = true; log('Аудио извлечено: ' + d.original, 'done');
@@ -4416,15 +4435,43 @@ export async function init() {
         toast('Скопировано объектов: ' + count, 'ok');
     }
 
+    function _cutSelected() {
+        const data = {};
+        let count = 0;
+        if (S.selIdxs.size > 0 || S.selIdx >= 0) {
+            const idxs = S.selIdxs.size > 0 ? [...S.selIdxs].sort((a,b)=>a-b) : [S.selIdx];
+            data.clips = idxs.filter(i => i >= 0 && i < S.clips.length).map(i => JSON.parse(JSON.stringify(S.clips[i])));
+            count += data.clips.length;
+        }
+        if (S.selAudioIdxs.size > 0 || S.selAudioIdx >= 0) {
+            const idxs = S.selAudioIdxs.size > 0 ? [...S.selAudioIdxs].sort((a,b)=>a-b) : [S.selAudioIdx];
+            data.audio = idxs.filter(i => i >= 0 && i < S.audioTracks.length).map(i => JSON.parse(JSON.stringify(S.audioTracks[i])));
+            count += data.audio.length;
+        }
+        if (S.selSubIdxs.size > 0 || S.selSubIdx >= 0) {
+            const idxs = S.selSubIdxs.size > 0 ? [...S.selSubIdxs].sort((a,b)=>a-b) : [S.selSubIdx];
+            data.subs = idxs.filter(i => i >= 0 && i < S.subtitles.length).map(i => JSON.parse(JSON.stringify(S.subtitles[i])));
+            count += data.subs.length;
+        }
+        if (S.selPipIdxs.size > 0 || S.selPipIdx >= 0) {
+            const idxs = S.selPipIdxs.size > 0 ? [...S.selPipIdxs].sort((a,b)=>a-b) : [S.selPipIdx];
+            data.pip = idxs.filter(i => i >= 0 && i < S.pipLayers.length).map(i => JSON.parse(JSON.stringify(S.pipLayers[i])));
+            count += data.pip.length;
+        }
+        if (count === 0) { toast('Ничего не выбрано', 'info'); return; }
+        _clipboard = data;
+        _deleteSelectedClip();
+        toast('Вырезано объектов: ' + count, 'ok');
+    }
+
     function _pasteSelected() {
         if (!_clipboard) { toast('Буфер обмена пуст', 'info'); return; }
         let count = 0;
         const t = S.currentTime;
 
         // Compute delta to shift time-based objects so the earliest one starts at playhead.
-        // Clips (sequential) are handled separately via array index.
+        // Clips (sequential) and audio are handled separately; subs/pip use delta.
         const timeBased = [];
-        if (_clipboard.audio?.length) _clipboard.audio.forEach(a => timeBased.push(a.startOffset || 0));
         if (_clipboard.subs?.length)  _clipboard.subs.forEach(s  => timeBased.push(s.start || 0));
         if (_clipboard.pip?.length)   _clipboard.pip.forEach(p   => timeBased.push(p.startTime || 0));
         const minT  = timeBased.length ? Math.min(...timeBased) : 0;
@@ -4445,11 +4492,13 @@ export async function init() {
             count += newClips.length;
         }
 
-        // Audio — place at playhead, preserving relative offsets between tracks.
+        // Audio — place after the last existing track, preserving relative offsets.
         if (_clipboard.audio?.length) {
+            const freeOff = _findFreeAudioOffset();
+            const srcMin = Math.min(..._clipboard.audio.map(a => a.startOffset || 0));
             const newAudio = _clipboard.audio.map(a => {
-                const newOff = Math.max(0, Math.round(((a.startOffset || 0) + delta) * 1000) / 1000);
-                return { ...a, id: uid(), startOffset: newOff };
+                const relOff = (a.startOffset || 0) - srcMin;
+                return { ...a, id: uid(), startOffset: Math.round((freeOff + relOff) * 1000) / 1000 };
             });
             newAudio.forEach(a => S.audioTracks.push(a));
             S.selAudioIdxs = new Set(newAudio.map((_, j) => S.audioTracks.length - newAudio.length + j));
