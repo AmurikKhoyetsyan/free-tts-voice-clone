@@ -843,7 +843,7 @@
                             <div id="ive-media-list" class="ive-media-list"></div>
                             <div class="ive-global-dur-row">
                                 <label style="flex:1;font-size:11px">Длит. (с)</label>
-                                <input class="ive-input" type="number" id="ive-global-dur" min="0.5" max="60" step="0.5" value="3" style="width:52px">
+                                <input class="ive-input" type="number" id="ive-global-dur" min="0.5" max="60" step="0.5" value="3" style="width:80px">
                                 <button class="btn btn-sm" id="ive-apply-dur-btn">↻</button>
                             </div>
                         </div>
@@ -912,6 +912,7 @@
                         <div class="ive-timeline-hdr">
                             <span style="font-size:11px;color:var(--text-dim)">Timeline</span>
                             <div style="display:flex;align-items:center;gap:8px">
+                                <button class="btn btn-sm" id="ive-select-all-btn" title="Выделить всё (Ctrl+A)" style="padding:1px 7px;font-size:10px;height:20px;line-height:1">Всё</button>
                                 <span style="font-size:10px;color:var(--text-dim)">Ctrl+↕ = зум</span>
                                 <span id="ive-total-dur" style="color:var(--accent);font-size:11px">0.0с</span>
                             </div>
@@ -920,10 +921,12 @@
                             <!-- Fixed labels column -->
                             <div class="ive-track-labels-col" id="ive-track-labels-col">
                                 <div class="ive-ruler-lbl-space"></div>
-                                <div class="ive-track-lbl" id="ive-video-lbl">VIDEO</div>
-                                <div class="ive-track-lbl" id="ive-audio-lbl">AUDIO</div>
-                                <div class="ive-track-lbl" id="ive-subs-lbl">SUBS</div>
-                                <div class="ive-track-lbl" id="ive-pip-lbl">PIP</div>
+                                <div class="ive-labels-scroll" id="ive-labels-scroll">
+                                    <div class="ive-track-lbl" id="ive-video-lbl">VIDEO</div>
+                                    <div class="ive-track-lbl" id="ive-audio-lbl">AUDIO</div>
+                                    <div class="ive-track-lbl" id="ive-subs-lbl">SUBS</div>
+                                    <div class="ive-track-lbl" id="ive-pip-lbl">PIP</div>
+                                </div>
                             </div>
                             <!-- Scrollable track area -->
                             <div class="ive-tracks-scroll" id="ive-tracks-scroll">

@@ -2,11 +2,10 @@
 
 .ive-layout {
     display: grid;
-    grid-template-columns: 220px 1fr 260px;
+    grid-template-columns: 260px 1fr 260px;
     grid-template-rows: 1fr;
     height: calc(100vh - 54px);
     gap: 0;
-    overflow: hidden;
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
@@ -16,7 +15,6 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
 }
 
 .ive-sidebar-inner {
@@ -103,14 +101,20 @@
 /* ── Main area ──────────────────────────────────────────────────────────── */
 .ive-main {
     grid-column: 2;
-    display: flex; flex-direction: column;
-    overflow: hidden; background: var(--bg1);
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    background: var(--bg1);
 }
 
 /* ── Preview ────────────────────────────────────────────────────────────── */
 .ive-preview-wrap {
-    flex: 1; display: flex; flex-direction: column;
-    overflow: hidden; background: #0a0c10; min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #0a0c10;
+    min-height: 350px;
 }
 
 .ive-preview-inner {
@@ -158,8 +162,12 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
 }
-.ive-sub-text-inner { display: block; width: 100%; }
+.ive-sub-overlay:active { cursor: grabbing; }
+.ive-sub-text-inner { display: block; width: 100%; user-select: none; -webkit-user-select: none; }
 .ive-sub-overlay.selected {
     outline: 2px dashed rgba(255, 210, 0, 0.95);
     outline-offset: 8px;
@@ -269,7 +277,7 @@
 /* ── Multi-track Timeline ────────────────────────────────────────────────── */
 .ive-timeline-wrap {
     background: #0d1117; border-top: 1px solid var(--border);
-    flex-shrink: 0; height: 210px;
+    flex-shrink: 0; height: 300px;
     display: flex; flex-direction: column; overflow: hidden;
 }
 
@@ -287,6 +295,7 @@
     border-right: 1px solid var(--border); background: #0a0c10;
 }
 .ive-ruler-lbl-space { height: 18px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.ive-labels-scroll { overflow: hidden; flex: 1; }
 .ive-track-lbl {
     display: flex; align-items: center; justify-content: center;
     font-size: 8px; font-weight: 700; color: var(--text-dim);
@@ -296,17 +305,18 @@
 #ive-video-lbl { height: 60px; }
 #ive-audio-lbl { height: 44px; }
 #ive-subs-lbl  { height: 30px; }
+#ive-pip-lbl   { height: 32px; }
 
 /* Scrollable track area */
 .ive-tracks-scroll {
-    flex: 1; overflow-x: auto; overflow-y: hidden;
+    flex: 1; overflow-x: auto; overflow-y: auto;
     position: relative; cursor: crosshair;
 }
 .ive-tracks-inner { position: relative; min-height: 100%; }
 
 /* Time ruler */
 .ive-time-ruler {
-    height: 18px; position: relative;
+    height: 18px; position: sticky; top: 0; z-index: 20;
     background: #0a0c10; border-bottom: 1px solid var(--border); overflow: hidden;
 }
 .ive-ruler-tick { position: absolute; top: 0; width: 1px; height: 7px; background: var(--border); }
@@ -638,6 +648,9 @@
 
 /* Multi-select clip highlighting */
 .ive-tl-clip.multi-sel { outline: 2px solid rgba(74,158,255,0.7); }
+.ive-tl-sub-item.multi-sel  { outline: 2px solid rgba(74,158,255,0.7); background: rgba(74,158,255,0.2); }
+.ive-tl-pip-item.multi-sel  { outline: 2px solid rgba(74,158,255,0.7); background: rgba(74,158,255,0.45); }
+.ive-tl-audio-item.multi-sel { outline: 2px solid rgba(74,158,255,0.7); }
 
 /* Template apply modal — DnD file slots */
 .tmpl-dnd-slot {
