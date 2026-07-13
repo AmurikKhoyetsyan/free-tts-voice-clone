@@ -168,6 +168,17 @@ export async function init() {
     // PIP element pool: pip.id → { wrapper, img, video }
     const _pipEls = new Map();
 
+    // History: property panel field changes
+    let _propsHistTimer = null;
+    propsBody.addEventListener('change', () => {
+        clearTimeout(_propsHistTimer);
+        _pushHistory();
+    });
+    propsBody.addEventListener('input', () => {
+        clearTimeout(_propsHistTimer);
+        _propsHistTimer = setTimeout(() => _pushHistory(), 700);
+    });
+
     let _amurMode = 'save';
     let _amurResolve = null;
 
@@ -597,6 +608,7 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
+            _historyStack.length = 0; _historyIdx = -1;
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -619,6 +631,7 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
+            _historyStack.length = 0; _historyIdx = -1;
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -2209,6 +2222,7 @@ export async function init() {
                     if (si === srcIdx) return;
                     keys.forEach(k => { if (src[k] !== undefined) sub[k] = src[k]; });
                 });
+                _pushHistory();
                 S.dirty = true; renderProps(); renderPreview();
                 toast(`Стиль #${srcIdx + 1} применён к ${subs.length - 1} субтитрам`, 'ok');
             });
@@ -2233,6 +2247,7 @@ export async function init() {
             btn.addEventListener('click', () => {
                 S.subtitles.splice(+btn.dataset.sdel, 1);
                 if (S.selSubIdx >= S.subtitles.length) S.selSubIdx = S.subtitles.length - 1;
+                _pushHistory();
                 S.dirty = true; renderProps(); renderPreview(); renderTimeline();
             });
         });
@@ -2242,6 +2257,7 @@ export async function init() {
                 const si = +btn.dataset.si, key = btn.dataset.sbf;
                 const sub = S.subtitles[si]; if (!sub) return;
                 sub[key] = !sub[key]; btn.classList.toggle('active', sub[key]);
+                _pushHistory();
                 S.dirty = true; renderPreview();
             });
         });
@@ -2253,6 +2269,7 @@ export async function init() {
                 sub.align = btn.dataset.align;
                 btn.closest('.ive-row3')?.querySelectorAll('.ive-align-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+                _pushHistory();
                 S.dirty = true; renderPreview();
             });
         });
@@ -2404,6 +2421,7 @@ export async function init() {
                         if (fxDef) fxDef.params.forEach(p => { entry[p.key] = p.def; });
                         track.soundEffects.push(entry);
                     }
+                    _pushHistory();
                     S.dirty = true; _sfxRender();
                 });
             });
@@ -2437,10 +2455,11 @@ export async function init() {
             const newTrack = { ...track, id: uid(), startOffset: t, trimIn: Math.min(audioSplitPos, origDur - 0.1), duration: secondDur };
             const ti = S.audioTracks.indexOf(track);
             S.audioTracks.splice(ti + 1, 0, newTrack);
+            _pushHistory();
             S.dirty = true; renderTimeline(); renderProps();
             toast('Аудио разделено', 'ok');
         });
-        $('acp-del').addEventListener('click', () => { S.audioTracks.splice(idx, 1); S.selAudioIdx = -1; S.dirty = true; renderAll(); });
+        $('acp-del').addEventListener('click', () => { S.audioTracks.splice(idx, 1); S.selAudioIdx = -1; _pushHistory(); S.dirty = true; renderAll(); });
     }
 
     function _renderPropsSlide(clip) {
@@ -2582,6 +2601,7 @@ export async function init() {
             $('pv-crop-btn')?.addEventListener('click', () => _openCropDialog(clip));
             $('pv-reset-transform')?.addEventListener('click', () => {
                 clip.imgScale = 100; clip.imgOffsetX = 0; clip.imgOffsetY = 0; clip.crop = null;
+                _pushHistory();
                 S.dirty = true; renderPreview(); renderProps();
             });
         }
@@ -2610,6 +2630,7 @@ export async function init() {
                 c.muteAudio  = clip.muteAudio;
                 c.trimIn     = clip.trimIn;
             });
+            _pushHistory();
             S.dirty = true;
             toast(`Настройки применены к ${S.clips.length - 1} клипам`, 'ok');
             renderTimeline(); renderMediaList();
@@ -2628,6 +2649,7 @@ export async function init() {
                     if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
                     const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: 0, trimIn: 0, originalDuration: d.duration || undefined };
                     S.audioTracks.push(track);
+                    _pushHistory();
                     S.dirty = true; log('Аудио извлечено: ' + d.original, 'done');
                     renderMediaList(); renderTimeline();
                     toast('Аудио добавлено в таймлайн', 'ok');
@@ -2781,6 +2803,7 @@ export async function init() {
                 sub.align = btn.dataset.align;
                 btn.closest('.ive-row3')?.querySelectorAll('.ive-align-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
+                _pushHistory();
                 S.dirty = true; renderPreview();
             });
         });
@@ -3250,6 +3273,7 @@ export async function init() {
             _pipEls.delete(pip.id);
             S.pipLayers.splice(idx, 1);
             S.selPipIdx = -1;
+            _pushHistory();
             S.dirty = true;
             renderAll();
         });
@@ -3294,6 +3318,7 @@ export async function init() {
                 if (trans)          { c.transition = c.transition || {}; c.transition.type = trans; }
                 if (isFinite(spd))  c.speed = spd;
             });
+            _pushHistory();
             S.dirty = true;
             toast('Применено к ' + S.selIdxs.size + ' клипам', 'ok');
             renderAll();
@@ -3303,6 +3328,7 @@ export async function init() {
             sorted.forEach(i => S.clips.splice(i, 1));
             S.selIdx = S.clips.length ? 0 : -1;
             S.selIdxs = new Set(S.selIdx >= 0 ? [S.selIdx] : []);
+            _pushHistory();
             S.dirty = true;
             renderAll();
         });
@@ -3318,6 +3344,7 @@ export async function init() {
             const sorted = [...S.selSubIdxs].sort((a, b) => b - a);
             sorted.forEach(i => { if (S.subtitles[i] !== undefined) S.subtitles.splice(i, 1); });
             S.selSubIdx = -1; S.selSubIdxs = new Set();
+            _pushHistory();
             S.dirty = true; renderAll();
         });
     }
@@ -3337,6 +3364,7 @@ export async function init() {
                 S.pipLayers.splice(i, 1);
             });
             S.selPipIdx = -1; S.selPipIdxs = new Set();
+            _pushHistory();
             S.dirty = true; renderAll();
         });
     }
@@ -3360,6 +3388,7 @@ export async function init() {
         $('multi-audio-apply')?.addEventListener('click', () => {
             const vol = parseFloat($('multi-audio-vol').value);
             [...S.selAudioIdxs].forEach(i => { if (S.audioTracks[i]) S.audioTracks[i].volume = vol; });
+            _pushHistory();
             S.dirty = true;
             toast('Громкость применена к ' + S.selAudioIdxs.size + ' дорожкам', 'ok');
             renderAll();
@@ -3373,6 +3402,7 @@ export async function init() {
                 S.audioTracks.splice(i, 1);
             });
             S.selAudioIdx = -1; S.selAudioIdxs = new Set();
+            _pushHistory();
             S.dirty = true; renderAll();
         });
     }
