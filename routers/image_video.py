@@ -925,7 +925,7 @@ async def export_video(
                             if trim_in > 0:
                                 atrim_args.append(f"start={trim_in:.3f}")
                             if track_dur_f is not None:
-                                atrim_args.append(f"end={trim_in + track_dur_f:.3f}")
+                                atrim_args.append(f"end={trim_in + track_dur_f * speed:.3f}")
                             af.append(f"atrim={':'.join(atrim_args)}")
                             af.append("asetpts=PTS-STARTPTS")
                         # Speed (atempo supports 0.5–2.0 per pass; chain for wider range)
@@ -966,7 +966,7 @@ async def export_video(
                             )
                         amix_in = "".join(f"[a{j}]" for j in range(len(valid_audio)))
                         filter_parts.append(
-                            f"{amix_in}amix=inputs={len(valid_audio)}:duration=first,"
+                            f"{amix_in}amix=inputs={len(valid_audio)}:duration=longest:normalize=0,"
                             f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS[aout]"
                         )
                         audio_map = ["-map", "[aout]"]
@@ -1004,7 +1004,22 @@ async def export_video(
                     acodec = []
                     audio_map = []  # GIF container does not support audio
                 elif vcodec_name in ("libx264", "libx265"):
-                    vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
+                    if crf == 0:  # lossless
+                        if vcodec_name == "libx264":
+                            # CRF=1 instead of CRF=0: x264 CRF=0 activates a special
+                            # internal lossless encoding path (--lossless flag) which is
+                            # broken in many Windows ffmpeg builds — encoder fails silently
+                            # and the muxer writes an audio-only file.
+                            # CRF=1 uses the standard encoding path, is visually identical
+                            # to CRF=0, and plays in all players and containers.
+                            vcodec = ["-c:v", "libx264", "-crf", "1",
+                                      "-preset", "slow", "-pix_fmt", "yuv420p"]
+                        else:
+                            # x265: CRF=0 is near-lossless (not the same special mode as x264)
+                            vcodec = ["-c:v", "libx265", "-crf", "0",
+                                      "-preset", "slow", "-pix_fmt", "yuv420p"]
+                    else:
+                        vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
                 elif vcodec_name == "libvpx-vp9":
                     vp9_crf = max(0, min(63, crf * 63 // 51))
@@ -1033,7 +1048,10 @@ async def export_video(
                     vcodec = ["-c:v", "mpeg4", "-b:v", "2M", "-pix_fmt", "yuv420p"]
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
                 else:
-                    vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
+                    if crf == 0:
+                        vcodec = ["-c:v", "libx264", "-crf", "1", "-preset", "slow", "-pix_fmt", "yuv420p"]
+                    else:
+                        vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
 
                 filter_complex = ";\n".join(filter_parts)
@@ -1053,6 +1071,7 @@ async def export_video(
                 )
 
                 app_log(f"Export start: {out_name} ({len(slides)} slides)", "INFO", "ImgVid")
+                app_log(f"FFmpeg cmd: {' '.join(cmd)}", "DEBUG", "ImgVid")
                 app_log(f"filter_complex:\n{filter_complex}", "DEBUG", "ImgVid")
                 print(flush=True)
                 q.put(("progress", 0.15, "Запуск FFmpeg…"))
@@ -1099,6 +1118,18 @@ async def export_video(
                 else:
                     print_progress(100, "FFmpeg")
                     app_log(f"Export done: {out_name}", "INFO", "ImgVid")
+                    try:
+                        probe = subprocess.run(
+                            [FFPROBE, "-v", "quiet", "-show_streams",
+                             "-select_streams", "v:0", "-print_format", "compact", out_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if probe.returncode == 0 and probe.stdout.strip():
+                            app_log(f"Video stream: {probe.stdout.strip()}", "DEBUG", "ImgVid")
+                        else:
+                            app_log("WARNING: ffprobe found no video stream in output!", "WARN", "ImgVid")
+                    except Exception:
+                        pass
                     q.put(("done", out_name))
 
         except Exception as e:
@@ -1148,11 +1179,57 @@ async def export_audio_track(
     if not valid_audio:
         raise HTTPException(400, "Аудиодорожки не найдены")
 
+    # When there are no slides, derive total_dur from the audio tracks themselves
+    if total_dur == 0.0:
+        for t in valid_audio:
+            s_off = float(t.get("startOffset", 0))
+            tdur  = t.get("duration")
+            if tdur is not None:
+                total_dur = max(total_dur, s_off + float(tdur))
+
     if audio_format not in ("mp3", "wav", "flac", "aac", "ogg", "m4a", "opus"):
         audio_format = "mp3"
 
     q: queue.Queue = queue.Queue()
     _NO_WIN = 0x08000000 if os.name == "nt" else 0
+
+    def _build_audio_filter_a(t, idx, out_label):
+        """Build FFmpeg audio filter chain for one track in audio-only export."""
+        vol       = float(t.get("volume", 1.0))
+        fi        = float(t.get("fadeIn",  t.get("fade_in",  0)))
+        fo        = float(t.get("fadeOut", t.get("fade_out", 0)))
+        trim_in   = float(t.get("trimIn", 0))
+        start_off = float(t.get("startOffset", 0))
+        speed     = float(t.get("speed", 1.0))
+        track_dur = t.get("duration")
+        track_dur_f = float(track_dur) if track_dur is not None else None
+        af = []
+        # Trim raw file: start at trimIn, read track_dur_f * speed file-seconds
+        atrim_args = []
+        if trim_in > 0:
+            atrim_args.append(f"start={trim_in:.3f}")
+        if track_dur_f is not None:
+            atrim_args.append(f"end={trim_in + track_dur_f * speed:.3f}")
+        if atrim_args:
+            af.append(f"atrim={':'.join(atrim_args)}")
+            af.append("asetpts=PTS-STARTPTS")
+        # Speed adjustment (atempo supports 0.5–2.0 per pass; chain for wider range)
+        if abs(speed - 1.0) > 0.001:
+            remaining = speed
+            while remaining < 0.5:
+                af.append("atempo=0.5"); remaining /= 0.5
+            while remaining > 2.0:
+                af.append("atempo=2.0"); remaining /= 2.0
+            af.append(f"atempo={remaining:.6f}")
+        af.append(f"volume={vol}")
+        if fi > 0:
+            af.append(f"afade=t=in:ss=0:d={fi:.2f}")
+        if fo > 0:
+            fade_start = (track_dur_f - fo) if track_dur_f else max(0, total_dur - fo - start_off)
+            af.append(f"afade=t=out:st={max(0, fade_start):.2f}:d={fo:.2f}")
+        if start_off > 0:
+            af.append(f"adelay={round(start_off * 1000)}:all=1")
+        return f"[{idx}:a]{','.join(af)}{out_label}"
 
     def _audio_worker():
         try:
@@ -1162,40 +1239,20 @@ async def export_audio_track(
 
             filter_parts_a = []
             if len(valid_audio) == 1:
-                t = valid_audio[0]
-                vol = float(t.get("volume", 1.0))
-                fi = float(t.get("fadeIn", t.get("fade_in", 0)))
-                fo = float(t.get("fadeOut", t.get("fade_out", 0)))
-                trim_in = float(t.get("trimIn", 0))
-                start_off = float(t.get("startOffset", 0))
-                af = []
-                if trim_in > 0:
-                    af += [f"atrim=start={trim_in:.3f}", "asetpts=PTS-STARTPTS"]
-                af.append(f"volume={vol}")
-                if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
-                if fo > 0: af.append(f"afade=t=out:st={max(0, total_dur - fo):.2f}:d={fo:.2f}")
-                if start_off > 0: af.append(f"adelay={int(start_off * 1000)}:all=1")
-                if total_dur > 0: af.append(f"atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS")
-                filter_parts_a.append(f"[0:a]{','.join(af)}[aout]")
-                audio_map = ["-map", "[aout]"]
+                filter_parts_a.append(_build_audio_filter_a(valid_audio[0], 0, "[aout]"))
+                if total_dur > 0:
+                    filter_parts_a.append(f"[aout]atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS[aout2]")
+                    audio_map = ["-map", "[aout2]"]
+                else:
+                    audio_map = ["-map", "[aout]"]
             else:
                 for j, t in enumerate(valid_audio):
-                    vol = float(t.get("volume", 1.0))
-                    fi = float(t.get("fadeIn", t.get("fade_in", 0)))
-                    fo = float(t.get("fadeOut", t.get("fade_out", 0)))
-                    trim_in = float(t.get("trimIn", 0))
-                    start_off = float(t.get("startOffset", 0))
-                    af = []
-                    if trim_in > 0:
-                        af += [f"atrim=start={trim_in:.3f}", "asetpts=PTS-STARTPTS"]
-                    af.append(f"volume={vol}")
-                    if fi > 0: af.append(f"afade=t=in:ss=0:d={fi:.2f}")
-                    if fo > 0: af.append(f"afade=t=out:st={max(0, total_dur - fo):.2f}:d={fo:.2f}")
-                    if start_off > 0: af.append(f"adelay={int(start_off * 1000)}:all=1")
-                    filter_parts_a.append(f"[{j}:a]{','.join(af)}[a{j}]")
+                    filter_parts_a.append(_build_audio_filter_a(t, j, f"[a{j}]"))
                 amix = "".join(f"[a{j}]" for j in range(len(valid_audio)))
                 tail = f",atrim=0:{total_dur:.3f},asetpts=PTS-STARTPTS" if total_dur > 0 else ""
-                filter_parts_a.append(f"{amix}amix=inputs={len(valid_audio)}:duration=first{tail}[aout]")
+                filter_parts_a.append(
+                    f"{amix}amix=inputs={len(valid_audio)}:duration=longest:normalize=0{tail}[aout]"
+                )
                 audio_map = ["-map", "[aout]"]
 
             _codec_map_a = {

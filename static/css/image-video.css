@@ -295,7 +295,14 @@
     border-right: 1px solid var(--border); background: #0a0c10;
 }
 .ive-ruler-lbl-space { height: 18px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
-.ive-labels-scroll { overflow: hidden; flex: 1; }
+.ive-labels-scroll {
+    overflow-x: hidden;
+    overflow-y: scroll;   /* scrollable so scrollTop sync works */
+    flex: 1;
+    scrollbar-width: none;       /* Firefox */
+    -ms-overflow-style: none;    /* IE / old Edge */
+}
+.ive-labels-scroll::-webkit-scrollbar { display: none; } /* Chrome / Safari */
 .ive-track-lbl {
     display: flex; align-items: center; justify-content: center;
     font-size: 8px; font-weight: 700; color: var(--text-dim);

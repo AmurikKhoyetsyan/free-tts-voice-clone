@@ -61,8 +61,9 @@ function _syncAudio(t, force = false) {
         const trackT = t - (track.startOffset || 0);
         if (trackT < 0) { if (!el.paused) el.pause(); continue; }
         if (track.duration !== undefined && trackT >= track.duration) { if (!el.paused) el.pause(); continue; }
-        if (force || Math.abs(el.currentTime - trackT) > 0.3) {
-            el.currentTime = Math.max(0, trackT + (track.trimIn || 0));
+        const audioFileT = trackT * speed + (track.trimIn || 0);
+        if (force || Math.abs(el.currentTime - audioFileT) > 0.3) {
+            el.currentTime = Math.max(0, audioFileT);
         }
         if (S.isPlaying && el.paused) el.play().catch(() => {});
         if (!S.isPlaying && !el.paused) el.pause();
@@ -508,10 +509,15 @@ export async function init() {
         const rect = tracksScroll.getBoundingClientRect();
         const cursorOffsetX = e.clientX - rect.left;
         const timeAtCursor = (tracksScroll.scrollLeft + cursorOffsetX) / S.pxPerSec;
-        S.pxPerSec = Math.max(20, Math.min(500, S.pxPerSec * (e.deltaY < 0 ? 1.15 : 0.87)));
+        S.pxPerSec = Math.max(2, Math.min(3000, S.pxPerSec * (e.deltaY < 0 ? 1.35 : 0.74)));
         renderTimeline();
         tracksScroll.scrollLeft = timeAtCursor * S.pxPerSec - cursorOffsetX;
     }, { passive: false });
+
+    // Keep labels column aligned with vertical scroll in tracks area
+    tracksScroll.addEventListener('scroll', () => {
+        labelsScroll.scrollTop = tracksScroll.scrollTop;
+    }, { passive: true });
 
     // ── Time ruler scrubbing (mousedown + drag) ───────────────────────────────
     let _rulerDragging = false;
@@ -868,7 +874,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/clips', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
+                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, originalDuration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
                 _pushHistory();
                 S.dirty = true; log('Видеоклип добавлен: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
@@ -877,15 +883,20 @@ export async function init() {
         renderAll();
     }
 
-    function _findFreeAudioOffset() {
-        if (!S.audioTracks.length) return 0;
+    function _findFreeAudioOffset(laneIdx = undefined) {
         let maxEnd = 0;
         for (const track of S.audioTracks) {
+            if (laneIdx !== undefined && (track.laneIndex ?? 0) !== laneIdx) continue;
             const start = track.startOffset || 0;
             const dur = track.duration !== undefined ? track.duration : (track.originalDuration || 5);
             maxEnd = Math.max(maxEnd, start + dur);
         }
         return maxEnd;
+    }
+
+    function _getNextLane() {
+        if (!S.audioTracks.length) return 0;
+        return Math.max(...S.audioTracks.map(t => t.laneIndex ?? 0)) + 1;
     }
 
     async function _uploadAudio(file) {
@@ -894,7 +905,8 @@ export async function init() {
             const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(), trimIn: 0 };
+            const _newLane = _getNextLane();
+            const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(_newLane), trimIn: 0, laneIndex: _newLane };
             S.audioTracks.push(track);
             _pushHistory();
             S.dirty = true; log('Аудио добавлено: ' + d.original, 'done');
@@ -1297,13 +1309,14 @@ export async function init() {
                     const dx = ev.clientX - sx;
                     if (!moved && Math.abs(dx) < 5) return;
                     moved = true;
-                    div.classList.add('dragging');
+                    document.body.style.cursor = 'grabbing';
+                    videoTrackEl.querySelector(`[data-cidx="${i}"]`)?.classList.add('dragging');
                     // Calculate which position to insert at
                     const tlRect = videoTrackEl.getBoundingClientRect();
-                    const mouseX = ev.clientX - tlRect.left + tracksScroll.scrollLeft;
+                    const mouseX = ev.clientX - tlRect.left;
                     let dropIdx = 0, cur2 = 0;
                     for (let j = 0; j < S.clips.length; j++) {
-                        const mid = (cur2 + S.clips[j].duration / 2) * S.pxPerSec;
+                        const mid = (cur2 + (S.clips[j].duration || 3) / 2) * S.pxPerSec;
                         if (mouseX > mid) dropIdx = j + 1;
                         cur2 += S.clips[j].duration || 3;
                     }
@@ -1321,10 +1334,11 @@ export async function init() {
                     document.removeEventListener('mousemove', onMove);
                     document.removeEventListener('mouseup', onUp);
                     document.querySelectorAll('.ive-tl-drop-indicator').forEach(el => el.remove());
-                    div.classList.remove('dragging');
+                    document.body.style.cursor = '';
+                    videoTrackEl.querySelector(`[data-cidx="${i}"]`)?.classList.remove('dragging');
                     if (!moved) return;
                     const tlRect = videoTrackEl.getBoundingClientRect();
-                    const mouseX = ev.clientX - tlRect.left + tracksScroll.scrollLeft;
+                    const mouseX = ev.clientX - tlRect.left;
                     let dropIdx = 0, cur2 = 0;
                     for (let j = 0; j < S.clips.length; j++) {
                         const mid = (cur2 + (S.clips[j].duration || 3) / 2) * S.pxPerSec;
@@ -1417,152 +1431,187 @@ export async function init() {
     }
 
     function _renderAudioTracks(total, contentW) {
-        const count  = Math.max(1, S.audioTracks.length);
-        const rowH   = 44;
-        const totalH = count * rowH;
+        const rowH = 44;
+
+        // Backward compat: give every track without a laneIndex its own unique lane
+        S.audioTracks.forEach((t, i) => { if (t.laneIndex === undefined) t.laneIndex = i; });
+
+        const lanesSet = new Set(S.audioTracks.map(t => t.laneIndex));
+        const uniqueLanes = [...lanesSet].sort((a, b) => a - b);
+        if (!uniqueLanes.length) uniqueLanes.push(0);
+
+        const totalH = uniqueLanes.length * rowH;
         audioTrackEl.style.height = totalH + 'px';
         audioLblEl.style.height   = totalH + 'px';
+        audioLblEl.style.display  = 'flex';
+        audioLblEl.style.flexDirection = 'column';
+        audioLblEl.innerHTML = '';
+
         audioTrackEl.innerHTML = '';
+
         if (!S.audioTracks.length) {
+            audioLblEl.innerHTML = `<div style="height:${rowH}px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em">AUDIO</div>`;
             const empty = document.createElement('div');
             empty.className = 'ive-audio-row-inner';
             empty.innerHTML = '<div class="ive-tl-empty-abs">Нет аудиодорожек</div>';
             audioTrackEl.appendChild(empty);
             return;
         }
-        S.audioTracks.forEach((track, i) => {
+
+        uniqueLanes.forEach((laneIdx, lj) => {
+            // Label for this lane
+            const lbl = document.createElement('div');
+            lbl.style.cssText = `height:${rowH}px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,.04);flex-shrink:0`;
+            lbl.textContent = uniqueLanes.length === 1 ? 'AUDIO' : `AUDIO ${laneIdx + 1}`;
+            audioLblEl.appendChild(lbl);
+
+            // Row for this lane
             const row = document.createElement('div');
             row.className = 'ive-audio-row-inner';
             row.style.width = contentW + 'px';
-            const offsetPx = (track.startOffset || 0) * S.pxPerSec;
-            const trackDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
-            const itemW    = Math.max(40, trackDur * S.pxPerSec);
-            const item     = document.createElement('div');
-            const isMultiAudioSel = S.selAudioIdxs.size > 1 && S.selAudioIdxs.has(i);
-            item.className = `ive-tl-audio-item${i === S.selAudioIdx ? ' sel' : ''}${isMultiAudioSel ? ' multi-sel' : ''}`;
-            item.dataset.aidx = i;
-            item.style.left  = offsetPx + 'px';
-            item.style.width = itemW + 'px';
-            const canvas = document.createElement('canvas');
-            canvas.className = 'ive-waveform-canvas';
-            canvas.width  = Math.max(40, itemW); canvas.height = rowH - 4;
-            item.appendChild(canvas);
-            // Left handle: moves startOffset (keeps out-point)
-            const lh = document.createElement('div');
-            lh.className = 'ive-tl-audio-resize ive-tl-audio-resize-left';
-            item.appendChild(lh);
-            // Right handle: changes duration
-            const rh = document.createElement('div');
-            rh.className = 'ive-tl-audio-resize ive-tl-audio-resize-right';
-            item.appendChild(rh);
+            row.dataset.lane = laneIdx;
 
-            item.addEventListener('mousedown', e => {
-                if (e.target.closest('.ive-tl-audio-resize')) return;
-                if (e.button !== 0) return;
-                e.stopPropagation(); e.preventDefault();
-                if (e.ctrlKey) {
-                    if (S.selAudioIdxs.has(i)) {
-                        S.selAudioIdxs.delete(i);
-                        if (S.selAudioIdx === i) S.selAudioIdx = [...S.selAudioIdxs].at(-1) ?? -1;
+            // All tracks on this lane
+            S.audioTracks.forEach((track, i) => {
+                if ((track.laneIndex ?? 0) !== laneIdx) return;
+
+                const offsetPx = (track.startOffset || 0) * S.pxPerSec;
+                const trackDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+                const itemW    = trackDur * S.pxPerSec;
+                const item     = document.createElement('div');
+                const isMultiAudioSel = S.selAudioIdxs.size > 1 && S.selAudioIdxs.has(i);
+                item.className = `ive-tl-audio-item${i === S.selAudioIdx ? ' sel' : ''}${isMultiAudioSel ? ' multi-sel' : ''}`;
+                item.dataset.aidx = i;
+                item.style.left  = offsetPx + 'px';
+                item.style.width = itemW + 'px';
+                const canvas = document.createElement('canvas');
+                canvas.className = 'ive-waveform-canvas';
+                canvas.width  = Math.max(1, Math.floor(itemW)); canvas.height = rowH - 4;
+                item.appendChild(canvas);
+                const lh = document.createElement('div');
+                lh.className = 'ive-tl-audio-resize ive-tl-audio-resize-left';
+                item.appendChild(lh);
+                const rh = document.createElement('div');
+                rh.className = 'ive-tl-audio-resize ive-tl-audio-resize-right';
+                item.appendChild(rh);
+
+                item.addEventListener('mousedown', e => {
+                    if (e.target.closest('.ive-tl-audio-resize')) return;
+                    if (e.button !== 0) return;
+                    e.stopPropagation(); e.preventDefault();
+                    if (e.ctrlKey) {
+                        if (S.selAudioIdxs.has(i)) {
+                            S.selAudioIdxs.delete(i);
+                            if (S.selAudioIdx === i) S.selAudioIdx = [...S.selAudioIdxs].at(-1) ?? -1;
+                        } else {
+                            S.selAudioIdxs.add(i);
+                            S.selAudioIdx = i;
+                        }
+                        S.activeTab = 'slide'; renderTimeline(); renderProps();
+                        return;
+                    }
+                    if (!S.selAudioIdxs.has(i)) {
+                        S.selAudioIdx = i; S.selAudioIdxs = new Set([i]);
+                        S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
                     } else {
-                        S.selAudioIdxs.add(i);
                         S.selAudioIdx = i;
                     }
                     S.activeTab = 'slide'; renderTimeline(); renderProps();
-                    return;
-                }
-                // Preserve multi-selection if the clicked item is already selected
-                if (!S.selAudioIdxs.has(i)) {
-                    S.selAudioIdx = i; S.selAudioIdxs = new Set([i]);
-                    S.selIdx = -1; S.selIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
-                } else {
-                    S.selAudioIdx = i;
-                }
-                S.activeTab = 'slide'; renderTimeline(); renderProps();
-                const sx = e.clientX;
-                // Capture initial positions of ALL selected types for cross-type group drag
-                const _dragInitAudio = [...S.selAudioIdxs].map(idx => ({ idx, startOffset: S.audioTracks[idx]?.startOffset || 0 }));
-                const _dragInitSub = [...S.selSubIdxs].map(idx => {
-                    const s = S.subtitles[idx] || {};
-                    return { idx, start: s.start || 0, dur: (s.end || 3) - (s.start || 0) };
+                    const sx = e.clientX, sy = e.clientY;
+                    const _dragInitAudio = [...S.selAudioIdxs].map(idx => ({
+                        idx,
+                        startOffset: S.audioTracks[idx]?.startOffset || 0,
+                        laneIndex: S.audioTracks[idx]?.laneIndex ?? 0,
+                    }));
+                    const _dragInitSub = [...S.selSubIdxs].map(idx => {
+                        const s = S.subtitles[idx] || {};
+                        return { idx, start: s.start || 0, dur: (s.end || 3) - (s.start || 0) };
+                    });
+                    const _dragInitPip = [...S.selPipIdxs].map(idx => {
+                        const p = S.pipLayers[idx] || {};
+                        const st = p.startTime || 0;
+                        return { idx, startTime: st, dur: (p.endTime ?? (st + 5)) - st };
+                    });
+                    let moved = false;
+                    const onMove = ev => {
+                        if (!moved && Math.abs(ev.clientX - sx) < 4 && Math.abs(ev.clientY - sy) < 4) return;
+                        moved = true;
+                        const dx = (ev.clientX - sx) / S.pxPerSec;
+                        const laneShift = Math.round((ev.clientY - sy) / rowH);
+                        _dragInitAudio.forEach(({ idx, startOffset, laneIndex: initLane }) => {
+                            if (!S.audioTracks[idx]) return;
+                            S.audioTracks[idx].startOffset = Math.max(0, Math.round((startOffset + dx) * 10) / 10);
+                            if (laneShift !== 0) {
+                                const newLane = Math.max(0, initLane + laneShift);
+                                S.audioTracks[idx].laneIndex = newLane;
+                            }
+                        });
+                        _dragInitSub.forEach(({ idx, start, dur }) => {
+                            const s = S.subtitles[idx]; if (!s) return;
+                            const newStart = Math.max(0, Math.round((start + dx) * 10) / 10);
+                            s.start = newStart; s.end = Math.round((newStart + dur) * 10) / 10;
+                        });
+                        _dragInitPip.forEach(({ idx, startTime, dur }) => {
+                            const p = S.pipLayers[idx]; if (!p) return;
+                            const newStart = Math.max(0, Math.round((startTime + dx) * 10) / 10);
+                            p.startTime = newStart; p.endTime = Math.round((newStart + dur) * 10) / 10;
+                        });
+                        S.dirty = true; renderTimeline(); renderProps();
+                    };
+                    const onUp = () => {
+                        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                        if (moved) _pushHistory();
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
                 });
-                const _dragInitPip = [...S.selPipIdxs].map(idx => {
-                    const p = S.pipLayers[idx] || {};
-                    const st = p.startTime || 0;
-                    return { idx, startTime: st, dur: (p.endTime ?? (st + 5)) - st };
+                lh.addEventListener('mousedown', e => {
+                    e.stopPropagation(); e.preventDefault();
+                    const sx = e.clientX, sOff = track.startOffset || 0, sTrimIn = track.trimIn || 0;
+                    const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - sOff);
+                    const outPt = sOff + sDur;
+                    let moved = false;
+                    const onMove = ev => {
+                        moved = true;
+                        const dx = (ev.clientX - sx) / S.pxPerSec;
+                        const maxTrimIn = (track.originalDuration || 9999) - 0.5;
+                        const newOff    = Math.max(0, Math.round((sOff + dx) * 10) / 10);
+                        const newTrimIn = Math.max(0, Math.min(maxTrimIn, Math.round((sTrimIn + dx) * 10) / 10));
+                        track.startOffset = newOff;
+                        track.trimIn      = newTrimIn;
+                        track.duration    = Math.max(0.5, Math.round((outPt - newOff) * 10) / 10);
+                        S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
+                    };
+                    const onUp = () => {
+                        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                        if (moved) _pushHistory();
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
                 });
-                let moved = false;
-                const onMove = ev => {
-                    if (!moved && Math.abs(ev.clientX - sx) < 4) return;
-                    moved = true;
-                    const dx = (ev.clientX - sx) / S.pxPerSec;
-                    _dragInitAudio.forEach(({ idx, startOffset }) => {
-                        if (S.audioTracks[idx]) S.audioTracks[idx].startOffset = Math.max(0, Math.round((startOffset + dx) * 10) / 10);
-                    });
-                    _dragInitSub.forEach(({ idx, start, dur }) => {
-                        const s = S.subtitles[idx]; if (!s) return;
-                        const newStart = Math.max(0, Math.round((start + dx) * 10) / 10);
-                        s.start = newStart; s.end = Math.round((newStart + dur) * 10) / 10;
-                    });
-                    _dragInitPip.forEach(({ idx, startTime, dur }) => {
-                        const p = S.pipLayers[idx]; if (!p) return;
-                        const newStart = Math.max(0, Math.round((startTime + dx) * 10) / 10);
-                        p.startTime = newStart; p.endTime = Math.round((newStart + dur) * 10) / 10;
-                    });
-                    S.dirty = true; renderTimeline(); renderProps();
-                };
-                const onUp = () => {
-                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
-                    if (moved) _pushHistory();
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
+                rh.addEventListener('mousedown', e => {
+                    e.stopPropagation(); e.preventDefault();
+                    const sx = e.clientX;
+                    const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+                    let moved = false;
+                    const onMove = ev => {
+                        moved = true;
+                        const maxDur = (track.originalDuration || 9999) - (track.trimIn || 0);
+                        track.duration = Math.max(0.5, Math.min(maxDur, Math.round((sDur + (ev.clientX - sx) / S.pxPerSec) * 10) / 10));
+                        S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
+                    };
+                    const onUp = () => {
+                        document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
+                        if (moved) _pushHistory();
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                });
+                row.appendChild(item);
+                drawWaveform(canvas, track.fileUrl);
             });
-            lh.addEventListener('mousedown', e => {
-                e.stopPropagation(); e.preventDefault();
-                const sx = e.clientX, sOff = track.startOffset || 0, sTrimIn = track.trimIn || 0;
-                const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - sOff);
-                const outPt = sOff + sDur;  // keep out-point fixed
-                let moved = false;
-                const onMove = ev => {
-                    moved = true;
-                    const dx = (ev.clientX - sx) / S.pxPerSec;
-                    const maxTrimIn = (track.originalDuration || 9999) - 0.5;
-                    const newOff    = Math.max(0, Math.round((sOff + dx) * 10) / 10);
-                    const newTrimIn = Math.max(0, Math.min(maxTrimIn, Math.round((sTrimIn + dx) * 10) / 10));
-                    track.startOffset = newOff;
-                    track.trimIn      = newTrimIn;
-                    track.duration    = Math.max(0.5, Math.round((outPt - newOff) * 10) / 10);
-                    S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
-                };
-                const onUp = () => {
-                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
-                    if (moved) _pushHistory();
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-            });
-            rh.addEventListener('mousedown', e => {
-                e.stopPropagation(); e.preventDefault();
-                const sx = e.clientX;
-                const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
-                let moved = false;
-                const onMove = ev => {
-                    moved = true;
-                    const maxDur = (track.originalDuration || 9999) - (track.trimIn || 0);
-                    track.duration = Math.max(0.5, Math.min(maxDur, Math.round((sDur + (ev.clientX - sx) / S.pxPerSec) * 10) / 10));
-                    S.dirty = true; renderTimeline(); if (i === S.selAudioIdx) renderProps();
-                };
-                const onUp = () => {
-                    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp);
-                    if (moved) _pushHistory();
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-            });
-            row.appendChild(item);
+
             audioTrackEl.appendChild(row);
-            drawWaveform(canvas, track.fileUrl);
         });
     }
 
@@ -2296,9 +2345,9 @@ export async function init() {
             { type: 'noise',      label: 'Шумодав',   params: [] },
             { type: 'pitch',      label: 'Питч',      params: [{key:'semitones',label:'Полутоны',min:-12,max:12,step:1,def:2}] },
         ];
-        const SPEED_VALS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
         const curSpeed = track.speed ?? 1;
-        const isCustomSpeed = !SPEED_VALS.includes(curSpeed);
+        const _uniqueLanes = [...new Set(S.audioTracks.map(t => t.laneIndex ?? 0))].sort((a, b) => a - b);
+        const curLane = track.laneIndex ?? 0;
 
         propsBody.innerHTML = `
         <div class="ive-audio-props-item">
@@ -2315,15 +2364,19 @@ export async function init() {
             </div>
             <label class="ive-label">Начало (с)<input class="ive-input" id="acp-offset" type="number" min="0" step="0.5" value="${track.startOffset || 0}"></label>
             <label class="ive-label">Длит. (с)<input class="ive-input" id="acp-dur" type="number" min="0" step="0.5" placeholder="авто" value="${track.duration !== undefined ? track.duration : ''}"></label>
-            <label class="ive-label">Скорость
-                <select class="ive-select" id="acp-speed">
-                    ${SPEED_VALS.map(v => `<option value="${v}"${curSpeed===v?' selected':''}>${v===1?'1× (норма)':v+'×'}</option>`).join('')}
-                    <option value="custom"${isCustomSpeed?' selected':''}>Другое…</option>
+            <label class="ive-label">Дорожка
+                <select class="ive-select" id="acp-lane">
+                    ${_uniqueLanes.map(l => `<option value="${l}"${l===curLane?' selected':''}>Дорожка ${l + 1}</option>`).join('')}
+                    <option value="__new__">+ Новая дорожка</option>
                 </select>
             </label>
-            <div id="acp-speed-custom-wrap" style="display:${isCustomSpeed?'block':'none'};margin-top:2px">
-                <input class="ive-input" id="acp-speed-custom" type="number" min="0.1" max="10" step="0.05" placeholder="напр. 1.8" value="${isCustomSpeed?curSpeed:''}">
-            </div>
+            <label class="ive-label">Скорость
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" id="acp-speed-range" min="0.1" max="4" step="0.05" value="${Math.min(4, curSpeed)}">
+                    <input class="ive-input" id="acp-speed-input" type="number" min="0.1" max="10" step="0.05" style="width:60px;flex-shrink:0" value="${curSpeed}">
+                </div>
+                <div id="acp-speed-display" style="font-size:11px;color:var(--text-dim)">${curSpeed}×</div>
+            </label>
             <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:8px 0 4px">Звуковые эффекты</div>
             <div class="ive-sfx-chips" id="acp-sfx-chips"></div>
             <div id="acp-sfx-params"></div>
@@ -2348,24 +2401,35 @@ export async function init() {
             S.dirty = true; renderTimeline();
         });
 
-        const speedSel = $('acp-speed'), speedCustomWrap = $('acp-speed-custom-wrap'), speedCustom = $('acp-speed-custom');
+        $('acp-lane').addEventListener('change', e => {
+            if (e.target.value === '__new__') {
+                track.laneIndex = _getNextLane();
+            } else {
+                track.laneIndex = parseInt(e.target.value);
+            }
+            _pushHistory(); S.dirty = true; renderTimeline(); renderProps();
+        });
+
+        const speedRange = $('acp-speed-range'), speedInput = $('acp-speed-input'), speedDisp = $('acp-speed-display');
         const _applySpeed = (val) => {
-            track.speed = val;
+            const clamped = Math.max(0.1, Math.min(10, val));
+            track.speed = clamped;
+            speedRange.value = Math.min(4, clamped);
+            speedInput.value = clamped;
+            if (speedDisp) speedDisp.textContent = clamped + '×';
+            if (track.originalDuration !== undefined) {
+                track.duration = track.originalDuration / clamped;
+                const durEl = $('acp-dur');
+                if (durEl) durEl.value = track.duration.toFixed(2);
+            }
             S.dirty = true;
             const el = _audioEls.get(track.id);
-            if (el) el.playbackRate = val;
+            if (el) el.playbackRate = clamped;
+            renderTimeline();
         };
-        speedSel.addEventListener('change', () => {
-            if (speedSel.value === 'custom') {
-                speedCustomWrap.style.display = 'block';
-                speedCustom.focus();
-            } else {
-                speedCustomWrap.style.display = 'none';
-                _applySpeed(parseFloat(speedSel.value) || 1);
-            }
-        });
-        speedCustom.addEventListener('change', () => {
-            const v = parseFloat(speedCustom.value);
+        speedRange.addEventListener('input', () => _applySpeed(parseFloat(speedRange.value) || 1));
+        speedInput.addEventListener('change', () => {
+            const v = parseFloat(speedInput.value);
             if (isFinite(v) && v > 0) _applySpeed(v);
         });
 
@@ -2484,16 +2548,11 @@ export async function init() {
                 <input class="ive-input" id="pv-end-eff-dur" type="number" min="0.1" max="${clip.duration}" step="0.1" value="${clip.endEffect?.duration||1.0}">
             </label>
             <label class="ive-label">Скорость
-                <select class="ive-select" id="pv-speed">
-                    <option value="0.25"${(clip.speed??1)===0.25?' selected':''}>0.25×</option>
-                    <option value="0.5"${(clip.speed??1)===0.5?' selected':''}>0.5×</option>
-                    <option value="0.75"${(clip.speed??1)===0.75?' selected':''}>0.75×</option>
-                    <option value="1"${(!clip.speed||clip.speed===1)?' selected':''}>1× (норма)</option>
-                    <option value="1.25"${(clip.speed??1)===1.25?' selected':''}>1.25×</option>
-                    <option value="1.5"${(clip.speed??1)===1.5?' selected':''}>1.5×</option>
-                    <option value="2"${(clip.speed??1)===2?' selected':''}>2×</option>
-                    <option value="4"${(clip.speed??1)===4?' selected':''}>4×</option>
-                </select>
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" id="pv-speed-range" min="0.1" max="4" step="0.05" value="${Math.min(4, clip.speed??1)}">
+                    <input class="ive-input" id="pv-speed-input" type="number" min="0.1" max="10" step="0.05" style="width:60px;flex-shrink:0" value="${clip.speed??1}">
+                </div>
+                <div id="pv-speed-display" style="font-size:11px;color:var(--text-dim)">${(clip.speed??1)}×</div>
             </label>
             ${isVideo ? `<label class="ive-toggle-row ive-label">Убрать аудио видео
                 <input class="ive-toggle" type="checkbox" id="pv-mute-audio"${clip.muteAudio ? ' checked' : ''}>
@@ -2592,9 +2651,24 @@ export async function init() {
                 S.dirty = true; renderPreview(); renderProps();
             });
         }
-        $('pv-speed').addEventListener('change', e => {
-            clip.speed = parseFloat(e.target.value) || 1;
-            S.dirty = true; renderPreview();
+        const _applyVideoSpeed = (val) => {
+            const clamped = Math.max(0.1, Math.min(10, val));
+            clip.speed = clamped;
+            $('pv-speed-range').value = Math.min(4, clamped);
+            $('pv-speed-input').value = clamped;
+            const dispEl = $('pv-speed-display');
+            if (dispEl) dispEl.textContent = clamped + '×';
+            if (clip.originalDuration !== undefined) {
+                clip.duration = Math.max(0.5, Math.round((clip.originalDuration / clamped) * 10) / 10);
+                const durEl = $('pv-dur');
+                if (durEl) durEl.value = clip.duration;
+            }
+            S.dirty = true; renderTimeline(); renderPreview();
+        };
+        $('pv-speed-range').addEventListener('input', () => _applyVideoSpeed(parseFloat($('pv-speed-range').value) || 1));
+        $('pv-speed-input').addEventListener('change', () => {
+            const v = parseFloat($('pv-speed-input').value);
+            if (isFinite(v) && v > 0) _applyVideoSpeed(v);
         });
         if (isVideo) {
             $('pv-mute-audio')?.addEventListener('change', e => {
@@ -2634,7 +2708,8 @@ export async function init() {
                     });
                     const d = await r.json();
                     if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-                    const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(), trimIn: 0, originalDuration: d.duration || undefined };
+                    const _exLane = _getNextLane();
+                    const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(_exLane), trimIn: 0, laneIndex: _exLane, originalDuration: d.duration || undefined };
                     S.audioTracks.push(track);
                     _pushHistory();
                     S.dirty = true; log('Аудио извлечено: ' + d.original, 'done');
