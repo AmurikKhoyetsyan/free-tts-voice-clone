@@ -61,8 +61,9 @@ function _syncAudio(t, force = false) {
         const trackT = t - (track.startOffset || 0);
         if (trackT < 0) { if (!el.paused) el.pause(); continue; }
         if (track.duration !== undefined && trackT >= track.duration) { if (!el.paused) el.pause(); continue; }
-        if (force || Math.abs(el.currentTime - trackT) > 0.3) {
-            el.currentTime = Math.max(0, trackT + (track.trimIn || 0));
+        const audioFileT = trackT * speed + (track.trimIn || 0);
+        if (force || Math.abs(el.currentTime - audioFileT) > 0.3) {
+            el.currentTime = Math.max(0, audioFileT);
         }
         if (S.isPlaying && el.paused) el.play().catch(() => {});
         if (!S.isPlaying && !el.paused) el.pause();
@@ -1297,13 +1298,14 @@ export async function init() {
                     const dx = ev.clientX - sx;
                     if (!moved && Math.abs(dx) < 5) return;
                     moved = true;
-                    div.classList.add('dragging');
+                    document.body.style.cursor = 'grabbing';
+                    videoTrackEl.querySelector(`[data-cidx="${i}"]`)?.classList.add('dragging');
                     // Calculate which position to insert at
                     const tlRect = videoTrackEl.getBoundingClientRect();
-                    const mouseX = ev.clientX - tlRect.left + tracksScroll.scrollLeft;
+                    const mouseX = ev.clientX - tlRect.left;
                     let dropIdx = 0, cur2 = 0;
                     for (let j = 0; j < S.clips.length; j++) {
-                        const mid = (cur2 + S.clips[j].duration / 2) * S.pxPerSec;
+                        const mid = (cur2 + (S.clips[j].duration || 3) / 2) * S.pxPerSec;
                         if (mouseX > mid) dropIdx = j + 1;
                         cur2 += S.clips[j].duration || 3;
                     }
@@ -1321,10 +1323,11 @@ export async function init() {
                     document.removeEventListener('mousemove', onMove);
                     document.removeEventListener('mouseup', onUp);
                     document.querySelectorAll('.ive-tl-drop-indicator').forEach(el => el.remove());
-                    div.classList.remove('dragging');
+                    document.body.style.cursor = '';
+                    videoTrackEl.querySelector(`[data-cidx="${i}"]`)?.classList.remove('dragging');
                     if (!moved) return;
                     const tlRect = videoTrackEl.getBoundingClientRect();
-                    const mouseX = ev.clientX - tlRect.left + tracksScroll.scrollLeft;
+                    const mouseX = ev.clientX - tlRect.left;
                     let dropIdx = 0, cur2 = 0;
                     for (let j = 0; j < S.clips.length; j++) {
                         const mid = (cur2 + (S.clips[j].duration || 3) / 2) * S.pxPerSec;
@@ -2351,9 +2354,15 @@ export async function init() {
         const speedSel = $('acp-speed'), speedCustomWrap = $('acp-speed-custom-wrap'), speedCustom = $('acp-speed-custom');
         const _applySpeed = (val) => {
             track.speed = val;
+            if (track.originalDuration !== undefined) {
+                track.duration = track.originalDuration / val;
+                const durEl = $('acp-dur');
+                if (durEl) durEl.value = track.duration.toFixed(2);
+            }
             S.dirty = true;
             const el = _audioEls.get(track.id);
             if (el) el.playbackRate = val;
+            renderTimeline();
         };
         speedSel.addEventListener('change', () => {
             if (speedSel.value === 'custom') {
