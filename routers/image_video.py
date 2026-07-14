@@ -1006,14 +1006,18 @@ async def export_video(
                 elif vcodec_name in ("libx264", "libx265"):
                     if crf == 0:  # lossless
                         if vcodec_name == "libx264":
-                            # -crf 0 = lossless; ultrafast + -bf 0 ensure B-frames are off
-                            # (B-frames with lossless mode cause silent video stream failure)
-                            vcodec = ["-c:v", "libx264", "-crf", "0",
-                                      "-preset", "ultrafast", "-bf", "0", "-pix_fmt", "yuv420p"]
+                            # CRF=1 instead of CRF=0: x264 CRF=0 activates a special
+                            # internal lossless encoding path (--lossless flag) which is
+                            # broken in many Windows ffmpeg builds — encoder fails silently
+                            # and the muxer writes an audio-only file.
+                            # CRF=1 uses the standard encoding path, is visually identical
+                            # to CRF=0, and plays in all players and containers.
+                            vcodec = ["-c:v", "libx264", "-crf", "1",
+                                      "-preset", "slow", "-pix_fmt", "yuv420p"]
                         else:
-                            # x265 lossless requires the explicit param; -crf 0 alone is lossy
-                            vcodec = ["-c:v", "libx265", "-x265-params", "lossless=1",
-                                      "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+                            # x265: CRF=0 is near-lossless (not the same special mode as x264)
+                            vcodec = ["-c:v", "libx265", "-crf", "0",
+                                      "-preset", "slow", "-pix_fmt", "yuv420p"]
                     else:
                         vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
@@ -1045,7 +1049,7 @@ async def export_video(
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
                 else:
                     if crf == 0:
-                        vcodec = ["-c:v", "libx264", "-crf", "0", "-preset", "ultrafast", "-bf", "0", "-pix_fmt", "yuv420p"]
+                        vcodec = ["-c:v", "libx264", "-crf", "1", "-preset", "slow", "-pix_fmt", "yuv420p"]
                     else:
                         vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
@@ -1067,6 +1071,7 @@ async def export_video(
                 )
 
                 app_log(f"Export start: {out_name} ({len(slides)} slides)", "INFO", "ImgVid")
+                app_log(f"FFmpeg cmd: {' '.join(cmd)}", "DEBUG", "ImgVid")
                 app_log(f"filter_complex:\n{filter_complex}", "DEBUG", "ImgVid")
                 print(flush=True)
                 q.put(("progress", 0.15, "Запуск FFmpeg…"))
@@ -1113,6 +1118,18 @@ async def export_video(
                 else:
                     print_progress(100, "FFmpeg")
                     app_log(f"Export done: {out_name}", "INFO", "ImgVid")
+                    try:
+                        probe = subprocess.run(
+                            [FFPROBE, "-v", "quiet", "-show_streams",
+                             "-select_streams", "v:0", "-print_format", "compact", out_path],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if probe.returncode == 0 and probe.stdout.strip():
+                            app_log(f"Video stream: {probe.stdout.strip()}", "DEBUG", "ImgVid")
+                        else:
+                            app_log("WARNING: ffprobe found no video stream in output!", "WARN", "ImgVid")
+                    except Exception:
+                        pass
                     q.put(("done", out_name))
 
         except Exception as e:
