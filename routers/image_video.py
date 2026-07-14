@@ -1004,7 +1004,18 @@ async def export_video(
                     acodec = []
                     audio_map = []  # GIF container does not support audio
                 elif vcodec_name in ("libx264", "libx265"):
-                    vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
+                    if crf == 0:  # lossless
+                        if vcodec_name == "libx264":
+                            # -qp 0 is the reliable lossless flag; ultrafast avoids B-frame
+                            # issues that cause the video stream to silently fail with -crf 0
+                            vcodec = ["-c:v", "libx264", "-qp", "0",
+                                      "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+                        else:
+                            # x265 lossless requires the explicit param; -crf 0 alone is lossy
+                            vcodec = ["-c:v", "libx265", "-x265-params", "lossless=1",
+                                      "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+                    else:
+                        vcodec = ["-c:v", vcodec_name, "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
                 elif vcodec_name == "libvpx-vp9":
                     vp9_crf = max(0, min(63, crf * 63 // 51))
@@ -1033,7 +1044,10 @@ async def export_video(
                     vcodec = ["-c:v", "mpeg4", "-b:v", "2M", "-pix_fmt", "yuv420p"]
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
                 else:
-                    vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
+                    if crf == 0:
+                        vcodec = ["-c:v", "libx264", "-qp", "0", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+                    else:
+                        vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
 
                 filter_complex = ";\n".join(filter_parts)

@@ -509,10 +509,15 @@ export async function init() {
         const rect = tracksScroll.getBoundingClientRect();
         const cursorOffsetX = e.clientX - rect.left;
         const timeAtCursor = (tracksScroll.scrollLeft + cursorOffsetX) / S.pxPerSec;
-        S.pxPerSec = Math.max(20, Math.min(500, S.pxPerSec * (e.deltaY < 0 ? 1.35 : 0.74)));
+        S.pxPerSec = Math.max(2, Math.min(3000, S.pxPerSec * (e.deltaY < 0 ? 1.35 : 0.74)));
         renderTimeline();
         tracksScroll.scrollLeft = timeAtCursor * S.pxPerSec - cursorOffsetX;
     }, { passive: false });
+
+    // Keep labels column aligned with vertical scroll in tracks area
+    tracksScroll.addEventListener('scroll', () => {
+        labelsScroll.scrollTop = tracksScroll.scrollTop;
+    }, { passive: true });
 
     // ── Time ruler scrubbing (mousedown + drag) ───────────────────────────────
     let _rulerDragging = false;
