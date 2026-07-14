@@ -295,7 +295,14 @@
     border-right: 1px solid var(--border); background: #0a0c10;
 }
 .ive-ruler-lbl-space { height: 18px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
-.ive-labels-scroll { overflow: hidden; flex: 1; }
+.ive-labels-scroll {
+    overflow-x: hidden;
+    overflow-y: scroll;   /* scrollable so scrollTop sync works */
+    flex: 1;
+    scrollbar-width: none;       /* Firefox */
+    -ms-overflow-style: none;    /* IE / old Edge */
+}
+.ive-labels-scroll::-webkit-scrollbar { display: none; } /* Chrome / Safari */
 .ive-track-lbl {
     display: flex; align-items: center; justify-content: center;
     font-size: 8px; font-weight: 700; color: var(--text-dim);
@@ -449,8 +456,8 @@
 }
 .ive-project-name-wrap { display: flex; gap: 6px; align-items: center; }
 .ive-project-name-wrap input { flex: 1; }
-.ive-export-settings { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.ive-export-settings select { flex: 1; min-width: 90px; font-size: 12px; }
+.ive-export-settings { display: flex; gap: 8px; align-items: center; }
+.ive-exp-summary-chip { flex: 1; font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ive-export-progress { display: flex; align-items: center; gap: 10px; }
 .ive-export-progress .vid-progress-bar { flex: 1; }
 .ive-export-progress .status { font-size: 12px; white-space: nowrap; }
