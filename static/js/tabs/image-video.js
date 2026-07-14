@@ -1477,7 +1477,7 @@ export async function init() {
 
                 const offsetPx = (track.startOffset || 0) * S.pxPerSec;
                 const trackDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
-                const itemW    = Math.max(40, trackDur * S.pxPerSec);
+                const itemW    = trackDur * S.pxPerSec;
                 const item     = document.createElement('div');
                 const isMultiAudioSel = S.selAudioIdxs.size > 1 && S.selAudioIdxs.has(i);
                 item.className = `ive-tl-audio-item${i === S.selAudioIdx ? ' sel' : ''}${isMultiAudioSel ? ' multi-sel' : ''}`;
@@ -1486,7 +1486,7 @@ export async function init() {
                 item.style.width = itemW + 'px';
                 const canvas = document.createElement('canvas');
                 canvas.className = 'ive-waveform-canvas';
-                canvas.width  = Math.max(40, itemW); canvas.height = rowH - 4;
+                canvas.width  = Math.max(1, Math.floor(itemW)); canvas.height = rowH - 4;
                 item.appendChild(canvas);
                 const lh = document.createElement('div');
                 lh.className = 'ive-tl-audio-resize ive-tl-audio-resize-left';

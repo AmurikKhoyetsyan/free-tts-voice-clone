@@ -1006,10 +1006,10 @@ async def export_video(
                 elif vcodec_name in ("libx264", "libx265"):
                     if crf == 0:  # lossless
                         if vcodec_name == "libx264":
-                            # -qp 0 is the reliable lossless flag; ultrafast avoids B-frame
-                            # issues that cause the video stream to silently fail with -crf 0
-                            vcodec = ["-c:v", "libx264", "-qp", "0",
-                                      "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+                            # -crf 0 = lossless; ultrafast + -bf 0 ensure B-frames are off
+                            # (B-frames with lossless mode cause silent video stream failure)
+                            vcodec = ["-c:v", "libx264", "-crf", "0",
+                                      "-preset", "ultrafast", "-bf", "0", "-pix_fmt", "yuv420p"]
                         else:
                             # x265 lossless requires the explicit param; -crf 0 alone is lossy
                             vcodec = ["-c:v", "libx265", "-x265-params", "lossless=1",
@@ -1045,7 +1045,7 @@ async def export_video(
                     acodec = ["-c:a", "aac", "-b:a", "192k"] if audio_map else []
                 else:
                     if crf == 0:
-                        vcodec = ["-c:v", "libx264", "-qp", "0", "-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+                        vcodec = ["-c:v", "libx264", "-crf", "0", "-preset", "ultrafast", "-bf", "0", "-pix_fmt", "yuv420p"]
                     else:
                         vcodec = ["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-pix_fmt", "yuv420p"]
                     acodec = _build_acodec(audio_codec, audio_bitrate) if audio_map else []
