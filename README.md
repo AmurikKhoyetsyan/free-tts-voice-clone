@@ -18,6 +18,7 @@
 | [Architecture](docs/architecture.md) | Backend routers, service packages, frontend modules, SSE pipeline |
 | [API Reference](docs/api.md) | All endpoints, request/response schemas, export options |
 | [Developer Guide](docs/developer-guide.md) | Adding routes, tabs, transitions, effects; SSE pattern; project format |
+| [Editor Guide](docs/EDITOR.md) | Image Video Editor — timeline, filters, export pipeline |
 
 ---
 
@@ -38,7 +39,7 @@ A local **text-to-speech and video production web app** with eight tabs, served 
 
 ---
 
-## Features (highlights)
+## Features
 
 - **Windows TTS** — SAPI5 / OneCore voices, adjustable rate and volume, optional SRT generation
 - **XTTS v2 voice cloning** — Coqui neural TTS, 8 languages, GPU-accelerated (CPU fallback)
@@ -46,7 +47,7 @@ A local **text-to-speech and video production web app** with eight tabs, served 
 - **Image Video Editor** — non-linear timeline, 22 transitions, per-clip effects, ASS subtitles, PIP layers, audio split/trim, cursor-relative zoom (Ctrl+Scroll)
 - **Audio effects** — 14 per-track sound effects (echo, reverb, bass boost, treble, compressor, phone, radio, low/high-pass filter, chorus, flanger, distortion, noise gate, pitch shift); speed 0.25×–4× + custom
 - **Custom audio player** — waveform drag-to-scrub, synchronized seekbar with progress fill, skip ±5 s, speed 0.5×–2×, download
-- **Template system** — save any project as a reusable template; apply via a drag-and-drop modal (single multi-file zone for slides, individual DnD zones for audio/PIP)
+- **Template system** — save any project as a reusable template; apply via a drag-and-drop modal
 - **Export** — 11 video formats (MP4 / MOV / MKV / AVI / WebM / GIF / …), 7 codecs (H.264 / H.265 / VP9 / …), audio-only export (MP3 / WAV / FLAC / AAC / OGG / M4A / OPUS)
 - **Projects** — save/load as `.project` archives (JSON + all media packed into a ZIP)
 - **SSE streaming** — real-time synthesis and export progress in the browser
@@ -117,41 +118,97 @@ Stop with `Ctrl+C`.
 
 ```
 tts/
-├── app.py                       # FastAPI entry point, middleware, router mounting
+├── app.py                            # FastAPI entry point, middleware, router mounting
 ├── requirements.txt
 ├── install.bat / run.bat / add_voices_admin.bat
 │
 ├── routers/
-│   ├── voices.py  synthesis.py  xtts.py  subtitles.py
-│   ├── video.py  transcribe.py  templates.py  history.py  log_router.py
-│   ├── image_video.py           # /api/imgvid/* — Image Video Editor (routes only)
-│   └── imgvid/                  # Image Video Editor service package
-│       ├── ffmpeg_utils.py      # FFmpeg binary resolution, transition/effect maps, probe helpers
-│       ├── ass_writer.py        # ASS subtitle file generator
-│       └── project_ops.py       # Project archive pack/unpack/finalize
+│   ├── voices.py                     # /api/voices — voice list, saved voices CRUD
+│   ├── synthesis.py                  # /api/synthesize — SSE TTS streams
+│   ├── xtts.py                       # /api/xtts — XTTS install status
+│   ├── history.py                    # /api/history — audio file browser
+│   ├── subtitles.py                  # /api/subtitles — SRT file CRUD
+│   ├── video.py                      # /api/video — upload, subtitle-burn
+│   ├── transcribe.py                 # /api/transcribe — Whisper transcription
+│   ├── templates.py                  # /api/templates — subtitle style templates
+│   ├── log_router.py                 # /api/logs — server log streaming
+│   ├── image_video.py                # /api/imgvid — aggregator (includes sub-routers)
+│   │
+│   └── imgvid/                       # Image Video Editor package
+│       ├── ffmpeg_utils.py           # FFmpeg binary resolution, transition/effect maps
+│       ├── ass_writer.py             # ASS subtitle file generator
+│       ├── codec_selector.py         # Video/audio codec → FFmpeg argument lists
+│       ├── audio_processor.py        # Audio filter chains and sound effects
+│       ├── filter_builder.py         # video filter_complex fragment assembly
+│       ├── project_ops.py            # .project ZIP pack/unpack/finalize
+│       │
+│       └── routes/                   # Sub-routers included by image_video.py
+│           ├── media.py              # Image, clip, audio, thumbnail upload/serve
+│           ├── projects.py           # Project CRUD (list/create/read/update/delete)
+│           ├── templates.py          # Template CRUD
+│           ├── project_files.py      # .project pack/unpack/browse/load
+│           └── export.py             # SSE-streamed video and audio export
 │
-├── core/          audio.py  history_manager.py  voice_manager.py  log.py  schemas.py
-├── services/      tts_windows.py  tts_xtts.py  sse.py
-├── middleware/    no_cache.py
+├── core/
+│   ├── audio.py                      # WAV I/O, save_named_audio()
+│   ├── history_manager.py            # Audio file history
+│   ├── voice_manager.py              # Saved voice profiles CRUD
+│   ├── log.py                        # app_log(), print_progress()
+│   └── schemas.py                    # Shared Pydantic models
+│
+├── services/
+│   ├── tts_windows.py                # SAPI5/OneCore synthesis
+│   ├── tts_xtts.py                   # Coqui XTTS v2 cloning + synthesis
+│   └── sse.py                        # run_synth_stream(), sse_frame()
+│
+├── middleware/
+│   └── no_cache.py                   # Cache-Control headers for /static/js/ and /static/css/
 │
 └── static/
-    ├── index.html               # Single page, all 8 tabs + modals
+    ├── index.html                    # Single page, all 8 tabs + modals
     ├── css/
     └── js/
-        ├── app.js  api.js  audio-manager.js  events.js  icons.js
-        ├── audio-player.js      # waveform drag-to-scrub, seekbar, play/download
-        ├── wave-renderer.js     # canvas waveform renderer used by AudioPlayer
-        ├── loader.js  logger.js  modal.js  toast.js  tabs.js
+        ├── app.js                    # Entry — lazy tab init
+        ├── api.js                    # Fetch helpers + SSE ReadableStream parser
+        ├── audio-manager.js          # Singleton: one AudioPlayer plays at a time
+        ├── audio-player.js           # Waveform drag-to-scrub, seekbar, play/download
+        ├── wave-renderer.js          # Canvas waveform renderer
+        ├── custom-select.js          # Custom dropdown component
+        ├── file-upload.js            # Drag-and-drop file upload component
+        ├── loader.js                 # withLoader() spinner + makeSkeleton()
+        ├── events.js                 # Cross-tab EventTarget bus
+        ├── icons.js                  # Inline SVG strings (single source of truth)
+        ├── logger.js                 # Floating draggable progress panel
+        ├── modal.js                  # openConfirm() / openPrompt() promise-based modals
+        ├── tabs.js                   # Tab switching
+        ├── toast.js                  # Transient notifications
+        │
         ├── tabs/
-        │   ├── windows.js  cloning.js  saved.js  subtitles.js
-        │   ├── video.js  ffmpeg.js  templates.js  history.js  logs.js
-        │   └── image-video.js   # Редактор tab (imports from imgvid/)
-        └── imgvid/              # Image Video Editor frontend sub-modules
-            ├── constants.js     # TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS
-            ├── utils.js         # Pure utility functions (uid, fmt, snap, totalDur, …)
-            ├── waveform.js      # drawWaveform(), probeAudioDuration() with cache
-            ├── export.js        # export helpers stub
-            └── preview.js       # preview zoom helpers stub
+        │   ├── windows.js            # Windows SAPI5 TTS
+        │   ├── cloning.js            # XTTS v2 voice cloning
+        │   ├── saved.js              # Saved voices library
+        │   ├── subtitles.js          # SRT editor + Whisper
+        │   ├── video.js              # Video upload + subtitle burn
+        │   ├── ffmpeg.js             # FFmpeg status helper
+        │   ├── templates.js          # Subtitle style templates
+        │   ├── history.js            # Audio/video/subtitle file browser
+        │   ├── logs.js               # Server log viewer
+        │   └── image-video.js        # Редактор tab — coordinator (imports imgvid/ modules)
+        │
+        └── imgvid/                   # Image Video Editor sub-modules
+            ├── constants.js          # TRANSITIONS (22), EFFECTS_DEF, FONTS, ANIMS
+            ├── state.js              # Shared state object S, audio element pool
+            ├── utils.js              # uid, fmt, snap, totalDur, clipAtTime, buildCSSFilter
+            ├── waveform.js           # drawWaveform(), probeAudioDuration() with cache
+            ├── props.js              # Property panels (slide/audio/subtitle/PIP)
+            ├── timeline.js           # Timeline drag-drop, resize, snap, context menus
+            ├── playback.js           # Play/pause/seek engine, preview zoom
+            ├── pip.js                # Picture-in-Picture layer controls
+            ├── preview-render.js     # Canvas slide renderer (image/video/effects/subtitles)
+            ├── media-list.js         # Media browser component
+            ├── exp-modal.js          # Export dialog UI
+            ├── export.js             # Export helper stubs
+            └── preview.js            # Preview zoom helper stubs
 ```
 
 Full module descriptions → [Architecture](docs/architecture.md)  
