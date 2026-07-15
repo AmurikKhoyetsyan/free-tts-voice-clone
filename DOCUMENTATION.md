@@ -74,11 +74,20 @@ app.py
 │   ├── transcribe.py      /api/transcribe    — Whisper транскрипция
 │   ├── templates.py       /api/templates     — Пресеты стилей субтитров
 │   ├── log_router.py      /api/logs          — Просмотр и редактирование логов
-│   └── image_video.py     /api/imgvid        — Редактор (Image Video Editor)
+│   └── image_video.py     /api/imgvid        — агрегатор (подключает sub-роутеры)
 │       └── imgvid/        — сервисный пакет редактора
-│           ├── ffmpeg_utils.py  — FFmpeg-хелперы, карты переходов/эффектов
-│           ├── ass_writer.py    — генератор ASS-субтитров
-│           └── project_ops.py  — pack/unpack .project-архивов
+│           ├── ffmpeg_utils.py   — FFmpeg-хелперы, карты переходов/эффектов
+│           ├── ass_writer.py     — генератор ASS-субтитров
+│           ├── codec_selector.py — выбор видео/аудио кодека → аргументы FFmpeg
+│           ├── audio_processor.py— цепочки аудио-фильтров и звуковые эффекты
+│           ├── filter_builder.py — сборка filter_complex для FFmpeg
+│           ├── project_ops.py    — pack/unpack .project-архивов
+│           └── routes/           — отдельные роутеры (подключены в image_video.py)
+│               ├── media.py      — загрузка/раздача изображений, клипов, аудио
+│               ├── projects.py   — CRUD проектов
+│               ├── templates.py  — CRUD шаблонов
+│               ├── project_files.py — .project pack/unpack/browse/load
+│               └── export.py     — SSE-экспорт видео и аудио
 ├── services/
 │   ├── tts_windows.py     — pyttsx3 / SAPI5 синтез
 │   ├── tts_xtts.py        — Coqui XTTS v2 синтез
@@ -96,14 +105,14 @@ app.py
         ├── app.js              — Вход, ленивая инициализация вкладок
         ├── api.js              — fetch-хелперы + SSE-парсер
         ├── audio-player.js     — плеер с waveform, seekbar, drag-to-scrub
-        ├── wave-renderer.js    — canvas-рендерер waveform (используется AudioPlayer)
-        ├── loader.js           — withLoader() / makeSkeleton() хелперы
-        ├── audio-manager.js    — синглтон: один плеер воспроизводит в один момент
+        ├── wave-renderer.js    — canvas-рендерер waveform
+        ├── loader.js           — withLoader() / makeSkeleton()
+        ├── audio-manager.js    — синглтон: один плеер в момент времени
         ├── custom-select.js    — dropdown-компонент
         ├── file-upload.js      — drag-and-drop загрузка файла
-        ├── events.js           — EventTarget-шина: voices-changed, history-changed
+        ├── events.js           — EventTarget-шина (voices-changed, history-changed)
         ├── icons.js            — SVG-иконки
-        ├── logger.js           — плавающая панель логов + прогресс-бар
+        ├── logger.js           — плавающая панель прогресса
         ├── modal.js            — openConfirm() / openPrompt()
         ├── tabs.js             — переключение вкладок
         ├── toast.js            — уведомления
@@ -114,16 +123,24 @@ app.py
         │   ├── history.js      — История (браузер файлов)
         │   ├── subtitles.js    — редактор субтитров
         │   ├── video.js        — прожиг субтитров в видео
-        │   ├── ffmpeg.js       — FFmpeg-элементы управления (вкладка Видео)
-        │   ├── templates.js    — шаблоны стилей субтитров (вкладка Видео)
+        │   ├── ffmpeg.js       — FFmpeg-элементы управления
+        │   ├── templates.js    — шаблоны стилей субтитров
         │   ├── logs.js         — просмотр логов
-        │   └── image-video.js  — Редактор (импортирует из imgvid/)
-        └── imgvid/
+        │   └── image-video.js  — координатор Редактора (подключает imgvid/)
+        └── imgvid/             — подмодули Image Video Editor
             ├── constants.js    — TRANSITIONS (22), EFFECTS_DEF, FONTS, ANIMS
+            ├── state.js        — разделяемое состояние S, пул аудиоэлементов
             ├── utils.js        — uid, fmt, snap, totalDur, buildCSSFilter, ...
-            ├── waveform.js     — drawWaveform(), probeAudioDuration() c кэшем
-            ├── export.js       — заглушка (логика в image-video.js)
-            └── preview.js      — заглушка (логика в image-video.js)
+            ├── waveform.js     — drawWaveform(), probeAudioDuration() с кэшем
+            ├── props.js        — панели свойств (слайд/аудио/субтитры/PIP)
+            ├── timeline.js     — таймлайн: drag-drop, resize, snap
+            ├── playback.js     — воспроизведение, перемотка, зум предпросмотра
+            ├── pip.js          — управление PIP-слоями
+            ├── preview-render.js — canvas-рендерер превью (изображения, видео, эффекты)
+            ├── media-list.js   — браузер медиафайлов
+            ├── exp-modal.js    — диалог экспорта (формат, кодек, качество)
+            ├── export.js       — заглушки хелперов экспорта
+            └── preview.js      — заглушки зума предпросмотра
 ```
 
 ### SSE-поток (стриминг синтеза)
