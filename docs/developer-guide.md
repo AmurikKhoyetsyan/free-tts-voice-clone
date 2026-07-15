@@ -22,7 +22,7 @@ add_voices_admin.bat
 
 There is **no lint step, no test runner, and no build step**. The frontend is plain ES modules served directly by FastAPI's `StaticFiles`. Edit a `.js` file, hard-refresh the browser (`Ctrl+Shift+R`) — that's it.
 
-> The no-cache middleware (`middleware/no_cache.py`) sends `Cache-Control: no-store` for all `/static/js/` and `/static/css/` responses, so a normal refresh usually suffices. Hard-refresh is only needed if the browser cached a response before the middleware was applied.
+> The no-cache middleware (`middleware/no_cache.py`) sends `Cache-Control: no-store` for all `/static/js/` and `/static/css/` responses, so a normal refresh usually suffices.
 
 ---
 
@@ -30,9 +30,12 @@ There is **no lint step, no test runner, and no build step**. The frontend is pl
 
 ```
 tts/
-├── app.py                      # Entry point
-├── routers/                    # One APIRouter per feature
-│   └── imgvid/                 # Image Video Editor service package
+├── app.py                      # Entry point — mounts all routers
+├── routers/
+│   ├── *.py                    # One APIRouter per feature area
+│   └── imgvid/                 # Image Video Editor sub-package
+│       ├── *.py                # Service modules (ffmpeg_utils, codec_selector, …)
+│       └── routes/             # Sub-routers included by image_video.py
 ├── core/                       # Shared utilities (audio, history, voice, log, schemas)
 ├── services/                   # TTS engines + SSE helper
 ├── middleware/                  # ASGI no-cache middleware
@@ -40,10 +43,8 @@ tts/
     ├── index.html
     ├── css/
     └── js/
-        ├── audio-player.js     # Waveform + seekbar audio player
-        ├── wave-renderer.js    # Canvas waveform renderer (used by audio-player)
-        ├── loader.js           # withLoader() / makeSkeleton() helpers
-        ├── tabs/               # One module per tab (+ ffmpeg.js, templates.js)
+        ├── *.js                # Shared UI components
+        ├── tabs/               # One module per tab
         └── imgvid/             # Image Video Editor sub-modules
 ```
 
@@ -53,26 +54,45 @@ For a full description of each module's responsibility, see [Architecture](archi
 
 ## Adding a new backend route
 
-### 1. Create the router file
+### Simple (top-level) route
 
 ```python
 # routers/my_feature.py
 from fastapi import APIRouter
-router = APIRouter()
+router = APIRouter(prefix="/api/my-feature", tags=["my-feature"])
 
 @router.get("/hello")
 async def hello():
     return {"message": "Hello"}
 ```
 
-### 2. Mount it in `app.py`
+Mount it in `app.py`:
 
 ```python
-from routers.my_feature import router as my_feature_router
-app.include_router(my_feature_router, prefix="/api/my-feature")
+from routers import my_feature
+app.include_router(my_feature.router)
 ```
 
-That's all. FastAPI auto-generates `/docs` (Swagger UI) and `/redoc` entries for the new routes.
+### Sub-router inside the Image Video Editor
+
+Add a new file under `routers/imgvid/routes/`:
+
+```python
+# routers/imgvid/routes/my_routes.py
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/my-endpoint")
+async def my_endpoint():
+    return {"ok": True}
+```
+
+Then include it in `routers/image_video.py`:
+
+```python
+from routers.imgvid.routes import my_routes
+router.include_router(my_routes.router)
+```
 
 ---
 
@@ -114,6 +134,41 @@ Tabs initialise lazily — only on the first click. Keep `init()` idempotent (ca
 
 ---
 
+## Adding an Image Video Editor sub-module
+
+The editor uses a **dependency-injection pattern** for sub-modules. Each module:
+1. Imports `S` from `./state.js` for shared state
+2. Exports `init(dom, callbacks)` called once by the coordinator (`image-video.js`)
+3. Exports render/action functions that the coordinator calls
+
+```javascript
+// static/js/imgvid/my-module.js
+import { S } from './state.js';
+
+let _dom = {};
+let _cb  = {};
+
+export function init(dom, callbacks) {
+    _dom = dom;
+    _cb  = callbacks;
+}
+
+export function doSomething() {
+    // read/write S, call _cb.renderAll() to update UI
+}
+```
+
+The coordinator wires it up:
+
+```javascript
+// inside image-video.js init():
+import { init as initMyModule, doSomething } from '../imgvid/my-module.js';
+
+initMyModule(dom, { renderAll, pushHistory });
+```
+
+---
+
 ## SSE streaming pattern
 
 Use this pattern for any long-running operation (synthesis, export, transcription):
@@ -121,17 +176,13 @@ Use this pattern for any long-running operation (synthesis, export, transcriptio
 ### Backend
 
 ```python
-from services.sse import run_synth_stream, sse_frame
-import asyncio, queue
+from services.sse import run_synth_stream
 from fastapi.responses import StreamingResponse
 
 @router.post("/my-stream")
 async def my_stream(text: str = Form(...)):
     def core(text, progress=None):
-        # ... do work ...
-        if progress:
-            progress(0.5, "Halfway done")
-        # ... more work ...
+        if progress: progress(0.5, "Halfway done")
         return result
 
     return StreamingResponse(
@@ -176,13 +227,7 @@ export const TRANSITIONS = {
 };
 ```
 
-### 3. Add an `<option>` to the transition `<select>` in `index.html`
-
-```html
-<option value="my-transition">My Transition</option>
-```
-
-That's all. The FFmpeg filter chain in `image_video.py` reads `_XFADE[slide["transition"]["type"]]` and builds the filter automatically.
+The FFmpeg filter chain in `routers/imgvid/filter_builder.py` reads `_XFADE[slide["transition"]["type"]]` and builds the filter automatically.
 
 ---
 
@@ -195,7 +240,7 @@ Effects are applied via FFmpeg's `vf` filter chain.
 ```python
 _EFFECTS = {
     # existing entries ...
-    "flip": "hflip",   # FFmpeg vf filter name / expression
+    "flip": "hflip",
 }
 ```
 
@@ -208,17 +253,42 @@ export const EFFECTS_DEF = {
 };
 ```
 
-### 3. Add a control in `index.html` inside the Effects panel
+### 3. Wire it up in `props.js`
 
-```html
-<label>
-  <input type="checkbox" id="ive-effect-flip"> Flip H
-</label>
+Add a control in the slide effects panel (`_renderPropsEffects()` in `static/js/imgvid/props.js`).
+
+---
+
+## Adding a new audio sound effect
+
+Sound effects are applied via FFmpeg audio filters.
+
+### 1. Add to `sfx_filter()` in `routers/imgvid/audio_processor.py`
+
+```python
+def sfx_filter(sfx_type: str, sfx: dict) -> str:
+    if sfx_type == "my-effect":
+        strength = float(sfx.get("strength", 1.0))
+        return f"myeffect=strength={strength}"
+    # ... other effects
 ```
 
-### 4. Wire it up in `image-video.js`
+### 2. Add the effect to the frontend property panel in `props.js`
 
-Read the value when building the effects array for a slide, and render it in `_renderEffectsPanel()`.
+---
+
+## Adding a new export codec
+
+### 1. Add to `resolve_codec_name()` in `routers/imgvid/codec_selector.py`
+
+```python
+_CODEC_MAP = {
+    # existing entries ...
+    "my-codec": "libmycodec",
+}
+```
+
+### 2. Add the codec option to the export dialog in `exp-modal.js`
 
 ---
 
@@ -231,19 +301,19 @@ project.json        # full project data ({ slides, audio, subtitles, pip, name }
 images/uuid.jpg     # all referenced images
 clips/uuid.mp4      # all referenced video clips
 audio/uuid.mp3      # all referenced audio tracks
+thumbs/uuid.jpg     # extracted thumbnails
 ```
 
-`project_ops.py` handles pack/unpack. When unpacking, `fileUrl` fields in the JSON are rewritten to point to the server's `/api/imgvid/*` endpoints after the media is saved to disk.
+`routers/imgvid/project_ops.py` handles pack/unpack. When unpacking, `fileUrl` fields in the JSON are rewritten to point to the server's `/api/imgvid/*` endpoints.
 
 ---
 
 ## ASS subtitle format
 
-Subtitles in the Image Video Editor are exported as an **ASS** (Advanced SubStation Alpha) file burned via FFmpeg's `subtitles=file.ass` filter. The generator is in `routers/imgvid/ass_writer.py`.
+Subtitles in the Image Video Editor are exported as **ASS** (Advanced SubStation Alpha) burned via FFmpeg's `subtitles=file.ass` filter. The generator is in `routers/imgvid/ass_writer.py`.
 
 Key details:
 - Timing uses centiseconds (`H:MM:SS.cs`) — `_ass_time(seconds)`.
-- Each subtitle generates one or more `Dialogue:` lines.
 - Karaoke word-highlight uses `{\k<cs>}word ` tags with cumulative timing.
 - Animations use `\fad()`, `\move()`, `\t()` override tags.
 
@@ -251,13 +321,14 @@ Key details:
 
 ## Output directories
 
-All output is written under `.output/` (created automatically on first run):
+All output is written under `.outputs/` (created automatically on first run):
 
 ```
-.output/
+.outputs/
 ├── audio/          # TTS WAV files
 ├── subtitle/       # SRT files
 ├── templates/      # Video style templates (JSON)
+├── saved_projects/ # .project archives saved by user
 ├── video/src/      # Uploaded source videos
 ├── video/          # Processed videos with burned subtitles
 └── imgvid/
@@ -265,11 +336,10 @@ All output is written under `.output/` (created automatically on first run):
     ├── clips/      # Video clips
     ├── audio/      # Audio tracks
     ├── thumbs/     # Thumbnails
-    ├── projects/   # Project JSON + template JSON
+    ├── projects/   # Project JSON files
+    ├── templates/  # Template JSON files
     └── output/     # Exported videos / audio files
 ```
-
-`.output/` is not committed to git (listed in `.gitignore`).
 
 ---
 
