@@ -140,7 +140,6 @@ export async function init() {
     const audioLblEl    = $('ive-audio-lbl');
     const labelsScroll  = $('ive-labels-scroll');
     const propsBody     = $('ive-props-body');
-    const propsPanel    = $('ive-props-overlay');
     const trimBtn       = $('ive-trim-btn');
     // Transition preview elements
     const previewContentNext = $('ive-preview-content-next');
@@ -488,7 +487,7 @@ export async function init() {
         if (idx >= 0) {
             S.selSubIdx = idx; S.selIdx = -1; S.selAudioIdx = -1;
             S.activeTab = 'subs';
-            document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
             document.querySelector('[data-ptab="subs"]')?.classList.add('active');
             renderTimeline(); renderProps();
         }
@@ -539,10 +538,10 @@ export async function init() {
     document.addEventListener('mouseup', () => { if (_rulerDragging) _rulerDragging = false; });
 
     // ── Props tabs ────────────────────────────────────────────────────────────
-    $('ive-props-nav').addEventListener('click', e => {
-        const tab = e.target.closest('.ive-pm-nav-btn');
+    $('ive-props').addEventListener('click', e => {
+        const tab = e.target.closest('.ive-ptab');
         if (!tab) return;
-        document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
         tab.classList.add('active');
         S.activeTab = tab.dataset.ptab;
         renderProps();
@@ -735,7 +734,7 @@ export async function init() {
                 });
                 if (S.selSubIdx >= 0) {
                     S.activeTab = 'subs';
-                    document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                     document.querySelector('[data-ptab="subs"]')?.classList.add('active');
                 }
             }
@@ -832,14 +831,7 @@ export async function init() {
     goEnd.innerHTML         = ICONS.tbGoEnd;
     trimBtn.innerHTML       = ICONS.scissors;
 
-    trimBtn.addEventListener('click', () => {
-        const isOpen = !propsPanel.hidden;
-        propsPanel.hidden = isOpen;
-        trimBtn.classList.toggle('active', !isOpen);
-    });
-    const _closePropsPanel = () => { propsPanel.hidden = true; trimBtn.classList.remove('active'); };
-    $('ive-props-close').addEventListener('click', _closePropsPanel);
-    propsPanel.addEventListener('click', e => { if (e.target === propsPanel) _closePropsPanel(); });
+    trimBtn.addEventListener('click', _splitAtPlayhead);
 
     await loadProjectsList();
     await loadTemplatesList();
@@ -853,6 +845,37 @@ export async function init() {
         onResolutionChange: () => { _updatePreviewSize(); renderPreview(); },
     });
     $('ive-exp-settings-btn')?.addEventListener('click', () => expModal.open());
+
+    // ── Draggable modals ──────────────────────────────────────────────────────
+    function _makeDraggable(overlay, box, handle) {
+        if (!overlay || !box || !handle) return;
+        let dx = 0, dy = 0;
+        const _reset = () => { dx = 0; dy = 0; box.style.transform = ''; box.style.animation = ''; };
+        new MutationObserver(() => { if (!overlay.hidden) _reset(); })
+            .observe(overlay, { attributes: true, attributeFilter: ['hidden'] });
+        handle.addEventListener('mousedown', e => {
+            if (e.button !== 0 || e.target.closest('button')) return;
+            e.preventDefault();
+            const sx = e.clientX - dx, sy = e.clientY - dy;
+            const onMove = ev => {
+                dx = ev.clientX - sx; dy = ev.clientY - sy;
+                box.style.transform = `translate(${dx}px,${dy}px)`;
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    }
+    // Settings modal — draggable
+    const _expOverlay = document.getElementById('ive-exp-modal');
+    _makeDraggable(
+        _expOverlay,
+        _expOverlay?.querySelector('.expm-box'),
+        _expOverlay?.querySelector('.expm-hdr')
+    );
 
     _updatePreviewSize();
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
@@ -1431,7 +1454,7 @@ export async function init() {
                         e.stopPropagation();
                         _selectClip(i);
                         S.activeTab = 'slide';
-                        document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+                        document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                         document.querySelector('[data-ptab="slide"]')?.classList.add('active');
                         renderProps();
                     });
@@ -1656,7 +1679,7 @@ export async function init() {
                     S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
                 }
                 S.activeTab = 'subs';
-                document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                 document.querySelector('[data-ptab="subs"]')?.classList.add('active');
                 renderTimeline(); renderProps();
             });
@@ -1748,7 +1771,7 @@ export async function init() {
                 el.title = (sub.text || '') + ' (старый формат)';
                 el.textContent = sub.text ? sub.text.slice(0, 18) : '—';
                 el.style.opacity = '0.5';
-                el.addEventListener('click', e => { e.stopPropagation(); _selectClip(ci); S.activeTab = 'subs'; document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active')); document.querySelector('[data-ptab="subs"]')?.classList.add('active'); renderProps(); });
+                el.addEventListener('click', e => { e.stopPropagation(); _selectClip(ci); S.activeTab = 'subs'; document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active')); document.querySelector('[data-ptab="subs"]')?.classList.add('active'); renderProps(); });
                 subTrackEl.appendChild(el);
             });
             cursor += clipDur;
@@ -2109,11 +2132,59 @@ export async function init() {
     }
 
     // ── Properties panel ──────────────────────────────────────────────────────
+    function _splitAtPlayhead() {
+        const t = S.currentTime;
+
+        // ── Split selected audio track ────────────────────────────────────────
+        if (S.selAudioIdx >= 0 && S.selAudioIdx < S.audioTracks.length) {
+            const track = S.audioTracks[S.selAudioIdx];
+            const st = track.startOffset || 0;
+            const origDur = track.originalDuration || 3600;
+            const usedDur = track.duration !== undefined ? track.duration : Math.max(1, totalDur() - st);
+            const end = st + usedDur;
+            if (t <= st + 0.05 || t >= end - 0.05) {
+                toast('Поставьте курсор внутри аудиодорожки', 'warn'); return;
+            }
+            const firstDur = t - st;
+            const splitPos  = (track.trimIn || 0) + firstDur;
+            track.duration  = firstDur;
+            const newTrack  = { ...track, id: uid(), startOffset: t, trimIn: Math.min(splitPos, origDur - 0.1), duration: end - t };
+            S.audioTracks.splice(S.audioTracks.indexOf(track) + 1, 0, newTrack);
+            _pushHistory(); S.dirty = true; renderTimeline(); renderProps();
+            toast('Аудио разрезано', 'ok');
+            return;
+        }
+
+        // ── Split selected video/image clip ───────────────────────────────────
+        if (S.selIdx >= 0 && S.selIdx < S.clips.length) {
+            const clip = S.clips[S.selIdx];
+            let clipStart = 0;
+            for (let i = 0; i < S.selIdx; i++) clipStart += S.clips[i].duration || 3;
+            const clipEnd = clipStart + (clip.duration || 3);
+            const local   = t - clipStart;
+            if (t <= clipStart + 0.05 || t >= clipEnd - 0.05) {
+                toast('Поставьте курсор внутри клипа', 'warn'); return;
+            }
+            const secondDur   = (clip.duration || 3) - local;
+            const secondTrimIn = clip.type === 'video' ? (clip.trimIn || 0) + local : (clip.trimIn || 0);
+            clip.duration = local;
+            const newClip = { ...clip, id: uid(), duration: secondDur, trimIn: secondTrimIn,
+                subtitles: [], transition: JSON.parse(JSON.stringify(clip.transition || {})),
+                startEffect: JSON.parse(JSON.stringify(clip.startEffect || {})),
+                endEffect:   JSON.parse(JSON.stringify(clip.endEffect   || {})),
+                effects:     JSON.parse(JSON.stringify(clip.effects     || [])) };
+            S.clips.splice(S.selIdx + 1, 0, newClip);
+            _pushHistory(); S.dirty = true; renderTimeline(); renderMediaList();
+            toast('Клип разрезан', 'ok');
+            return;
+        }
+
+        toast('Выберите клип или аудиодорожку', 'warn');
+    }
+
     function _updateTrimBtn() {
-        const hasSelection = S.selIdx >= 0 || S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0
-            || S.selPipIdx >= 0 || S.selSubIdx >= 0;
+        const hasSelection = S.selIdx >= 0 || S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0;
         trimBtn.disabled = !hasSelection;
-        if (!hasSelection && !propsPanel.hidden) _closePropsPanel();
     }
 
     function renderProps() {
@@ -3044,7 +3115,7 @@ export async function init() {
             S.selPipIdx = idx; S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
             // Switch to slide tab
             S.activeTab = 'slide';
-            document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
             document.querySelector('[data-ptab="slide"]')?.classList.add('active');
             renderTimeline(); renderProps(); renderPreview();
         });
@@ -3189,7 +3260,7 @@ export async function init() {
                     S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
                 }
                 S.activeTab = 'slide';
-                document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
                 document.querySelector('[data-ptab="slide"]')?.classList.add('active');
                 renderTimeline(); renderProps(); renderPreview();
             });

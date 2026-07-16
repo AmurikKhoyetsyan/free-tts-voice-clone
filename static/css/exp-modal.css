@@ -38,7 +38,9 @@
 .expm-hdr {
     display: flex; align-items: center; justify-content: space-between;
     padding: 15px 22px; border-bottom: 1px solid var(--ebd); flex-shrink: 0;
+    cursor: grab; user-select: none;
 }
+.expm-hdr:active { cursor: grabbing; }
 .expm-title { font-size: 14px; font-weight: 700; color: var(--et); letter-spacing: .02em; }
 .expm-close {
     background: none; border: none; color: var(--etd); cursor: pointer;
