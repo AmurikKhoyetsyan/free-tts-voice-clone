@@ -140,7 +140,7 @@ export async function init() {
     const audioLblEl    = $('ive-audio-lbl');
     const labelsScroll  = $('ive-labels-scroll');
     const propsBody     = $('ive-props-body');
-    const propsPanel    = $('ive-props-panel');
+    const propsPanel    = $('ive-props-overlay');
     const trimBtn       = $('ive-trim-btn');
     // Transition preview elements
     const previewContentNext = $('ive-preview-content-next');
@@ -488,7 +488,7 @@ export async function init() {
         if (idx >= 0) {
             S.selSubIdx = idx; S.selIdx = -1; S.selAudioIdx = -1;
             S.activeTab = 'subs';
-            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
             document.querySelector('[data-ptab="subs"]')?.classList.add('active');
             renderTimeline(); renderProps();
         }
@@ -539,10 +539,10 @@ export async function init() {
     document.addEventListener('mouseup', () => { if (_rulerDragging) _rulerDragging = false; });
 
     // ── Props tabs ────────────────────────────────────────────────────────────
-    $('ive-props-panel').addEventListener('click', e => {
-        const tab = e.target.closest('.ive-ptab');
+    $('ive-props-nav').addEventListener('click', e => {
+        const tab = e.target.closest('.ive-pm-nav-btn');
         if (!tab) return;
-        document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
         tab.classList.add('active');
         S.activeTab = tab.dataset.ptab;
         renderProps();
@@ -735,7 +735,7 @@ export async function init() {
                 });
                 if (S.selSubIdx >= 0) {
                     S.activeTab = 'subs';
-                    document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
                     document.querySelector('[data-ptab="subs"]')?.classList.add('active');
                 }
             }
@@ -837,10 +837,9 @@ export async function init() {
         propsPanel.hidden = isOpen;
         trimBtn.classList.toggle('active', !isOpen);
     });
-    $('ive-props-close').addEventListener('click', () => {
-        propsPanel.hidden = true;
-        trimBtn.classList.remove('active');
-    });
+    const _closePropsPanel = () => { propsPanel.hidden = true; trimBtn.classList.remove('active'); };
+    $('ive-props-close').addEventListener('click', _closePropsPanel);
+    propsPanel.addEventListener('click', e => { if (e.target === propsPanel) _closePropsPanel(); });
 
     await loadProjectsList();
     await loadTemplatesList();
@@ -1432,7 +1431,7 @@ export async function init() {
                         e.stopPropagation();
                         _selectClip(i);
                         S.activeTab = 'slide';
-                        document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                        document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
                         document.querySelector('[data-ptab="slide"]')?.classList.add('active');
                         renderProps();
                     });
@@ -1657,7 +1656,7 @@ export async function init() {
                     S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selPipIdx = -1; S.selPipIdxs = new Set();
                 }
                 S.activeTab = 'subs';
-                document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
                 document.querySelector('[data-ptab="subs"]')?.classList.add('active');
                 renderTimeline(); renderProps();
             });
@@ -1749,7 +1748,7 @@ export async function init() {
                 el.title = (sub.text || '') + ' (старый формат)';
                 el.textContent = sub.text ? sub.text.slice(0, 18) : '—';
                 el.style.opacity = '0.5';
-                el.addEventListener('click', e => { e.stopPropagation(); _selectClip(ci); S.activeTab = 'subs'; document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active')); document.querySelector('[data-ptab="subs"]')?.classList.add('active'); renderProps(); });
+                el.addEventListener('click', e => { e.stopPropagation(); _selectClip(ci); S.activeTab = 'subs'; document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active')); document.querySelector('[data-ptab="subs"]')?.classList.add('active'); renderProps(); });
                 subTrackEl.appendChild(el);
             });
             cursor += clipDur;
@@ -2114,10 +2113,7 @@ export async function init() {
         const hasSelection = S.selIdx >= 0 || S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0
             || S.selPipIdx >= 0 || S.selSubIdx >= 0;
         trimBtn.disabled = !hasSelection;
-        if (!hasSelection && !propsPanel.hidden) {
-            propsPanel.hidden = true;
-            trimBtn.classList.remove('active');
-        }
+        if (!hasSelection && !propsPanel.hidden) _closePropsPanel();
     }
 
     function renderProps() {
@@ -3048,7 +3044,7 @@ export async function init() {
             S.selPipIdx = idx; S.selIdx = -1; S.selAudioIdx = -1; S.selSubIdx = -1;
             // Switch to slide tab
             S.activeTab = 'slide';
-            document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
             document.querySelector('[data-ptab="slide"]')?.classList.add('active');
             renderTimeline(); renderProps(); renderPreview();
         });
@@ -3193,7 +3189,7 @@ export async function init() {
                     S.selIdx = -1; S.selIdxs = new Set(); S.selAudioIdx = -1; S.selAudioIdxs = new Set(); S.selSubIdx = -1; S.selSubIdxs = new Set();
                 }
                 S.activeTab = 'slide';
-                document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.ive-pm-nav-btn').forEach(b => b.classList.remove('active'));
                 document.querySelector('[data-ptab="slide"]')?.classList.add('active');
                 renderTimeline(); renderProps(); renderPreview();
             });

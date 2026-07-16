@@ -971,23 +971,29 @@
 
                 </div>
 
-                <!-- Properties floating panel (opened by trim button) -->
-                <div id="ive-props-panel" class="ive-props-panel" hidden>
-                    <div class="ive-props-panel-hdr">
-                        <span>Свойства</span>
-                        <button class="ive-props-close-btn" id="ive-props-close" title="Закрыть">×</button>
-                    </div>
-                    <div class="ive-props-tabs">
-                        <button class="ive-ptab active" data-ptab="slide">Клип</button>
-                        <button class="ive-ptab" data-ptab="subs">Субтитры</button>
-                        <button class="ive-ptab" data-ptab="effects">Эффекты</button>
-                    </div>
-                    <div id="ive-props-body" class="ive-props-body">
-                        <div class="ive-props-placeholder">Выберите клип</div>
-                    </div>
-                </div>
 
             </div>
+
+            <!-- Properties modal (same style as export settings) -->
+            <div id="ive-props-overlay" class="ive-pm-overlay" hidden>
+                <div class="ive-pm-box">
+                    <div class="ive-pm-hdr">
+                        <span class="ive-pm-title">Свойства</span>
+                        <button class="ive-pm-close" id="ive-props-close" title="Закрыть">×</button>
+                    </div>
+                    <div class="ive-pm-layout">
+                        <nav class="ive-pm-nav" id="ive-props-nav">
+                            <button class="ive-pm-nav-btn active" data-ptab="slide">Клип</button>
+                            <button class="ive-pm-nav-btn" data-ptab="subs">Субтитры</button>
+                            <button class="ive-pm-nav-btn" data-ptab="effects">Эффекты</button>
+                        </nav>
+                        <div id="ive-props-body" class="ive-pm-content">
+                            <div class="ive-props-placeholder">Выберите клип</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </section>
 
     </main>
