@@ -14,11 +14,12 @@ const lpFill = progressEl.querySelector('.lp-fill');
 const lpStage = progressEl.querySelector('.lp-stage');
 const lpEta = progressEl.querySelector('.lp-eta');
 
-const POS_KEY = '__log_pos_v1';
-const SIZE_KEY = '__log_size_v1';
+const POS_KEY   = '__log_pos_v1';
+const SIZE_KEY  = '__log_size_v1';
+const OPEN_KEY  = '__log_open_v1';
 
-function show() { panel.hidden = false; toggle.classList.add('open'); }
-function hide() { panel.hidden = true; toggle.classList.remove('open'); }
+function show() { panel.hidden = false; toggle.classList.add('open'); try { sessionStorage.setItem(OPEN_KEY, '1'); } catch (_) {} }
+function hide() { panel.hidden = true;  toggle.classList.remove('open'); try { sessionStorage.setItem(OPEN_KEY, '0'); } catch (_) {} }
 function isOpen() { return !panel.hidden; }
 
 // restore persisted position/size
@@ -36,7 +37,7 @@ try {
     }
 } catch (_) {}
 
-show();
+try { if (sessionStorage.getItem(OPEN_KEY) !== '0') show(); } catch (_) { show(); }
 
 toggle.addEventListener('click', () => (isOpen() ? hide() : show()));
 closeBtn.addEventListener('click', (e) => { e.stopPropagation(); hide(); });
@@ -172,7 +173,6 @@ export const progress = {
         lpFill.style.width = '0%';
         lpStage.textContent = 'старт';
         lpEta.textContent = '';
-        show();
     },
     update(frac, desc) {
         if (!prog.active) this.start(desc);
