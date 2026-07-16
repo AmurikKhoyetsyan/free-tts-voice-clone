@@ -140,6 +140,8 @@ export async function init() {
     const audioLblEl    = $('ive-audio-lbl');
     const labelsScroll  = $('ive-labels-scroll');
     const propsBody     = $('ive-props-body');
+    const propsPanel    = $('ive-props-panel');
+    const trimBtn       = $('ive-trim-btn');
     // Transition preview elements
     const previewContentNext = $('ive-preview-content-next');
     const previewImgNext     = $('ive-preview-img-next');
@@ -537,7 +539,7 @@ export async function init() {
     document.addEventListener('mouseup', () => { if (_rulerDragging) _rulerDragging = false; });
 
     // ── Props tabs ────────────────────────────────────────────────────────────
-    $('ive-props').addEventListener('click', e => {
+    $('ive-props-panel').addEventListener('click', e => {
         const tab = e.target.closest('.ive-ptab');
         if (!tab) return;
         document.querySelectorAll('.ive-ptab').forEach(b => b.classList.remove('active'));
@@ -828,6 +830,17 @@ export async function init() {
     stopBtn.innerHTML       = ICONS.tbStop;
     fwdBtn.innerHTML        = ICONS.skipFwd;
     goEnd.innerHTML         = ICONS.tbGoEnd;
+    trimBtn.innerHTML       = ICONS.scissors;
+
+    trimBtn.addEventListener('click', () => {
+        const isOpen = !propsPanel.hidden;
+        propsPanel.hidden = isOpen;
+        trimBtn.classList.toggle('active', !isOpen);
+    });
+    $('ive-props-close').addEventListener('click', () => {
+        propsPanel.hidden = true;
+        trimBtn.classList.remove('active');
+    });
 
     await loadProjectsList();
     await loadTemplatesList();
@@ -1608,7 +1621,7 @@ export async function init() {
                     document.addEventListener('mouseup', onUp);
                 });
                 row.appendChild(item);
-                drawWaveform(canvas, track.fileUrl);
+                drawWaveform(canvas, track.fileUrl, track.trimIn || 0, trackDur);
             });
 
             audioTrackEl.appendChild(row);
@@ -2097,7 +2110,18 @@ export async function init() {
     }
 
     // ── Properties panel ──────────────────────────────────────────────────────
+    function _updateTrimBtn() {
+        const hasSelection = S.selIdx >= 0 || S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0
+            || S.selPipIdx >= 0 || S.selSubIdx >= 0;
+        trimBtn.disabled = !hasSelection;
+        if (!hasSelection && !propsPanel.hidden) {
+            propsPanel.hidden = true;
+            trimBtn.classList.remove('active');
+        }
+    }
+
     function renderProps() {
+        _updateTrimBtn();
         if (S.selPipIdxs.size > 1) { _renderPropsMultiPip(); return; }
         if (S.selPipIdx >= 0 && S.selPipIdx < S.pipLayers.length) {
             _renderPropsPip(S.pipLayers[S.selPipIdx], S.selPipIdx); return;

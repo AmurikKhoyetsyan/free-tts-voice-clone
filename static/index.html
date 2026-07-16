@@ -889,6 +889,7 @@
                                 <button class="ive-tb-btn" id="ive-fwd-btn"    title="+5с (L)"></button>
                                 <button class="ive-tb-btn" id="ive-go-end"     title="К концу (End)"></button>
                             </div>
+                            <button class="ive-tb-btn ive-tb-trim" id="ive-trim-btn" title="Свойства / Обрезка" disabled></button>
                             <input type="range" class="ive-seek-bar" id="ive-seek-bar" min="0" max="10000" step="1" value="0">
                             <div class="ive-time-group">
                                 <span class="ive-cur-time" id="ive-cur-time">0:00.0</span>
@@ -970,8 +971,12 @@
 
                 </div>
 
-                <!-- Right: properties -->
-                <aside class="ive-props" id="ive-props">
+                <!-- Properties floating panel (opened by trim button) -->
+                <div id="ive-props-panel" class="ive-props-panel" hidden>
+                    <div class="ive-props-panel-hdr">
+                        <span>Свойства</span>
+                        <button class="ive-props-close-btn" id="ive-props-close" title="Закрыть">×</button>
+                    </div>
                     <div class="ive-props-tabs">
                         <button class="ive-ptab active" data-ptab="slide">Клип</button>
                         <button class="ive-ptab" data-ptab="subs">Субтитры</button>
@@ -980,7 +985,7 @@
                     <div id="ive-props-body" class="ive-props-body">
                         <div class="ive-props-placeholder">Выберите клип</div>
                     </div>
-                </aside>
+                </div>
 
             </div>
         </section>

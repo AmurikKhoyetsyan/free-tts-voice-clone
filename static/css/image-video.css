@@ -2,10 +2,11 @@
 
 .ive-layout {
     display: grid;
-    grid-template-columns: 260px 1fr 260px;
+    grid-template-columns: 260px 1fr;
     grid-template-rows: 1fr;
     height: calc(100vh - 54px);
     gap: 0;
+    position: relative;
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
@@ -462,12 +463,42 @@
 .ive-export-progress .vid-progress-bar { flex: 1; }
 .ive-export-progress .status { font-size: 12px; white-space: nowrap; }
 
-/* ── Properties panel ───────────────────────────────────────────────────── */
-.ive-props {
-    grid-column: 3; background: var(--bg2);
-    border-left: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden;
+/* ── Trim button in transport bar ───────────────────────────────────────── */
+.ive-tb-trim {
+    width: 36px; height: 31px;
+    border-radius: 7px; margin-left: 4px;
 }
+.ive-tb-trim:not(:disabled) { color: #7a9ab8; }
+.ive-tb-trim:not(:disabled):hover { background: #1c2d3c; border-color: #2a4060; color: #8aaccc; }
+.ive-tb-trim.active { background: #162d4c !important; border-color: #244870 !important; color: #4c8ec8 !important; }
+.ive-tb-trim:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+
+/* ── Properties floating panel ──────────────────────────────────────────── */
+.ive-props-panel {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 280px;
+    background: var(--bg2);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    z-index: 50;
+    overflow: hidden;
+    box-shadow: -4px 0 16px rgba(0,0,0,.35);
+}
+.ive-props-panel[hidden] { display: none; }
+.ive-props-panel-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 600; color: var(--text-dim);
+    flex-shrink: 0; background: var(--bg2);
+}
+.ive-props-close-btn {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 16px; line-height: 1; cursor: pointer;
+    padding: 2px 5px; border-radius: 3px;
+}
+.ive-props-close-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
 .ive-props-tabs {
     display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
