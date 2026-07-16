@@ -2471,7 +2471,6 @@ export async function init() {
             <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:8px 0 4px">Звуковые эффекты</div>
             <div class="ive-sfx-chips" id="acp-sfx-chips"></div>
             <div id="acp-sfx-params"></div>
-            <button class="btn btn-sm" id="acp-split" style="margin-top:8px" title="Разделить в позиции курсора">✂ Разделить</button>
             <button class="btn btn-sm danger" id="acp-del" style="margin-top:6px">Удалить дорожку</button>
         </div>`;
 
@@ -2581,26 +2580,6 @@ export async function init() {
         }
         _sfxRender();
 
-        $('acp-split').addEventListener('click', () => {
-            const t = S.currentTime;
-            const st = track.startOffset || 0;
-            const origDur = track.originalDuration || 3600;
-            const usedDur = track.duration !== undefined ? track.duration : Math.max(1, totalDur() - st);
-            const end = st + usedDur;
-            if (t <= st + 0.05 || t >= end - 0.05) {
-                toast('Поставьте курсор внутри аудио дорожки', 'warn'); return;
-            }
-            const firstDur = t - st;
-            const audioSplitPos = (track.trimIn || 0) + firstDur;
-            const secondDur = end - t;
-            track.duration = firstDur;
-            const newTrack = { ...track, id: uid(), startOffset: t, trimIn: Math.min(audioSplitPos, origDur - 0.1), duration: secondDur };
-            const ti = S.audioTracks.indexOf(track);
-            S.audioTracks.splice(ti + 1, 0, newTrack);
-            _pushHistory();
-            S.dirty = true; renderTimeline(); renderProps();
-            toast('Аудио разделено', 'ok');
-        });
         $('acp-del').addEventListener('click', () => { S.audioTracks.splice(idx, 1); S.selAudioIdx = -1; _pushHistory(); S.dirty = true; renderAll(); });
     }
 
