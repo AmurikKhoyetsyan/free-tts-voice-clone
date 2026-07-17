@@ -6,6 +6,7 @@
     grid-template-rows: 1fr;
     height: calc(100vh - 54px);
     gap: 0;
+    position: relative;
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────────────── */
@@ -462,7 +463,7 @@
 .ive-export-progress .vid-progress-bar { flex: 1; }
 .ive-export-progress .status { font-size: 12px; white-space: nowrap; }
 
-/* ── Properties panel ───────────────────────────────────────────────────── */
+/* ── Properties aside (right panel) ────────────────────────────────────── */
 .ive-props {
     grid-column: 3; background: var(--bg2);
     border-left: 1px solid var(--border);
@@ -479,10 +480,117 @@
 }
 .ive-ptab:hover  { color: var(--text); }
 .ive-ptab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.ive-props-body { flex: 1; overflow-y: auto; padding: 10px; }
+.ive-props-body  { flex: 1; overflow-y: auto; padding: 10px; }
+
+/* ── Trim button in transport bar ───────────────────────────────────────── */
+.ive-tb-trim {
+    width: 36px; height: 31px;
+    border-radius: 7px; margin-left: 4px;
+}
+.ive-tb-trim:not(:disabled) { color: #7a9ab8; }
+.ive-tb-trim:not(:disabled):hover { background: #1c3020; border-color: #2a5030; color: #7aba80; }
+.ive-tb-trim:not(:disabled):active { background: #1e4028; border-color: #40a060; color: #90d0a0; }
+.ive-tb-trim:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+
+/* ── Properties modal (matches exp-modal design) ────────────────────────── */
+@keyframes ivePmIn {
+    from { opacity: 0; transform: scale(.96); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.ive-pm-overlay {
+    display: none; position: fixed; inset: 0; z-index: 9100;
+}
+.ive-pm-overlay:not([hidden]) {
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.82); backdrop-filter: blur(8px); padding: 16px;
+}
+
+.ive-pm-box {
+    /* Dark colour tokens */
+    --eb:  #1a1d23;
+    --eb2: #22252d;
+    --eb3: #2a2d35;
+    --ebd: #333a45;
+    --et:  #e0e0e0;
+    --etd: #888;
+    --ea:  #4a9eff;
+    --eas: rgba(74,158,255,.14);
+
+    /* Remap global vars → dark tokens so all child components auto-inherit */
+    --bg:        var(--eb);
+    --bg1:       var(--eb);
+    --bg2:       var(--eb2);
+    --border:    var(--ebd);
+    --text:      var(--et);
+    --text-dim:  var(--etd);
+    --text-muted:var(--etd);
+    --accent:    var(--ea);
+    --radius:    6px;
+
+    background: var(--eb); color: var(--et);
+    border: 1px solid var(--ebd);
+    border-radius: 14px; width: min(760px, 100%); max-height: 88vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 32px 80px rgba(0,0,0,.7);
+    animation: ivePmIn .18s ease both;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.ive-pm-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 15px 22px; border-bottom: 1px solid var(--ebd); flex-shrink: 0;
+    cursor: grab; user-select: none;
+}
+.ive-pm-hdr:active { cursor: grabbing; }
+.ive-pm-title { font-size: 14px; font-weight: 700; color: var(--et); letter-spacing: .02em; }
+.ive-pm-close {
+    background: none; border: none; color: var(--etd); cursor: pointer;
+    font-size: 15px; padding: 4px 9px; border-radius: 6px; line-height: 1;
+    transition: background .12s, color .12s;
+}
+.ive-pm-close:hover { background: var(--eb3); color: var(--et); }
+
+.ive-pm-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+.ive-pm-nav {
+    width: 150px; flex-shrink: 0; border-right: 1px solid var(--ebd);
+    display: flex; flex-direction: column; padding: 8px 0; background: var(--eb2);
+}
+.ive-pm-nav-btn {
+    padding: 10px 18px; background: none; border: none;
+    border-left: 3px solid transparent;
+    text-align: left; font-size: 13px; color: var(--etd);
+    cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+    white-space: nowrap;
+}
+.ive-pm-nav-btn:hover { background: var(--eb3); color: var(--et); }
+.ive-pm-nav-btn.active {
+    color: var(--ea); border-left-color: var(--ea);
+    background: var(--eas); font-weight: 600;
+}
+
+.ive-pm-content {
+    flex: 1; overflow-y: auto; padding: 20px 22px; background: var(--eb);
+    min-height: 320px;
+}
+.ive-pm-content .ive-label { color: var(--etd); }
+.ive-pm-content .ive-input,
+.ive-pm-content .ive-select,
+.ive-pm-content .ive-textarea {
+    background: var(--eb2); border: 1px solid var(--ebd);
+    color: var(--et); border-radius: 5px; padding: 4px 7px;
+}
+.ive-pm-content .ive-input:focus,
+.ive-pm-content .ive-select:focus,
+.ive-pm-content .ive-textarea:focus { border-color: var(--ea); outline: none; }
+.ive-pm-content .ive-toggle-row { color: var(--etd); }
+.ive-pm-content .ive-form { gap: 10px; }
+.ive-pm-content .ive-audio-props-item { display: flex; flex-direction: column; gap: 8px; }
+.ive-pm-content .btn { font-size: 12px; }
 .ive-props-placeholder {
     display: flex; align-items: center; justify-content: center;
-    height: 100%; color: var(--text-dim); font-size: 13px;
+    height: 100%; color: var(--etd); font-size: 13px;
 }
 
 /* ── Form elements ──────────────────────────────────────────────────────── */

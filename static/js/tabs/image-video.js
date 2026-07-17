@@ -36,7 +36,8 @@ const S = {
 
 // ── Undo/Redo history ────────────────────────────────────────────────────────
 const _historyStack = [];
-let _historyIdx = -1;
+let _historyIdx    = -1;
+let _historyMinIdx =  0; // floor: undo stops here. 0 = any baseline reachable; set to 0 always, overridden per-context
 
 // ── Audio element pool ────────────────────────────────────────────────────────
 const _audioEls = new Map(); // trackId → HTMLAudioElement
@@ -140,6 +141,7 @@ export async function init() {
     const audioLblEl    = $('ive-audio-lbl');
     const labelsScroll  = $('ive-labels-scroll');
     const propsBody     = $('ive-props-body');
+    const trimBtn       = $('ive-trim-btn');
     // Transition preview elements
     const previewContentNext = $('ive-preview-content-next');
     const previewImgNext     = $('ive-preview-img-next');
@@ -293,6 +295,7 @@ export async function init() {
         const d = parseFloat(globalDurEl.value);
         if (!isFinite(d) || d < 0.5) return;
         S.clips.filter(c => c.type === 'image').forEach(c => { c.duration = d; });
+        _pushHistory();
         S.dirty = true; renderAll();
     });
 
@@ -618,7 +621,8 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
-            _historyStack.length = 0; _historyIdx = -1;
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -641,7 +645,8 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
-            _historyStack.length = 0; _historyIdx = -1;
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -770,7 +775,17 @@ export async function init() {
     // ── Keyboard shortcuts ────────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
         if (!section || section.hidden) return;
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y: work even when an input is focused.
+        // Only skip for TEXTAREA so native per-character undo still works in subtitle fields.
+        if (e.ctrlKey && e.target.tagName !== 'TEXTAREA') {
+            if (e.key === 'z' || e.key === 'Z') {
+                e.preventDefault();
+                if (e.shiftKey) _redo(); else _undo();
+                return;
+            }
+            if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); _redo(); return; }
+        }
+        if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
         switch (e.key) {
             case ' ':        e.preventDefault(); _togglePlay();                                 break;
             case 'k': case 'K': e.preventDefault(); S.isPlaying ? _pausePlayback() : null;    break;
@@ -788,12 +803,6 @@ export async function init() {
             if (hasAnySelection) { e.preventDefault(); _deleteSelectedClip(); }
             break;
         }
-        case 'z': case 'Z':
-            if (e.ctrlKey && e.shiftKey) { e.preventDefault(); _redo(); }
-            else if (e.ctrlKey) { e.preventDefault(); _undo(); }
-            break;
-        case 'y': case 'Y':
-            if (e.ctrlKey) { e.preventDefault(); _redo(); }                                    break;
         case 'a': case 'A':
             if (e.ctrlKey) { e.preventDefault(); _selectAll(); }                               break;
         case 'Escape':
@@ -828,12 +837,13 @@ export async function init() {
     stopBtn.innerHTML       = ICONS.tbStop;
     fwdBtn.innerHTML        = ICONS.skipFwd;
     goEnd.innerHTML         = ICONS.tbGoEnd;
+    trimBtn.innerHTML       = ICONS.scissors;
+
+    trimBtn.addEventListener('click', _splitAtPlayhead);
 
     await loadProjectsList();
     await loadTemplatesList();
     renderAll();
-    // Initialize history with empty baseline so first Ctrl+Z has a state to return to
-    _pushHistory();
 
     // ── Export Modal ──────────────────────────────────────────────────────────
     const expModal = createExpModal({
@@ -841,6 +851,37 @@ export async function init() {
         onResolutionChange: () => { _updatePreviewSize(); renderPreview(); },
     });
     $('ive-exp-settings-btn')?.addEventListener('click', () => expModal.open());
+
+    // ── Draggable modals ──────────────────────────────────────────────────────
+    function _makeDraggable(overlay, box, handle) {
+        if (!overlay || !box || !handle) return;
+        let dx = 0, dy = 0;
+        const _reset = () => { dx = 0; dy = 0; box.style.transform = ''; box.style.animation = ''; };
+        new MutationObserver(() => { if (!overlay.hidden) _reset(); })
+            .observe(overlay, { attributes: true, attributeFilter: ['hidden'] });
+        handle.addEventListener('mousedown', e => {
+            if (e.button !== 0 || e.target.closest('button')) return;
+            e.preventDefault();
+            const sx = e.clientX - dx, sy = e.clientY - dy;
+            const onMove = ev => {
+                dx = ev.clientX - sx; dy = ev.clientY - sy;
+                box.style.transform = `translate(${dx}px,${dy}px)`;
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    }
+    // Settings modal — draggable
+    const _expOverlay = document.getElementById('ive-exp-modal');
+    _makeDraggable(
+        _expOverlay,
+        _expOverlay?.querySelector('.expm-box'),
+        _expOverlay?.querySelector('.expm-hdr')
+    );
 
     _updatePreviewSize();
     new ResizeObserver(() => { _updatePreviewSize(); renderPreview(); }).observe(previewInner);
@@ -1608,7 +1649,7 @@ export async function init() {
                     document.addEventListener('mouseup', onUp);
                 });
                 row.appendChild(item);
-                drawWaveform(canvas, track.fileUrl);
+                drawWaveform(canvas, track.fileUrl, track.trimIn || 0, trackDur);
             });
 
             audioTrackEl.appendChild(row);
@@ -2097,7 +2138,63 @@ export async function init() {
     }
 
     // ── Properties panel ──────────────────────────────────────────────────────
+    function _splitAtPlayhead() {
+        const t = S.currentTime;
+
+        // ── Split selected audio track ────────────────────────────────────────
+        if (S.selAudioIdx >= 0 && S.selAudioIdx < S.audioTracks.length) {
+            const track = S.audioTracks[S.selAudioIdx];
+            const st = track.startOffset || 0;
+            const origDur = track.originalDuration || 3600;
+            const usedDur = track.duration !== undefined ? track.duration : Math.max(1, totalDur() - st);
+            const end = st + usedDur;
+            if (t <= st + 0.05 || t >= end - 0.05) {
+                toast('Поставьте курсор внутри аудиодорожки', 'warn'); return;
+            }
+            const firstDur = t - st;
+            const splitPos  = (track.trimIn || 0) + firstDur;
+            track.duration  = firstDur;
+            const newTrack  = { ...track, id: uid(), startOffset: t, trimIn: Math.min(splitPos, origDur - 0.1), duration: end - t };
+            S.audioTracks.splice(S.audioTracks.indexOf(track) + 1, 0, newTrack);
+            _pushHistory(); S.dirty = true; renderTimeline(); renderProps();
+            toast('Аудио разрезано', 'ok');
+            return;
+        }
+
+        // ── Split selected video/image clip ───────────────────────────────────
+        if (S.selIdx >= 0 && S.selIdx < S.clips.length) {
+            const clip = S.clips[S.selIdx];
+            let clipStart = 0;
+            for (let i = 0; i < S.selIdx; i++) clipStart += S.clips[i].duration || 3;
+            const clipEnd = clipStart + (clip.duration || 3);
+            const local   = t - clipStart;
+            if (t <= clipStart + 0.05 || t >= clipEnd - 0.05) {
+                toast('Поставьте курсор внутри клипа', 'warn'); return;
+            }
+            const secondDur   = (clip.duration || 3) - local;
+            const secondTrimIn = clip.type === 'video' ? (clip.trimIn || 0) + local : (clip.trimIn || 0);
+            clip.duration = local;
+            const newClip = { ...clip, id: uid(), duration: secondDur, trimIn: secondTrimIn,
+                subtitles: [], transition: JSON.parse(JSON.stringify(clip.transition || {})),
+                startEffect: JSON.parse(JSON.stringify(clip.startEffect || {})),
+                endEffect:   JSON.parse(JSON.stringify(clip.endEffect   || {})),
+                effects:     JSON.parse(JSON.stringify(clip.effects     || [])) };
+            S.clips.splice(S.selIdx + 1, 0, newClip);
+            _pushHistory(); S.dirty = true; renderTimeline(); renderMediaList();
+            toast('Клип разрезан', 'ok');
+            return;
+        }
+
+        toast('Выберите клип или аудиодорожку', 'warn');
+    }
+
+    function _updateTrimBtn() {
+        const hasSelection = S.selIdx >= 0 || S.selAudioIdx >= 0 || S.selAudioIdxs.size > 0;
+        trimBtn.disabled = !hasSelection;
+    }
+
     function renderProps() {
+        _updateTrimBtn();
         if (S.selPipIdxs.size > 1) { _renderPropsMultiPip(); return; }
         if (S.selPipIdx >= 0 && S.selPipIdx < S.pipLayers.length) {
             _renderPropsPip(S.pipLayers[S.selPipIdx], S.selPipIdx); return;
@@ -2380,7 +2477,6 @@ export async function init() {
             <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:8px 0 4px">Звуковые эффекты</div>
             <div class="ive-sfx-chips" id="acp-sfx-chips"></div>
             <div id="acp-sfx-params"></div>
-            <button class="btn btn-sm" id="acp-split" style="margin-top:8px" title="Разделить в позиции курсора">✂ Разделить</button>
             <button class="btn btn-sm danger" id="acp-del" style="margin-top:6px">Удалить дорожку</button>
         </div>`;
 
@@ -2490,26 +2586,6 @@ export async function init() {
         }
         _sfxRender();
 
-        $('acp-split').addEventListener('click', () => {
-            const t = S.currentTime;
-            const st = track.startOffset || 0;
-            const origDur = track.originalDuration || 3600;
-            const usedDur = track.duration !== undefined ? track.duration : Math.max(1, totalDur() - st);
-            const end = st + usedDur;
-            if (t <= st + 0.05 || t >= end - 0.05) {
-                toast('Поставьте курсор внутри аудио дорожки', 'warn'); return;
-            }
-            const firstDur = t - st;
-            const audioSplitPos = (track.trimIn || 0) + firstDur;
-            const secondDur = end - t;
-            track.duration = firstDur;
-            const newTrack = { ...track, id: uid(), startOffset: t, trimIn: Math.min(audioSplitPos, origDur - 0.1), duration: secondDur };
-            const ti = S.audioTracks.indexOf(track);
-            S.audioTracks.splice(ti + 1, 0, newTrack);
-            _pushHistory();
-            S.dirty = true; renderTimeline(); renderProps();
-            toast('Аудио разделено', 'ok');
-        });
         $('acp-del').addEventListener('click', () => { S.audioTracks.splice(idx, 1); S.selAudioIdx = -1; _pushHistory(); S.dirty = true; renderAll(); });
     }
 
@@ -3995,7 +4071,9 @@ export async function init() {
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(tmpl.export_settings);
             _updateSaveBtn();
-            renderAll();
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            renderAll(); _pushHistory();
             log('Шаблон применён: ' + S.projectName, 'done');
             toast('Шаблон применён: ' + S.projectName, 'ok');
 
@@ -4086,7 +4164,9 @@ export async function init() {
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _updateSaveBtn();
-            renderAll(); await loadProjectsList();
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
     });
@@ -4167,7 +4247,9 @@ export async function init() {
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _updateSaveBtn();
-            renderAll();
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            renderAll(); _pushHistory();
             await loadTemplatesList();
             toast('Шаблон открыт для редактирования', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -4335,6 +4417,20 @@ export async function init() {
     // ── Undo/Redo ─────────────────────────────────────────────────────────────
 
     function _pushHistory() {
+        // Dedup: skip if state is identical to current top
+        if (_historyIdx >= 0 && _historyStack[_historyIdx]) {
+            const prev = _historyStack[_historyIdx];
+            if (
+                prev.clips.length       === S.clips.length       &&
+                prev.audioTracks.length === S.audioTracks.length &&
+                prev.subtitles.length   === S.subtitles.length   &&
+                prev.pipLayers.length   === S.pipLayers.length   &&
+                JSON.stringify(prev) === JSON.stringify({
+                    clips: S.clips, audioTracks: S.audioTracks,
+                    subtitles: S.subtitles, pipLayers: S.pipLayers,
+                })
+            ) return;
+        }
         _historyStack.length = _historyIdx + 1;
         _historyStack.push({
             clips:       JSON.parse(JSON.stringify(S.clips)),
@@ -4342,8 +4438,13 @@ export async function init() {
             subtitles:   JSON.parse(JSON.stringify(S.subtitles)),
             pipLayers:   JSON.parse(JSON.stringify(S.pipLayers)),
         });
-        if (_historyStack.length > 50) { _historyStack.shift(); _historyIdx = 49; }
-        else { _historyIdx = _historyStack.length - 1; }
+        if (_historyStack.length > 50) {
+            _historyStack.shift();
+            _historyIdx = 49;
+            _historyMinIdx = Math.max(0, _historyMinIdx - 1);
+        } else {
+            _historyIdx = _historyStack.length - 1;
+        }
     }
 
     function _restoreSnapshot(snap) {
@@ -4362,13 +4463,15 @@ export async function init() {
     }
 
     function _undo() {
-        if (_historyIdx <= 0) { toast('Нечего отменять', 'info'); return; }
+        if (_propsHistTimer) { clearTimeout(_propsHistTimer); _propsHistTimer = null; _pushHistory(); }
+        if (_historyIdx <= _historyMinIdx) { toast('Нечего отменять', 'info'); return; }
         _historyIdx--;
         _restoreSnapshot(_historyStack[_historyIdx]);
         toast('Отменено', 'ok');
     }
 
     function _redo() {
+        clearTimeout(_propsHistTimer); _propsHistTimer = null;
         if (_historyIdx >= _historyStack.length - 1) { toast('Нечего повторять', 'info'); return; }
         _historyIdx++;
         _restoreSnapshot(_historyStack[_historyIdx]);
@@ -4595,6 +4698,8 @@ export async function init() {
         S.dirty = false; S.currentTime = 0;
         _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
         _pipEls.clear();
+        _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+        clearTimeout(_propsHistTimer); _propsHistTimer = null;
         _updateSaveBtn();
     }
 
