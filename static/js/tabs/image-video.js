@@ -36,7 +36,8 @@ const S = {
 
 // ── Undo/Redo history ────────────────────────────────────────────────────────
 const _historyStack = [];
-let _historyIdx = -1;
+let _historyIdx    = -1;
+let _historyMinIdx =  0; // floor: undo stops here. 0 = any baseline reachable; set to 0 always, overridden per-context
 
 // ── Audio element pool ────────────────────────────────────────────────────────
 const _audioEls = new Map(); // trackId → HTMLAudioElement
@@ -294,6 +295,7 @@ export async function init() {
         const d = parseFloat(globalDurEl.value);
         if (!isFinite(d) || d < 0.5) return;
         S.clips.filter(c => c.type === 'image').forEach(c => { c.duration = d; });
+        _pushHistory();
         S.dirty = true; renderAll();
     });
 
@@ -619,7 +621,8 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
-            _historyStack.length = 0; _historyIdx = -1;
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -642,7 +645,8 @@ export async function init() {
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
-            _historyStack.length = 0; _historyIdx = -1;
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -771,7 +775,17 @@ export async function init() {
     // ── Keyboard shortcuts ────────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
         if (!section || section.hidden) return;
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+        // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y: work even when an input is focused.
+        // Only skip for TEXTAREA so native per-character undo still works in subtitle fields.
+        if (e.ctrlKey && e.target.tagName !== 'TEXTAREA') {
+            if (e.key === 'z' || e.key === 'Z') {
+                e.preventDefault();
+                if (e.shiftKey) _redo(); else _undo();
+                return;
+            }
+            if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); _redo(); return; }
+        }
+        if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
         switch (e.key) {
             case ' ':        e.preventDefault(); _togglePlay();                                 break;
             case 'k': case 'K': e.preventDefault(); S.isPlaying ? _pausePlayback() : null;    break;
@@ -789,12 +803,6 @@ export async function init() {
             if (hasAnySelection) { e.preventDefault(); _deleteSelectedClip(); }
             break;
         }
-        case 'z': case 'Z':
-            if (e.ctrlKey && e.shiftKey) { e.preventDefault(); _redo(); }
-            else if (e.ctrlKey) { e.preventDefault(); _undo(); }
-            break;
-        case 'y': case 'Y':
-            if (e.ctrlKey) { e.preventDefault(); _redo(); }                                    break;
         case 'a': case 'A':
             if (e.ctrlKey) { e.preventDefault(); _selectAll(); }                               break;
         case 'Escape':
@@ -836,8 +844,6 @@ export async function init() {
     await loadProjectsList();
     await loadTemplatesList();
     renderAll();
-    // Initialize history with empty baseline so first Ctrl+Z has a state to return to
-    _pushHistory();
 
     // ── Export Modal ──────────────────────────────────────────────────────────
     const expModal = createExpModal({
@@ -4065,7 +4071,9 @@ export async function init() {
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(tmpl.export_settings);
             _updateSaveBtn();
-            renderAll();
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            renderAll(); _pushHistory();
             log('Шаблон применён: ' + S.projectName, 'done');
             toast('Шаблон применён: ' + S.projectName, 'ok');
 
@@ -4156,7 +4164,9 @@ export async function init() {
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _updateSaveBtn();
-            renderAll(); await loadProjectsList();
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
     });
@@ -4237,7 +4247,9 @@ export async function init() {
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _updateSaveBtn();
-            renderAll();
+            _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+            clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            renderAll(); _pushHistory();
             await loadTemplatesList();
             toast('Шаблон открыт для редактирования', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -4405,6 +4417,20 @@ export async function init() {
     // ── Undo/Redo ─────────────────────────────────────────────────────────────
 
     function _pushHistory() {
+        // Dedup: skip if state is identical to current top
+        if (_historyIdx >= 0 && _historyStack[_historyIdx]) {
+            const prev = _historyStack[_historyIdx];
+            if (
+                prev.clips.length       === S.clips.length       &&
+                prev.audioTracks.length === S.audioTracks.length &&
+                prev.subtitles.length   === S.subtitles.length   &&
+                prev.pipLayers.length   === S.pipLayers.length   &&
+                JSON.stringify(prev) === JSON.stringify({
+                    clips: S.clips, audioTracks: S.audioTracks,
+                    subtitles: S.subtitles, pipLayers: S.pipLayers,
+                })
+            ) return;
+        }
         _historyStack.length = _historyIdx + 1;
         _historyStack.push({
             clips:       JSON.parse(JSON.stringify(S.clips)),
@@ -4412,8 +4438,13 @@ export async function init() {
             subtitles:   JSON.parse(JSON.stringify(S.subtitles)),
             pipLayers:   JSON.parse(JSON.stringify(S.pipLayers)),
         });
-        if (_historyStack.length > 50) { _historyStack.shift(); _historyIdx = 49; }
-        else { _historyIdx = _historyStack.length - 1; }
+        if (_historyStack.length > 50) {
+            _historyStack.shift();
+            _historyIdx = 49;
+            _historyMinIdx = Math.max(0, _historyMinIdx - 1);
+        } else {
+            _historyIdx = _historyStack.length - 1;
+        }
     }
 
     function _restoreSnapshot(snap) {
@@ -4432,13 +4463,15 @@ export async function init() {
     }
 
     function _undo() {
-        if (_historyIdx <= 0) { toast('Нечего отменять', 'info'); return; }
+        if (_propsHistTimer) { clearTimeout(_propsHistTimer); _propsHistTimer = null; _pushHistory(); }
+        if (_historyIdx <= _historyMinIdx) { toast('Нечего отменять', 'info'); return; }
         _historyIdx--;
         _restoreSnapshot(_historyStack[_historyIdx]);
         toast('Отменено', 'ok');
     }
 
     function _redo() {
+        clearTimeout(_propsHistTimer); _propsHistTimer = null;
         if (_historyIdx >= _historyStack.length - 1) { toast('Нечего повторять', 'info'); return; }
         _historyIdx++;
         _restoreSnapshot(_historyStack[_historyIdx]);
@@ -4665,6 +4698,8 @@ export async function init() {
         S.dirty = false; S.currentTime = 0;
         _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
         _pipEls.clear();
+        _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
+        clearTimeout(_propsHistTimer); _propsHistTimer = null;
         _updateSaveBtn();
     }
 
