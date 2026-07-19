@@ -5,7 +5,7 @@ import { openConfirm, openPrompt } from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
-import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS } from '../imgvid/constants.js';
+import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS, CONTINUOUS_EFFECTS } from '../imgvid/constants.js';
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
@@ -898,7 +898,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/images', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
+                S.clips.push({ id: uid(), type: 'image', file: d.name, fileUrl: d.url, thumbUrl: d.url, original: d.original, duration: dur, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, continuousEffect: { type: 'none', intensity: 30 }, effects: [], subtitles: [], imgScale: 100, imgOffsetX: 0, imgOffsetY: 0, crop: null });
                 _pushHistory();
                 S.dirty = true; log('Изображение добавлено: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
@@ -915,7 +915,7 @@ export async function init() {
                 const r = await fetch('/api/imgvid/clips', { method: 'POST', body: fd });
                 const d = await r.json();
                 if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); continue; }
-                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, originalDuration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, effects: [], subtitles: [] });
+                S.clips.push({ id: uid(), type: 'video', file: d.name, fileUrl: d.url, thumbUrl: d.thumb_url || '', original: d.original, duration: d.duration || 5, originalDuration: d.duration || 5, transition: { type: 'fade', duration: 0.5 }, startEffect: { type: 'none', duration: 1.0 }, endEffect: { type: 'none', duration: 1.0 }, continuousEffect: { type: 'none', intensity: 30 }, effects: [], subtitles: [] });
                 _pushHistory();
                 S.dirty = true; log('Видеоклип добавлен: ' + d.original, 'done');
             } catch (e) { toast(e.message, 'err'); }
@@ -1957,47 +1957,131 @@ export async function init() {
     function _applyClipStartEndEffects(clip, local) {
         const start = clip.startEffect;
         const end   = clip.endEffect;
+        const cont  = clip.continuousEffect;
         const dur   = clip.duration || 3;
-        let opacity = 1, scale = 1, tx = 0, ty = 0;
+        let opacity = 1, scale = 1, tx = 0, ty = 0, rotate = 0, flipX = 1, extraBlur = 0;
 
+        // ── Start effect ──────────────────────────────────────────────────────
         if (start?.type && start.type !== 'none') {
             const d = Math.max(0.01, start.duration || 1);
             const p = Math.max(0, Math.min(1, local / d));
             if (p < 1) {
                 switch (start.type) {
-                    case 'fade-in':    opacity *= p; break;
-                    case 'zoom-in':    scale = 0.5 + 0.5 * p; break;
-                    case 'zoom-out':   scale = 1.5 - 0.5 * p; break;
-                    case 'slide-left': tx = (p - 1) * 100; break;
-                    case 'slide-right':tx = (1 - p) * 100; break;
-                    case 'slide-up':   ty = (p - 1) * 100; break;
-                    case 'slide-down': ty = (1 - p) * 100; break;
+                    case 'fade-in':       opacity *= p; break;
+                    case 'zoom-in':       scale = 0.5 + 0.5 * p; break;
+                    case 'zoom-out':      scale = 1.5 - 0.5 * p; break;
+                    case 'slide-left':    tx = (p - 1) * 100; break;
+                    case 'slide-right':   tx = (1 - p) * 100; break;
+                    case 'slide-up':      ty = (p - 1) * 100; break;
+                    case 'slide-down':    ty = (1 - p) * 100; break;
+                    case 'blur-in':       extraBlur = (1 - p) * 20; break;
+                    case 'rotate-in':     rotate = (1 - p) * -90; opacity = Math.min(1, p * 2); break;
+                    case 'flip-h-in':     flipX = p; opacity = Math.min(1, p * 3); break;
+                    case 'reveal-center': scale = Math.max(0.01, p); opacity = p < 0.15 ? p / 0.15 : 1; break;
+                    case 'bounce-in': {
+                        if (p < 0.6) { scale = p / 0.6; }
+                        else { const ep = (p - 0.6) / 0.4; scale = 1 + 0.25 * Math.sin(ep * Math.PI * 2.5) * (1 - ep); }
+                        opacity = Math.min(1, p * 2.5);
+                        break;
+                    }
                 }
             }
         }
 
+        // ── End effect ────────────────────────────────────────────────────────
         if (end?.type && end.type !== 'none') {
             const d = Math.max(0.01, end.duration || 1);
             const p = Math.max(0, Math.min(1, (dur - local) / d));
             if (p < 1) {
                 switch (end.type) {
-                    case 'fade-out':   opacity *= p; break;
-                    case 'zoom-in':    scale *= 1 + (1 - p) * 0.5; break;
-                    case 'zoom-out':   scale *= 0.5 + 0.5 * p; break;
-                    case 'slide-left': tx -= (1 - p) * 100; break;
-                    case 'slide-right':tx += (1 - p) * 100; break;
-                    case 'slide-up':   ty -= (1 - p) * 100; break;
-                    case 'slide-down': ty += (1 - p) * 100; break;
+                    case 'fade-out':    opacity *= p; break;
+                    case 'zoom-in':     scale *= 1 + (1 - p) * 0.5; break;
+                    case 'zoom-out':    scale *= 0.5 + 0.5 * p; break;
+                    case 'slide-left':  tx -= (1 - p) * 100; break;
+                    case 'slide-right': tx += (1 - p) * 100; break;
+                    case 'slide-up':    ty -= (1 - p) * 100; break;
+                    case 'slide-down':  ty += (1 - p) * 100; break;
+                    case 'blur-out':    extraBlur += (1 - p) * 20; break;
+                    case 'rotate-out':  rotate += (1 - p) * 90; opacity *= Math.min(1, p * 2); break;
+                    case 'flip-h-out':  flipX *= p; opacity *= Math.min(1, p * 3); break;
+                    case 'hide-center': scale *= Math.max(0.01, p); opacity = p < 0.15 ? p / 0.15 : 1; break;
+                    case 'bounce-out': {
+                        if (p > 0.4) { scale *= p; }
+                        else { const ep = p / 0.4; scale *= 0.7 + 0.3 * (ep + (1 - ep) * Math.abs(Math.sin(ep * Math.PI * 2))); }
+                        opacity *= Math.min(1, p * 2.5);
+                        break;
+                    }
                 }
             }
         }
 
-        const zT  = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
-        const effT = (scale !== 1 || tx !== 0 || ty !== 0)
-            ? `scale(${scale.toFixed(4)}) translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%)`
-            : '';
+        // ── Continuous animation ──────────────────────────────────────────────
+        if (cont?.type && cont.type !== 'none') {
+            const intens = Math.max(0.01, Math.min(1, (cont.intensity ?? 30) / 100));
+            const t = local;
+            switch (cont.type) {
+                case 'ken-burns-in': {
+                    const prog = dur > 0 ? t / dur : 0;
+                    scale *= 1 + intens * 0.5 * prog;
+                    break;
+                }
+                case 'ken-burns-out': {
+                    const prog = dur > 0 ? t / dur : 0;
+                    scale *= 1 + intens * 0.5 * (1 - prog);
+                    break;
+                }
+                case 'ken-burns-lr': {
+                    const prog = dur > 0 ? t / dur : 0;
+                    scale *= 1 + intens * 0.15;
+                    tx += (prog - 0.5) * intens * 25;
+                    break;
+                }
+                case 'ken-burns-rl': {
+                    const prog = dur > 0 ? t / dur : 0;
+                    scale *= 1 + intens * 0.15;
+                    tx += (0.5 - prog) * intens * 25;
+                    break;
+                }
+                case 'pulse': {
+                    scale *= 1 + intens * 0.08 * Math.sin(2 * Math.PI * t / 2.5);
+                    break;
+                }
+                case 'shake': {
+                    tx += intens * 3 * Math.sin(2 * Math.PI * t / 0.9);
+                    break;
+                }
+                case 'float': {
+                    ty += intens * 2.5 * Math.sin(2 * Math.PI * t / 3.5);
+                    break;
+                }
+                case 'zoom-breathe': {
+                    scale *= 1 + intens * 0.06 * Math.sin(2 * Math.PI * t / 5.0);
+                    break;
+                }
+                case 'rotate-slow': {
+                    rotate += (t * intens * 30) % 360;
+                    break;
+                }
+            }
+        }
+
+        // ── Apply ─────────────────────────────────────────────────────────────
+        const zT = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
+        const parts = [];
+        if (zT) parts.push(zT);
+        if (scale !== 1) parts.push(`scale(${scale.toFixed(4)})`);
+        if (flipX !== 1) parts.push(`scaleX(${flipX.toFixed(4)})`);
+        if (rotate !== 0) parts.push(`rotate(${rotate.toFixed(2)}deg)`);
+        if (tx !== 0 || ty !== 0) parts.push(`translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%)`);
+
         previewContent.style.opacity   = opacity.toFixed(4);
-        previewContent.style.transform = [zT, effT].filter(Boolean).join(' ') || '';
+        previewContent.style.transform = parts.join(' ') || '';
+
+        if (extraBlur > 0) {
+            const cur = previewContent.style.filter || '';
+            const blurStr = `blur(${extraBlur.toFixed(1)}px)`;
+            previewContent.style.filter = cur ? `${blurStr} ${cur}` : blurStr;
+        }
     }
 
     function _renderSubOverlay(sub, subKey) {
@@ -2623,6 +2707,18 @@ export async function init() {
             <label class="ive-label" id="pv-end-eff-dur-row" ${(!clip.endEffect?.type||clip.endEffect.type==='none')?'hidden':''}>Длит. (с)
                 <input class="ive-input" id="pv-end-eff-dur" type="number" min="0.1" max="${clip.duration}" step="0.1" value="${clip.endEffect?.duration||1.0}">
             </label>
+            <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Непрерывная анимация</div>
+            <label class="ive-label">Тип
+                <select class="ive-select" id="pv-cont-eff-type">
+                    ${CONTINUOUS_EFFECTS.map(e => `<option value="${e.value}"${(clip.continuousEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('')}
+                </select>
+            </label>
+            <label class="ive-label" id="pv-cont-eff-int-row" ${(!clip.continuousEffect?.type||clip.continuousEffect.type==='none')?'hidden':''}>Интенсивность
+                <div class="ive-range-row">
+                    <input class="ive-range" type="range" id="pv-cont-eff-int" min="5" max="100" step="5" value="${clip.continuousEffect?.intensity??30}">
+                    <span class="ive-range-val" id="pv-cont-eff-int-v">${clip.continuousEffect?.intensity??30}</span>
+                </div>
+            </label>
             <label class="ive-label">Скорость
                 <div class="ive-range-row">
                     <input class="ive-range" type="range" id="pv-speed-range" min="0.1" max="4" step="0.05" value="${Math.min(4, clip.speed??1)}">
@@ -2693,6 +2789,20 @@ export async function init() {
             const v = parseFloat(e.target.value);
             if (isFinite(v) && v > 0) { (clip.endEffect = clip.endEffect || {}).duration = v; S.dirty = true; renderPreview(); }
         });
+        const ceTypeEl = $('pv-cont-eff-type'), ceIntRow = $('pv-cont-eff-int-row');
+        ceTypeEl.addEventListener('change', () => {
+            clip.continuousEffect = clip.continuousEffect || {};
+            clip.continuousEffect.type = ceTypeEl.value;
+            ceIntRow.hidden = ceTypeEl.value === 'none';
+            S.dirty = true; renderPreview();
+        });
+        $('pv-cont-eff-int')?.addEventListener('input', e => {
+            const v = parseInt(e.target.value);
+            (clip.continuousEffect = clip.continuousEffect || {}).intensity = v;
+            const vEl = $('pv-cont-eff-int-v');
+            if (vEl) vEl.textContent = v;
+            S.dirty = true; renderPreview();
+        });
         if (!isVideo) {
             $('pv-replace-btn').addEventListener('click', () => $('pv-replace-file').click());
             $('pv-replace-file').addEventListener('change', async () => {
@@ -2759,10 +2869,11 @@ export async function init() {
         $('pv-apply-all').addEventListener('click', () => {
             S.clips.forEach((c, idx) => {
                 if (c === clip) return;
-                c.duration    = clip.duration;
-                c.transition  = JSON.parse(JSON.stringify(clip.transition  || {}));
-                c.startEffect = JSON.parse(JSON.stringify(clip.startEffect || {}));
-                c.endEffect   = JSON.parse(JSON.stringify(clip.endEffect   || {}));
+                c.duration         = clip.duration;
+                c.transition       = JSON.parse(JSON.stringify(clip.transition       || {}));
+                c.startEffect      = JSON.parse(JSON.stringify(clip.startEffect      || {}));
+                c.endEffect        = JSON.parse(JSON.stringify(clip.endEffect        || {}));
+                c.continuousEffect = JSON.parse(JSON.stringify(clip.continuousEffect || {}));
                 c.speed      = clip.speed;
                 c.muteAudio  = clip.muteAudio;
                 c.trimIn     = clip.trimIn;
@@ -3921,8 +4032,9 @@ export async function init() {
                             original: existing.original };
                         base.transition  = base.transition  || { type: 'none', duration: 0.5 };
                         base.effects     = base.effects     || [];
-                        base.startEffect = base.startEffect || { type: 'none', duration: 1.0 };
-                        base.endEffect   = base.endEffect   || { type: 'none', duration: 1.0 };
+                        base.startEffect      = base.startEffect      || { type: 'none', duration: 1.0 };
+                        base.endEffect        = base.endEffect        || { type: 'none', duration: 1.0 };
+                        base.continuousEffect = base.continuousEffect || { type: 'none', intensity: 30 };
                         if (existing.type === 'video') {
                             base.duration = tmplSlide.duration || existing.duration || 5;
                             delete base.imgScale; delete base.imgOffsetX; delete base.imgOffsetY; delete base.crop;

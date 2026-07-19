@@ -28,8 +28,10 @@ from core.log import app_log, print_progress
 from routers.imgvid.ffmpeg_utils import (
     FFMPEG, FFPROBE,
     _EFFECTS,
+    _KEN_BURNS_TYPES,
     _compute_video_dur,
     _probe_duration_clip,
+    _continuous_effect_filters,
 )
 from routers.imgvid.codec_selector import (
     resolve_codec_name,
@@ -254,12 +256,26 @@ async def export_video(
                                 f"setsar=1,fps={fps},format=yuv420p"
                             )
 
-                    parts = pre_parts + [cur_scale_f]
+                    cont_eff  = slide.get("continuousEffect") or {}
+                    cont_type = (cont_eff.get("type") or "none").strip()
+                    cont_int  = float(cont_eff.get("intensity") or 30)
+
+                    replaces_scale, cont_filters = _continuous_effect_filters(
+                        cont_type, cont_int, dur, width, height, fps, clip_type
+                    )
+
+                    if replaces_scale and clip_type == "image":
+                        parts = pre_parts + cont_filters
+                    else:
+                        parts = pre_parts + [cur_scale_f]
 
                     for ef in slide.get("effects", []):
                         et, ev = ef.get("type"), ef.get("value", 0)
                         if et in _EFFECTS and float(ev) != 0:
                             parts.append(_EFFECTS[et](ev))
+
+                    if not replaces_scale and cont_filters:
+                        parts.extend(cont_filters)
 
                     from routers.imgvid.ffmpeg_utils import _start_effect_filters, _end_effect_filters
                     start_eff = slide.get("startEffect") or {}
