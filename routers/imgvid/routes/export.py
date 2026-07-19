@@ -198,10 +198,11 @@ async def export_video(
                         cmd_inputs += ["-i", ap]
                         valid_audio.append(track)
 
-                # Add PIP inputs after audio
+                # Add PIP inputs after audio; record the FFmpeg input index on each pip
                 _total_dur_approx = _compute_video_dur(slides)
                 pip_input_start = audio_start_idx + len(valid_audio)
-                for pip in valid_pip:
+                for pi, pip in enumerate(valid_pip):
+                    pip["_ffmpeg_idx"] = pip_input_start + pi
                     pip_type = pip.get("type", "image")
                     pip_path = pip["_path"]
                     if pip_type == "video":
@@ -319,16 +320,23 @@ async def export_video(
                 q.put(("progress", 0.12, "Сборка переходов…"))
                 filter_parts, last = build_transition_filters_fps(slides, filter_parts, fps)
 
-                if sub_filter:
-                    filter_parts.append(f"[{last}]{sub_filter}[vout_base]")
-                else:
-                    filter_parts.append(f"[{last}]null[vout_base]")
+                filter_parts.append(f"[{last}]null[vout_base]")
 
-                # ── PIP overlays ─────────────────────────────────────────────
-                pip_filters, final_video_label = build_pip_filters(
-                    valid_pip, pip_input_start, "vout_base", width, height, _compute_video_dur(slides)
+                # ── PIP overlays (below subtitles) ───────────────────────────
+                # Sort PIP by their `order` field so higher order = rendered on top.
+                sorted_pip = sorted(valid_pip, key=lambda p: float(p.get("order", 0)))
+                pip_filters, pip_out_label = build_pip_filters(
+                    sorted_pip, pip_input_start, "vout_base", width, height,
+                    _compute_video_dur(slides), fps,
                 )
                 filter_parts.extend(pip_filters)
+
+                # ── Subtitles on top of PIP ──────────────────────────────────
+                if sub_filter:
+                    final_video_label = "vout_sub"
+                    filter_parts.append(f"[{pip_out_label}]{sub_filter}[{final_video_label}]")
+                else:
+                    final_video_label = pip_out_label
 
                 # ── Audio ────────────────────────────────────────────────────
                 audio_map: list[str] = []

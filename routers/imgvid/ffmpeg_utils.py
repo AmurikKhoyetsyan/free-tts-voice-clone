@@ -135,11 +135,11 @@ def _start_effect_filters(se_type: str, se_dur: float, dur: float, w: int, h: in
         return [f"fade=type=in:start_time=0:duration={D:.3f}"]
     if se_type == "rotate-in":
         return [
-            f"rotate=a='(-PI/2)*(1-min(1,t/{D:.3f}))':fillcolor=black:expand=0,scale={w}:{h},setsar=1",
+            f"rotate=a='(-PI/2)*(1-min(1,t/{D:.3f}))':fillcolor=black,scale={w}:{h},setsar=1",
             f"fade=type=in:start_time=0:duration={min(D, 0.4):.3f}",
         ]
     if se_type == "flip-h-in":
-        expr = f"max(2,round({w}*min(1,t/{D:.3f})))"
+        expr = f"max(2,trunc({w}*min(1,t/{D:.3f})/2)*2)"
         return [
             f"scale='{expr}':{h}:eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:0:black",
@@ -147,13 +147,13 @@ def _start_effect_filters(se_type: str, se_dur: float, dur: float, w: int, h: in
     if se_type == "reveal-center":
         expr = f"min(1,t/{D:.3f})"
         return [
-            f"scale='trunc({w}*({expr})/2)*2':'trunc({h}*({expr})/2)*2':eval=frame",
+            f"scale='max(2,trunc({w}*({expr})/2)*2)':'max(2,trunc({h}*({expr})/2)*2)':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     if se_type == "bounce-in":
         expr = f"min(1.1,1.1*min(1,t/{D:.3f}))"
         return [
-            f"scale='trunc({w}*min(1,{expr})/2)*2':'trunc({h}*min(1,{expr})/2)*2':eval=frame",
+            f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
             f"fade=type=in:start_time=0:duration={min(D, 0.35):.3f}",
         ]
@@ -205,11 +205,11 @@ def _end_effect_filters(ee_type: str, ee_dur: float, dur: float, w: int, h: int)
         return [f"fade=type=out:start_time={st:.3f}:duration={D:.3f}"]
     if ee_type == "rotate-out":
         return [
-            f"rotate=a='(PI/2)*(1-min(1,max(0,({dur:.3f}-t)/{D:.3f})))':fillcolor=black:expand=0,scale={w}:{h},setsar=1",
+            f"rotate=a='(PI/2)*(1-min(1,max(0,({dur:.3f}-t)/{D:.3f})))':fillcolor=black,scale={w}:{h},setsar=1",
             f"fade=type=out:start_time={st:.3f}:duration={min(D, 0.4):.3f}",
         ]
     if ee_type == "flip-h-out":
-        expr = f"max(2,round({w}*max(0,({dur:.3f}-t)/{D:.3f})))"
+        expr = f"max(2,trunc({w}*max(0,({dur:.3f}-t)/{D:.3f})/2)*2)"
         return [
             f"scale='{expr}':{h}:eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:0:black",
@@ -217,13 +217,13 @@ def _end_effect_filters(ee_type: str, ee_dur: float, dur: float, w: int, h: int)
     if ee_type == "hide-center":
         expr = f"max(0,min(1,({dur:.3f}-t)/{D:.3f}))"
         return [
-            f"scale='trunc({w}*({expr})/2)*2':'trunc({h}*({expr})/2)*2':eval=frame",
+            f"scale='max(2,trunc({w}*({expr})/2)*2)':'max(2,trunc({h}*({expr})/2)*2)':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     if ee_type == "bounce-out":
         expr = f"min(1.1,1.1*max(0,({dur:.3f}-t)/{D:.3f}))"
         return [
-            f"scale='trunc({w}*min(1,{expr})/2)*2':'trunc({h}*min(1,{expr})/2)*2':eval=frame",
+            f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
             f"fade=type=out:start_time={st:.3f}:duration={min(D, 0.35):.3f}",
         ]
@@ -285,7 +285,7 @@ def _continuous_effect_filters(
         amp = intens * 0.08
         expr_s = f"1+{amp:.4f}*sin(2*PI*t/2.5)"
         return False, [
-            f"scale='round({w}*({expr_s}))':'round({h}*({expr_s}))':eval=frame",
+            f"scale='trunc({w}*({expr_s})/2)*2':'trunc({h}*({expr_s})/2)*2':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     if cont_type == "shake":
@@ -304,13 +304,13 @@ def _continuous_effect_filters(
         amp = intens * 0.06
         expr_s = f"1+{amp:.4f}*sin(2*PI*t/5.0)"
         return False, [
-            f"scale='round({w}*({expr_s}))':'round({h}*({expr_s}))':eval=frame",
+            f"scale='trunc({w}*({expr_s})/2)*2':'trunc({h}*({expr_s})/2)*2':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     if cont_type == "rotate-slow":
         deg_per_sec = intens * 30
         return False, [
-            f"rotate=a='{deg_per_sec:.2f}*(PI/180)*t':fillcolor=black:expand=0"
+            f"rotate=a='{deg_per_sec:.2f}*(PI/180)*t':fillcolor=black"
             f",scale={w}:{h},setsar=1",
         ]
     return False, []

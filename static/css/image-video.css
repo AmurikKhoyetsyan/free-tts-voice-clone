@@ -743,8 +743,30 @@
 .ive-pip-rh-w  { left: -5px;   top:  calc(50% - 5px);    cursor: w-resize; }
 .ive-pip-rh-e  { right: -5px;  top:  calc(50% - 5px);    cursor: e-resize; }
 
-/* PIP timeline track */
+/* PIP timeline track — rows generated dynamically per PIP layer */
 .ive-pip-row { height: 32px; position: relative; overflow: hidden; }
+.ive-pip-track-row {
+    position: relative; height: 32px; overflow: hidden;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    box-sizing: border-box;
+}
+.ive-pip-lbl-row {
+    height: 32px; display: flex; align-items: center;
+    padding: 0 2px 0 4px; gap: 2px;
+    font-size: 8px; font-weight: 700; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: .06em;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    flex-shrink: 0; overflow: hidden; user-select: none;
+    box-sizing: border-box; cursor: default;
+}
+.ive-pip-lbl-row:hover { background: rgba(255,255,255,.02); }
+.ive-pip-drag-handle {
+    cursor: ns-resize; font-size: 11px; opacity: .35;
+    flex-shrink: 0; line-height: 1; padding: 0 1px;
+    transition: opacity .15s;
+}
+.ive-pip-lbl-row:hover .ive-pip-drag-handle { opacity: .7; }
+.ive-pip-drag-row-over { outline: 2px solid #4a9eff; }
 .ive-tl-pip-item {
     position: absolute; height: 24px; top: 4px;
     background: linear-gradient(90deg, rgba(74,158,255,0.35), rgba(74,158,255,0.2));

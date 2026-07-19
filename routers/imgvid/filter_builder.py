@@ -7,7 +7,11 @@ with ``;`` and passed to FFmpeg's ``-filter_complex`` argument.
 import os
 from typing import Optional
 
-from .ffmpeg_utils import _XFADE, _EFFECTS, _start_effect_filters, _end_effect_filters
+from .ffmpeg_utils import (
+    _XFADE, _EFFECTS,
+    _start_effect_filters, _end_effect_filters, _continuous_effect_filters,
+    _KEN_BURNS_TYPES,
+)
 
 
 def build_scale_filter(width: int, height: int, fps: int) -> str:
@@ -195,20 +199,28 @@ def build_pip_filters(
     width: int,
     height: int,
     total_dur: float,
+    fps: int = 30,
 ) -> tuple[list[str], str]:
     """Build Picture-in-Picture overlay filters and return new filter fragments + final label.
 
+    Layers are rendered in the order of *valid_pip* (first = bottom). Callers should
+    sort by the ``order`` field before calling so that higher-order PIPs end up on top.
+
     For each PIP layer the function generates:
-    1. A scale filter for the pip stream.
-    2. An optional opacity (colorchannelmixer) filter.
-    3. An overlay filter that enables the PIP only within its time window.
+    1. Trim/speed for video PIPs.
+    2. Scale to the PIP bounding box.
+    3. Optional colour-effect filters.
+    4. Optional start/end/continuous motion effects.
+    5. Optional opacity (colorchannelmixer) filter.
+    6. An overlay filter that enables the PIP only within its time window.
 
     Args:
         valid_pip:          List of PIP dicts that have ``_path`` resolved.
         pip_input_start:    FFmpeg input index of the first PIP file.
         final_video_label:  The video label to overlay onto (e.g. ``"vout_base"``).
         width, height:      Output video dimensions in pixels.
-        total_dur:          Total video duration (not used in filters, kept for future use).
+        total_dur:          Total video duration (seconds).
+        fps:                Frame rate used for zoompan / continuous effects.
 
     Returns:
         ``(filter_parts, final_label)`` where *filter_parts* is a list of new
@@ -223,41 +235,78 @@ def build_pip_filters(
         py_pct = float(pip.get("y", 5))
         pw_pct = float(pip.get("w", 30))
         ph_pct = float(pip.get("h", 20))
-        pip_start = float(pip.get("startTime", 0))
-        pip_end = float(pip.get("endTime", pip_start + 5))
+        pip_start  = float(pip.get("startTime", 0))
+        pip_end    = float(pip.get("endTime", pip_start + 5))
+        pip_dur    = max(0.001, pip_end - pip_start)
         pip_opacity = float(pip.get("opacity", 1))
-        pip_speed = float(pip.get("speed", 1) or 1)
+        pip_speed  = float(pip.get("speed", 1) or 1)
         pip_trimin = float(pip.get("trimIn", 0) or 0)
 
-        px = int(width * px_pct / 100)
+        px = int(width  * px_pct / 100)
         py = int(height * py_pct / 100)
-        pw = max(1, int(width * pw_pct / 100))
-        ph = max(1, int(height * ph_pct / 100))
+        pw = max(2, int(width  * pw_pct / 100) // 2 * 2)
+        ph = max(2, int(height * ph_pct / 100) // 2 * 2)
 
-        inp_idx = pip_input_start + pi
+        inp_idx = pip.get("_ffmpeg_idx", pip_input_start + pi)
+        pip_label_raw    = f"pip_r_{pi}"
         pip_label_scaled = f"pip_s_{pi}"
-        next_label = f"vout_pip{pi}"
+        next_label       = f"vout_pip{pi}"
 
-        # Build pip video filter chain
-        pip_vf_parts: list[str] = []
+        # ── 1. Trim / speed ──────────────────────────────────────────────────
+        pip_pre: list[str] = []
         if pip_type == "video":
             if pip_trimin > 0:
-                pip_vf_parts.append(f"trim=start={pip_trimin:.3f},setpts=PTS-STARTPTS")
+                pip_pre.append(f"trim=start={pip_trimin:.3f},setpts=PTS-STARTPTS")
             if pip_speed != 1.0:
-                pip_vf_parts.append(f"setpts={1.0 / pip_speed:.6f}*PTS")
-        pip_vf_parts.append(f"scale={pw}:{ph}")
-        filter_parts.append(f"[{inp_idx}:v]{','.join(pip_vf_parts)}[{pip_label_scaled}]")
+                pip_pre.append(f"setpts={1.0 / pip_speed:.6f}*PTS")
 
-        # Opacity filter
+        # ── 2. Continuous effect (may replace scale) ─────────────────────────
+        cont_eff  = pip.get("continuousEffect") or {}
+        cont_type = (cont_eff.get("type") or "none").strip()
+        cont_int  = float(cont_eff.get("intensity") or 30)
+        replaces_scale, cont_filters = _continuous_effect_filters(
+            cont_type, cont_int, pip_dur, pw, ph, fps, pip_type
+        )
+
+        if replaces_scale and pip_type == "image":
+            # Ken Burns: zoompan already outputs pw×ph — no separate scale needed
+            pip_parts = pip_pre + cont_filters
+        else:
+            pip_parts = pip_pre + [
+                f"scale={pw}:{ph}:force_original_aspect_ratio=decrease:flags=lanczos,"
+                f"pad={pw}:{ph}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+            ]
+            if cont_filters:
+                pip_parts.extend(cont_filters)
+
+        # ── 3. Colour effects ────────────────────────────────────────────────
+        for ef in pip.get("effects", []):
+            et, ev = ef.get("type"), ef.get("value", 0)
+            if et in _EFFECTS and float(ev) != 0:
+                pip_parts.append(_EFFECTS[et](ev))
+
+        # ── 4. Start / end motion effects ────────────────────────────────────
+        start_eff = pip.get("startEffect") or {}
+        end_eff   = pip.get("endEffect")   or {}
+        se_type   = (start_eff.get("type") or "none").strip()
+        ee_type   = (end_eff.get("type")   or "none").strip()
+        se_dur    = min(float(start_eff.get("duration") or 1.0), pip_dur)
+        ee_dur    = min(float(end_eff.get("duration")   or 1.0), pip_dur)
+        pip_parts.extend(_start_effect_filters(se_type, se_dur, pip_dur, pw, ph))
+        pip_parts.extend(_end_effect_filters(ee_type, ee_dur, pip_dur, pw, ph))
+
+        filter_parts.append(f"[{inp_idx}:v]{','.join(pip_parts)}[{pip_label_scaled}]")
+
+        # ── 5. Opacity ───────────────────────────────────────────────────────
         pip_label_in = pip_label_scaled
-        if pip_opacity < 1.0:
+        if pip_opacity < 0.999:
             op_label = f"pip_op_{pi}"
             filter_parts.append(
                 f"[{pip_label_in}]format=rgba,colorchannelmixer=aa={pip_opacity:.3f}[{op_label}]"
             )
             pip_label_in = op_label
 
-        # Overlay with time-enable expression
+        # ── 6. Overlay ───────────────────────────────────────────────────────
         enable = f"between(t\\,{pip_start:.3f}\\,{pip_end:.3f})"
         filter_parts.append(
             f"[{current_label}][{pip_label_in}]overlay={px}:{py}:enable='{enable}'[{next_label}]"
