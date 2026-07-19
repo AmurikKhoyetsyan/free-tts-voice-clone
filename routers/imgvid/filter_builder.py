@@ -192,6 +192,25 @@ def build_transition_filters_fps(
     return filter_parts, prev
 
 
+def _pip_transparent_filters(filters: list) -> list:
+    """Replace black fills with transparent ones in PIP continuous-effect filters.
+
+    Called only for PIPs so that letterbox/oscillation padding is transparent
+    (showing the base video layer) instead of opaque black.
+    """
+    result = []
+    for f in filters:
+        if "pad=" in f and ":black" in f:
+            result.append("format=rgba")
+            result.append(f.replace(":black", ":black@0", 1))
+        elif "fillcolor=black" in f:
+            result.append("format=rgba")
+            result.append(f.replace("fillcolor=black", "fillcolor=black@0", 1))
+        else:
+            result.append(f)
+    return result
+
+
 def build_pip_filters(
     valid_pip: list,
     pip_input_start: int,
@@ -272,12 +291,14 @@ def build_pip_filters(
             # Ken Burns: zoompan already outputs pw×ph — no separate scale needed
             pip_parts = pip_pre + cont_filters
         else:
+            # Convert to RGBA so the letterbox pad is transparent (shows base layer)
             pip_parts = pip_pre + [
-                f"scale={pw}:{ph}:force_original_aspect_ratio=decrease:flags=lanczos,"
-                f"pad={pw}:{ph}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+                f"scale={pw}:{ph}:force_original_aspect_ratio=decrease:flags=lanczos",
+                f"format=rgba",
+                f"pad={pw}:{ph}:(ow-iw)/2:(oh-ih)/2:black@0",
             ]
             if cont_filters:
-                pip_parts.extend(cont_filters)
+                pip_parts.extend(_pip_transparent_filters(cont_filters))
 
         # ── 3. Colour effects ────────────────────────────────────────────────
         for ef in pip.get("effects", []):

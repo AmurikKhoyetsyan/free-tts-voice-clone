@@ -892,7 +892,7 @@ export async function init() {
     // ══════════════════════════════════════════════════════════════════════════
 
     async function _uploadImages(files) {
-        const dur = parseFloat(globalDurEl.value) || 3;
+        const dur = parseFloat(globalDurEl.value) || 4;
         for (const file of files) {
             try {
                 const fd = new FormData(); fd.append('file', file);
@@ -2056,7 +2056,8 @@ export async function init() {
                     break;
                 }
                 case 'zoom-breathe': {
-                    scale *= 1 + intens * 0.06 * Math.sin(2 * Math.PI * t / 5.0);
+                    // Smooth breath: 100% at t=0 → 100%+amp at t=2s → 100% at t=4s, always ≥ 100%
+                    scale *= 1 + (intens / 6.0) * (0.5 + 0.5 * Math.sin(2 * Math.PI * t / 4.0 - Math.PI / 2));
                     break;
                 }
                 case 'rotate-slow': {
@@ -2722,8 +2723,8 @@ export async function init() {
             </label>
             <label class="ive-label">Скорость
                 <div class="ive-range-row">
-                    <input class="ive-range" type="range" id="pv-speed-range" min="0.1" max="4" step="0.05" value="${Math.min(4, clip.speed??1)}">
-                    <input class="ive-input" id="pv-speed-input" type="number" min="0.1" max="10" step="0.05" style="width:60px;flex-shrink:0" value="${clip.speed??1}">
+                    <input class="ive-range" type="range" id="pv-speed-range" min="0.1" max="32" step="0.05" value="${Math.min(32, clip.speed??1)}">
+                    <input class="ive-input" id="pv-speed-input" type="number" min="0.1" max="32" step="0.05" style="width:60px;flex-shrink:0" value="${clip.speed??1}">
                 </div>
                 <div id="pv-speed-display" style="font-size:11px;color:var(--text-dim)">${(clip.speed??1)}×</div>
             </label>
@@ -2839,9 +2840,9 @@ export async function init() {
             });
         }
         const _applyVideoSpeed = (val) => {
-            const clamped = Math.max(0.1, Math.min(10, val));
+            const clamped = Math.max(0.1, Math.min(32, val));
             clip.speed = clamped;
-            $('pv-speed-range').value = Math.min(4, clamped);
+            $('pv-speed-range').value = Math.min(32, clamped);
             $('pv-speed-input').value = clamped;
             const dispEl = $('pv-speed-display');
             if (dispEl) dispEl.textContent = clamped + '×';
@@ -3219,7 +3220,7 @@ export async function init() {
                 case 'pulse':        scale *= 1 + intens * 0.08 * Math.sin(2 * Math.PI * t / 2.5); break;
                 case 'shake':        tx += intens * 3 * Math.sin(2 * Math.PI * t / 0.9); break;
                 case 'float':        ty += intens * 2.5 * Math.sin(2 * Math.PI * t / 3.5); break;
-                case 'zoom-breathe': scale *= 1 + intens * 0.06 * Math.sin(2 * Math.PI * t / 5.0); break;
+                case 'zoom-breathe': scale *= 1 + (intens / 6.0) * (0.5 + 0.5 * Math.sin(2 * Math.PI * t / 4.0 - Math.PI / 2)); break;
                 case 'rotate-slow':  rotate += (t * intens * 30) % 360; break;
             }
         }
@@ -3427,13 +3428,16 @@ export async function init() {
         if (!sorted.length) {
             const emptyH = ROW_H + 'px';
             pipTrackEl.style.height = emptyH;
-            pipTrackEl.innerHTML = '<div class="ive-tl-empty-abs" style="font-size:10px;opacity:.4">Нет PIP</div>';
+            pipTrackEl.innerHTML = '<div class="ive-tl-empty-abs" style="font-size:10px;opacity:.4;cursor:pointer" title="Добавить PIP слой">+ Add PIP</div>';
+            pipTrackEl.querySelector('.ive-tl-empty-abs')?.addEventListener('click', () => addPipBtn?.click());
             if (pipLblEl) {
                 pipLblEl.style.height = emptyH;
                 const lbl = document.createElement('div');
                 lbl.className = 'ive-pip-lbl-row';
-                lbl.style.justifyContent = 'center';
-                lbl.textContent = 'PIP';
+                lbl.style.cssText = 'justify-content:center;cursor:pointer;color:var(--accent);';
+                lbl.title = 'Добавить PIP слой';
+                lbl.textContent = '+ PIP';
+                lbl.addEventListener('click', () => addPipBtn?.click());
                 pipLblEl.appendChild(lbl);
             }
             return;
@@ -3667,6 +3671,10 @@ export async function init() {
                     <option value="1"${(!pip.speed||pip.speed===1)?' selected':''}>1× (норма)</option>
                     <option value="1.5"${(pip.speed??1)===1.5?' selected':''}>1.5×</option>
                     <option value="2"${(pip.speed??1)===2?' selected':''}>2×</option>
+                    <option value="4"${(pip.speed??1)===4?' selected':''}>4×</option>
+                    <option value="8"${(pip.speed??1)===8?' selected':''}>8×</option>
+                    <option value="16"${(pip.speed??1)===16?' selected':''}>16×</option>
+                    <option value="32"${(pip.speed??1)===32?' selected':''}>32×</option>
                 </select>
             </label>
             <label class="ive-label">Вход (с)<input class="ive-input" type="number" id="pip-trimin" min="0" step="0.1" value="${pip.trimIn||0}"></label>

@@ -174,7 +174,7 @@ async def export_video(
                 cmd_inputs: list[str] = []
                 for i, slide in enumerate(slides):
                     clip_type = slide.get("type", "image")
-                    dur = float(slide.get("duration", 3))
+                    dur = float(slide.get("duration", 4))
                     if clip_type == "video":
                         vp = os.path.join(CLIPS_DIR, slide.get("file", ""))
                         if not os.path.exists(vp):
@@ -219,7 +219,7 @@ async def export_video(
                     clip_type = slide.get("type", "image")
                     speed = float(slide.get("speed", 1) or 1)
                     trim_in = float(slide.get("trimIn", 0) or 0)
-                    dur = float(slide.get("duration", 3))
+                    dur = float(slide.get("duration", 4))
 
                     pre_parts: list[str] = []
                     cur_scale_f = scale_f

@@ -85,7 +85,7 @@ def _extract_thumb(video_path: str, thumb_path: str) -> bool:
 
 def _compute_video_dur(slides: list) -> float:
     """Total video duration: additive model — clips keep their full duration."""
-    return max(0.0, sum(float(s.get("duration", 3)) for s in slides))
+    return max(0.0, sum(float(s.get("duration", 4)) for s in slides))
 
 
 _KEN_BURNS_TYPES = {"ken-burns-in", "ken-burns-out", "ken-burns-lr", "ken-burns-rl"}
@@ -301,8 +301,9 @@ def _continuous_effect_filters(
             f"crop={w}:{h}:0:'round({amp}+{amp}*sin(2*PI*t/3.5))'",
         ]
     if cont_type == "zoom-breathe":
-        amp = intens * 0.06
-        expr_s = f"1+{amp:.4f}*sin(2*PI*t/5.0)"
+        # amp=intens/6 → default intensity 30 → intens=0.3 → amp=0.05 → 5% extra (100%↔105%)
+        amp = intens / 6.0
+        expr_s = f"1+{amp:.4f}*(0.5+0.5*sin(2*PI*t/4.0-PI/2))"
         return False, [
             f"scale='trunc({w}*({expr_s})/2)*2':'trunc({h}*({expr_s})/2)*2':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
