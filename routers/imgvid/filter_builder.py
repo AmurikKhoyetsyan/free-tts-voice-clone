@@ -280,11 +280,12 @@ def build_pip_filters(
                 pip_pre.append(f"setpts={1.0 / pip_speed:.6f}*PTS")
 
         # ── 2. Continuous effect (may replace scale) ─────────────────────────
-        cont_eff  = pip.get("continuousEffect") or {}
-        cont_type = (cont_eff.get("type") or "none").strip()
-        cont_int  = float(cont_eff.get("intensity") or 30)
+        cont_eff        = pip.get("continuousEffect") or {}
+        cont_type       = (cont_eff.get("type") or "none").strip()
+        cont_int        = float(cont_eff.get("intensity") or 30)
+        pip_effect_speed = max(0.01, float(pip.get("effectSpeed", 1) or 1))
         replaces_scale, cont_filters = _continuous_effect_filters(
-            cont_type, cont_int, pip_dur, pw, ph, fps, pip_type
+            cont_type, cont_int, pip_dur, pw, ph, fps, pip_type, speed=pip_effect_speed
         )
 
         if replaces_scale and pip_type == "image":
@@ -311,8 +312,8 @@ def build_pip_filters(
         end_eff   = pip.get("endEffect")   or {}
         se_type   = (start_eff.get("type") or "none").strip()
         ee_type   = (end_eff.get("type")   or "none").strip()
-        se_dur    = min(float(start_eff.get("duration") or 1.0), pip_dur)
-        ee_dur    = min(float(end_eff.get("duration")   or 1.0), pip_dur)
+        se_dur    = max(0.001, min(float(start_eff.get("duration") or 1.0), pip_dur) / pip_effect_speed)
+        ee_dur    = max(0.001, min(float(end_eff.get("duration")   or 1.0), pip_dur) / pip_effect_speed)
         pip_parts.extend(_start_effect_filters(se_type, se_dur, pip_dur, pw, ph))
         pip_parts.extend(_end_effect_filters(ee_type, ee_dur, pip_dur, pw, ph))
 
@@ -337,6 +338,32 @@ def build_pip_filters(
     return filter_parts, current_label
 
 
+def _make_safe_fonts_dir(tmp_dir: str) -> str:
+    """Create a temp dir with hard-links to only .ttf/.otf fonts.
+
+    Windows Fonts dir contains .fon bitmap fonts which crash libass during
+    directory scanning (STATUS_ACCESS_VIOLATION / exit 3221225477).
+    Hard-linking only the TrueType/OpenType fonts avoids the crash.
+    Falls back to an empty string if anything goes wrong (caller omits fontsdir).
+    """
+    try:
+        safe = os.path.join(tmp_dir, "_fonts")
+        os.makedirs(safe, exist_ok=True)
+        wdir = os.environ.get("WINDIR", "C:\\Windows")
+        src_dir = os.path.join(wdir, "Fonts")
+        if not os.path.isdir(src_dir):
+            return ""
+        for fname in os.listdir(src_dir):
+            if fname.lower().endswith((".ttf", ".otf")):
+                try:
+                    os.link(os.path.join(src_dir, fname), os.path.join(safe, fname))
+                except OSError:
+                    pass
+        return safe
+    except Exception:
+        return ""
+
+
 def build_subtitle_filter(
     all_subs: list,
     tmp_dir: str,
@@ -346,8 +373,8 @@ def build_subtitle_filter(
     """Write an ASS subtitle file and return the FFmpeg ``subtitles=`` filter string.
 
     Returns an empty string when *all_subs* is empty (no subtitles in project).
-    On Windows the path is escaped for FFmpeg's filter syntax and the Windows
-    system Fonts directory is passed as ``fontsdir``.
+    On Windows a safe fonts directory containing only .ttf/.otf fonts is used
+    to prevent libass from crashing on .fon bitmap fonts.
 
     Args:
         all_subs:  List of subtitle dicts with ``abs_start`` / ``abs_end`` keys.
@@ -368,8 +395,10 @@ def build_subtitle_filter(
 
     if os.name == "nt":
         esc = ass_path.replace("\\", "/").replace(":", "\\:")
-        wdir = os.environ.get("WINDIR", "C:\\Windows")
-        esc_fonts = (wdir + "\\Fonts").replace("\\", "/").replace(":", "\\:")
-        return f"subtitles='{esc}':fontsdir='{esc_fonts}'"
+        safe_fonts = _make_safe_fonts_dir(tmp_dir)
+        if safe_fonts:
+            esc_fonts = safe_fonts.replace("\\", "/").replace(":", "\\:")
+            return f"subtitles='{esc}':fontsdir='{esc_fonts}'"
+        return f"subtitles='{esc}'"
 
     return f"subtitles='{ass_path}'"

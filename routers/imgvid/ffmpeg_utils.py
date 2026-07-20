@@ -233,17 +233,23 @@ def _end_effect_filters(ee_type: str, ee_dur: float, dur: float, w: int, h: int)
 def _continuous_effect_filters(
     cont_type: str, intensity: float, dur: float, w: int, h: int, fps: int,
     clip_type: str = "image",
+    speed: float = 1.0,
 ) -> tuple[bool, list]:
     """Returns (replaces_scale, filter_list).
 
     If replaces_scale is True the caller should skip the normal scale/pad
     filter and use filter_list instead (Ken Burns zoompan case).
     Otherwise filter_list should be appended AFTER the normal scale filter.
+
+    ``speed`` scales the oscillation frequency of periodic effects and the
+    rotation rate of rotate-slow.  Ken Burns effects are not speed-scaled
+    (they naturally span the full clip duration).
     """
     if not cont_type or cont_type == "none":
         return False, []
 
     intens = max(0.01, min(1.0, intensity / 100.0))
+    spd = max(0.01, float(speed))
     nframes = max(2, int(round(dur * fps)))
 
     # ── Ken Burns (image only via zoompan) ───────────────────────────────────
@@ -281,35 +287,40 @@ def _continuous_effect_filters(
         return True, [f, f"format=yuv420p"]
 
     # ── Oscillating effects (applied after scale) ─────────────────────────────
+    # Period is divided by speed so higher speed = shorter period = faster oscillation.
     if cont_type == "pulse":
         amp = intens * 0.08
-        expr_s = f"1+{amp:.4f}*sin(2*PI*t/2.5)"
+        period = 2.5 / spd
+        expr_s = f"1+{amp:.4f}*sin(2*PI*t/{period:.4f})"
         return False, [
             f"scale='trunc({w}*({expr_s})/2)*2':'trunc({h}*({expr_s})/2)*2':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     if cont_type == "shake":
         amp = max(1, int(intens * w * 0.025))
+        period = 0.9 / spd
         return False, [
             f"pad={w + amp * 2}:{h}:{amp}:0:black",
-            f"crop={w}:{h}:'round({amp}+{amp}*sin(2*PI*t/0.9))':0",
+            f"crop={w}:{h}:'round({amp}+{amp}*sin(2*PI*t/{period:.4f}))':0",
         ]
     if cont_type == "float":
         amp = max(1, int(intens * h * 0.025))
+        period = 3.5 / spd
         return False, [
             f"pad={w}:{h + amp * 2}:0:{amp}:black",
-            f"crop={w}:{h}:0:'round({amp}+{amp}*sin(2*PI*t/3.5))'",
+            f"crop={w}:{h}:0:'round({amp}+{amp}*sin(2*PI*t/{period:.4f}))'",
         ]
     if cont_type == "zoom-breathe":
         # amp=intens/6 → default intensity 30 → intens=0.3 → amp=0.05 → 5% extra (100%↔105%)
         amp = intens / 6.0
-        expr_s = f"1+{amp:.4f}*(0.5+0.5*sin(2*PI*t/4.0-PI/2))"
+        period = 4.0 / spd
+        expr_s = f"1+{amp:.4f}*(0.5+0.5*sin(2*PI*t/{period:.4f}-PI/2))"
         return False, [
             f"scale='trunc({w}*({expr_s})/2)*2':'trunc({h}*({expr_s})/2)*2':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     if cont_type == "rotate-slow":
-        deg_per_sec = intens * 30
+        deg_per_sec = intens * 30 * spd
         return False, [
             f"rotate=a='{deg_per_sec:.2f}*(PI/180)*t':fillcolor=black"
             f",scale={w}:{h},setsar=1",

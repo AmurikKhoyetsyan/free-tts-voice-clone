@@ -1,6 +1,14 @@
 import re
 
 
+def _safe_font(name: str) -> str:
+    """Strip path chars and validate font name for use in ASS \\fn tags; fall back to Arial."""
+    if not name:
+        return "Arial"
+    clean = re.sub(r'[\\/:*?"<>|{}]', '', str(name)).strip()
+    return clean if clean else "Arial"
+
+
 def _ass_time(sec: float) -> str:
     sec      = max(0.0, sec)
     total_cs = int(round(sec * 100))
@@ -37,7 +45,7 @@ def _write_ass(subs: list, path: str, width: int, height: int) -> None:
         abs_start = float(sub.get("abs_start", 0))
         abs_end   = float(sub.get("abs_end",   3))
 
-        font      = sub.get("fontFamily", "Arial")
+        font      = _safe_font(sub.get("fontFamily", "Arial"))
         size      = int(sub.get("fontSize", 40))
         color_hex = sub.get("color", "#ffffff").lstrip("#")
         try:

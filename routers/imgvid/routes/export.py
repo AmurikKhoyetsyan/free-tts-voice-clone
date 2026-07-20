@@ -112,6 +112,7 @@ async def export_video(
 
     slides = project.get("slides", [])
     pip_layers_raw = project.get("pip", project.get("pipLayers", []))
+    track_order = project.get("trackOrder", ["video", "audio", "subtitle", "pip"])
 
     # ── Pre-export validation ────────────────────────────────────────────────
     if not slides:
@@ -257,12 +258,14 @@ async def export_video(
                                 f"setsar=1,fps={fps},format=yuv420p"
                             )
 
-                    cont_eff  = slide.get("continuousEffect") or {}
-                    cont_type = (cont_eff.get("type") or "none").strip()
-                    cont_int  = float(cont_eff.get("intensity") or 30)
+                    cont_eff     = slide.get("continuousEffect") or {}
+                    cont_type    = (cont_eff.get("type") or "none").strip()
+                    cont_int     = float(cont_eff.get("intensity") or 30)
+                    effect_speed = max(0.01, float(slide.get("effectSpeed", 1) or 1))
 
                     replaces_scale, cont_filters = _continuous_effect_filters(
-                        cont_type, cont_int, dur, width, height, fps, clip_type
+                        cont_type, cont_int, dur, width, height, fps, clip_type,
+                        speed=effect_speed,
                     )
 
                     if replaces_scale and clip_type == "image":
@@ -283,8 +286,8 @@ async def export_video(
                     end_eff   = slide.get("endEffect")   or {}
                     se_type   = (start_eff.get("type") or "none").strip()
                     ee_type   = (end_eff.get("type")   or "none").strip()
-                    se_dur    = min(float(start_eff.get("duration") or 1.0), dur)
-                    ee_dur    = min(float(end_eff.get("duration")   or 1.0), dur)
+                    se_dur    = max(0.001, min(float(start_eff.get("duration") or 1.0), dur) / effect_speed)
+                    ee_dur    = max(0.001, min(float(end_eff.get("duration")   or 1.0), dur) / effect_speed)
                     parts.extend(_start_effect_filters(se_type, se_dur, dur, width, height))
                     parts.extend(_end_effect_filters(ee_type, ee_dur, dur, width, height))
 
@@ -322,21 +325,41 @@ async def export_video(
 
                 filter_parts.append(f"[{last}]null[vout_base]")
 
-                # ── PIP overlays (below subtitles) ───────────────────────────
-                # Sort PIP by their `order` field so higher order = rendered on top.
+                # ── PIP + Subtitle layer order from trackOrder ───────────────
+                # Lower index in trackOrder = higher visual position = rendered on top.
+                # Default (when not specified): subtitle on top of PIP.
                 sorted_pip = sorted(valid_pip, key=lambda p: float(p.get("order", 0)))
-                pip_filters, pip_out_label = build_pip_filters(
-                    sorted_pip, pip_input_start, "vout_base", width, height,
-                    _compute_video_dur(slides), fps,
-                )
-                filter_parts.extend(pip_filters)
+                pip_idx = track_order.index("pip") if "pip" in track_order else 3
+                sub_idx = track_order.index("subtitle") if "subtitle" in track_order else 2
+                pip_on_top = pip_idx < sub_idx  # pip closer to index 0 = higher layer
 
-                # ── Subtitles on top of PIP ──────────────────────────────────
-                if sub_filter:
-                    final_video_label = "vout_sub"
-                    filter_parts.append(f"[{pip_out_label}]{sub_filter}[{final_video_label}]")
-                else:
+                if pip_on_top:
+                    # Apply subtitle first, then PIP on top
+                    if sub_filter:
+                        filter_parts.append(f"[vout_base]{sub_filter}[vout_sub_base]")
+                        pip_filters, pip_out_label = build_pip_filters(
+                            sorted_pip, pip_input_start, "vout_sub_base", width, height,
+                            _compute_video_dur(slides), fps,
+                        )
+                    else:
+                        pip_filters, pip_out_label = build_pip_filters(
+                            sorted_pip, pip_input_start, "vout_base", width, height,
+                            _compute_video_dur(slides), fps,
+                        )
+                    filter_parts.extend(pip_filters)
                     final_video_label = pip_out_label
+                else:
+                    # Apply PIP first, then subtitle on top (default)
+                    pip_filters, pip_out_label = build_pip_filters(
+                        sorted_pip, pip_input_start, "vout_base", width, height,
+                        _compute_video_dur(slides), fps,
+                    )
+                    filter_parts.extend(pip_filters)
+                    if sub_filter:
+                        final_video_label = "vout_sub"
+                        filter_parts.append(f"[{pip_out_label}]{sub_filter}[{final_video_label}]")
+                    else:
+                        final_video_label = pip_out_label
 
                 # ── Audio ────────────────────────────────────────────────────
                 audio_map: list[str] = []

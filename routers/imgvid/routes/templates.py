@@ -38,6 +38,7 @@ class ProjectBody(BaseModel):
     audio:           list = []
     subtitles:       list = []
     pip:             list = []
+    trackOrder:      list = []
     export_settings: dict = {}
     is_template:     bool = False
 
@@ -126,6 +127,7 @@ async def update_template(tid: str, body: ProjectBody):
         "slides": body.slides, "audio": body.audio,
         "subtitles": body.subtitles,
         "pip": body.pip,
+        "trackOrder": body.trackOrder or ["video", "audio", "subtitle", "pip"],
         "export_settings": body.export_settings,
         "is_template": True,
     }
