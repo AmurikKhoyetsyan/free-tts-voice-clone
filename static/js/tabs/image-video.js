@@ -5,7 +5,7 @@ import { openConfirm, openPrompt } from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
-import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS, CONTINUOUS_EFFECTS, PIP_START_EFFECTS, PIP_END_EFFECTS, PIP_CONTINUOUS_EFFECTS, TRACK_TYPES } from '../imgvid/constants.js';
+import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS, CONTINUOUS_EFFECTS, PIP_START_EFFECTS, PIP_END_EFFECTS, PIP_CONTINUOUS_EFFECTS } from '../imgvid/constants.js';
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
@@ -928,64 +928,88 @@ export async function init() {
     // ── Add Track button (beautiful modal) ────────────────────────────────────
     (function _initAddTrackBtn() {
         const addTrackBtn = document.createElement('button');
-        addTrackBtn.className = 'btn btn-sm ive-add-track-btn';
-        addTrackBtn.innerHTML = '<span style="font-size:14px;margin-right:4px">+</span> Добавить дорожку';
+        addTrackBtn.className = 'ive-add-track-btn';
         addTrackBtn.title = 'Добавить новую дорожку';
+        addTrackBtn.dataset.trackAddBtn = '1';
+        addTrackBtn.innerHTML = `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" style="flex-shrink:0"><path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z"/></svg> Дорожку`;
         labelsScroll.appendChild(addTrackBtn);
 
-        // Create modal overlay
         const overlay = document.createElement('div');
         overlay.id = 'ive-add-track-modal';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.65);display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
         overlay.innerHTML = `
-          <div class="ive-atm-box" style="background:var(--bg2,#1e1e2e);border:1px solid var(--border,#333);border-radius:12px;padding:24px;max-width:600px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5)">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-              <h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text,#fff)">Добавить дорожку</h3>
-              <button id="ive-atm-close" style="background:none;border:none;color:var(--text-muted,#888);font-size:20px;cursor:pointer;padding:0 4px;line-height:1">&times;</button>
+          <div class="ive-atm-box">
+            <div class="ive-atm-hdr">
+              <h3 class="ive-atm-title">Добавить дорожку</h3>
+              <button id="ive-atm-close" class="ive-atm-close">&times;</button>
             </div>
-            <div id="ive-atm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px"></div>
+            <div id="ive-atm-grid" class="ive-atm-grid"></div>
           </div>
         `;
         document.body.appendChild(overlay);
 
         const grid = overlay.querySelector('#ive-atm-grid');
-        const _actionMap = {
-            'upload-video':      () => { videoInput?.click(); },
-            'upload-image':      () => { imgInput?.click(); },
-            'upload-audio':      () => { addAudioBtn?.click(); },
-            'upload-pip':        () => { addPipBtn?.click(); },
-            'upload-overlay':    () => { addPipBtn?.click(); },
-            'upload-background': () => { imgInput?.click(); },
-            'add-subtitle': () => {
-                const td = totalDur();
-                S.subtitles = S.subtitles || [];
-                S.subtitles.push({ id: uid(), text: 'Subtitle', start: S.currentTime, end: Math.min(S.currentTime + 3, td || 3), style: {} });
-                S.dirty = true; renderAll();
-            },
-            'add-effect': () => {
-                toast('Выберите клип и назначьте эффект в панели свойств', 'info');
-            },
-        };
 
-        for (const tt of TRACK_TYPES) {
-            const card = document.createElement('button');
-            card.style.cssText = 'background:var(--bg3,#2a2a3e);border:1px solid var(--border,#333);border-radius:8px;padding:14px 10px;cursor:pointer;text-align:center;transition:all 0.15s;color:inherit;display:flex;flex-direction:column;align-items:center;gap:6px';
-            card.innerHTML = `
-              <span style="font-size:28px;line-height:1">${tt.icon}</span>
-              <span style="font-size:13px;font-weight:600;color:var(--text,#fff)">${tt.label}</span>
-              <span style="font-size:10px;color:var(--text-muted,#888);line-height:1.3">${tt.desc}</span>
-            `;
-            card.addEventListener('mouseenter', () => { card.style.borderColor = 'var(--accent,#f97316)'; card.style.background = 'var(--surface-hover,rgba(249,115,22,0.1))'; });
-            card.addEventListener('mouseleave', () => { card.style.borderColor = 'var(--border,#333)'; card.style.background = 'var(--bg3,#2a2a3e)'; });
-            card.addEventListener('click', () => {
-                overlay.style.display = 'none';
-                const fn = _actionMap[tt.action];
-                if (fn) fn();
+        // 4 canonical track groups — only shown when they have content (or if nothing exists yet)
+        const GROUPS = [
+            {
+                key: 'clip', icon: '🎬', label: 'Clip',
+                subItems: ['Видео', 'Изображение'],
+                hasContent: () => S.clips.length > 0,
+                count: () => S.clips.length,
+                action: () => { _hide(); videoInput?.click(); },
+            },
+            {
+                key: 'subtitle', icon: '📝', label: 'Subtitle',
+                subItems: ['Субтитры'],
+                hasContent: () => S.subtitles.length > 0,
+                count: () => S.subtitles.length,
+                action: () => {
+                    _hide();
+                    const td = totalDur();
+                    S.subtitles = S.subtitles || [];
+                    S.subtitles.push({ id: uid(), text: 'Subtitle', start: S.currentTime, end: Math.min(S.currentTime + 3, td || 3), style: {} });
+                    S.dirty = true; renderAll();
+                },
+            },
+            {
+                key: 'pip', icon: '📺', label: 'PIP',
+                subItems: ['PIP объекты'],
+                hasContent: () => S.pipLayers.length > 0,
+                count: () => S.pipLayers.length,
+                action: () => { _hide(); addPipBtn?.click(); },
+            },
+            {
+                key: 'audio', icon: '🎵', label: 'Audio',
+                subItems: ['Аудио файлы'],
+                hasContent: () => S.audioTracks.length > 0,
+                count: () => S.audioTracks.length,
+                action: () => { _hide(); addAudioBtn?.click(); },
+            },
+        ];
+
+        function _refreshGrid() {
+            grid.innerHTML = '';
+            const available = GROUPS.filter(g => g.hasContent());
+            // If nothing has content yet show all groups so user can add first elements
+            const list = available.length > 0 ? available : GROUPS;
+            list.forEach(g => {
+                const card = document.createElement('button');
+                card.className = 'ive-atm-card';
+                const cnt = g.count();
+                const itemsHtml = g.subItems.map(s => `<span>${s}</span>`).join('');
+                card.innerHTML = `
+                  <span class="ive-atm-card-icon">${g.icon}</span>
+                  <span class="ive-atm-card-label">${g.label}</span>
+                  <span class="ive-atm-card-items">${itemsHtml}</span>
+                  ${cnt > 0 ? `<span class="ive-atm-card-count">${cnt} элем.</span>` : ''}
+                `;
+                card.addEventListener('click', g.action);
+                grid.appendChild(card);
             });
-            grid.appendChild(card);
         }
 
-        const _show = () => { overlay.style.display = 'flex'; };
+        const _show = () => { _refreshGrid(); overlay.style.display = 'flex'; };
         const _hide = () => { overlay.style.display = 'none'; };
         addTrackBtn.addEventListener('click', _show);
         overlay.querySelector('#ive-atm-close').addEventListener('click', _hide);
@@ -1658,7 +1682,7 @@ export async function init() {
         audioTrackEl.style.height = totalH + 'px';
         audioLblEl.style.height   = totalH + 'px';
         audioLblEl.style.display  = 'flex';
-        audioLblEl.style.flexDirection = 'column';
+        audioLblEl.style.flexDirection = 'row';
         audioLblEl.innerHTML = '';
 
         audioTrackEl.innerHTML = '';
@@ -2895,6 +2919,9 @@ export async function init() {
                     <span class="ive-range-val" id="pv-cont-eff-int-v">${clip.continuousEffect?.intensity??30}</span>
                 </div>
             </label>
+            <label class="ive-toggle-row ive-label">☑ Применить к Clip + PIP
+                <input class="ive-toggle" type="checkbox" id="pv-apply-pip-eff"${clip.applyEffectsToPip ? ' checked' : ''}>
+            </label>
             <label class="ive-label">Скорость эффектов
                 <select class="ive-select" id="pv-eff-speed">
                     ${[0.25,0.5,1,2,4,8,16,32].map(v=>`<option value="${v}"${(clip.effectSpeed??1)==v?' selected':''}>${v===1?'1× (норма)':v+'×'}</option>`).join('')}
@@ -2948,45 +2975,64 @@ export async function init() {
             const v = parseFloat(e.target.value);
             if (isFinite(v) && v > 0) { clip.transition.duration = v; S.dirty = true; }
         });
+        const _syncEffToPip = () => {
+            if (!clip.applyEffectsToPip || !S.pipLayers.length) return;
+            const se = JSON.parse(JSON.stringify(clip.startEffect || {}));
+            const ee = JSON.parse(JSON.stringify(clip.endEffect   || {}));
+            const ce = JSON.parse(JSON.stringify(clip.continuousEffect || {}));
+            S.pipLayers.forEach(p => { p.startEffect = se; p.endEffect = ee; p.continuousEffect = ce; });
+        };
         const seTypeEl = $('pv-start-eff-type'), seDurRow = $('pv-start-eff-dur-row');
         seTypeEl.addEventListener('change', () => {
             clip.startEffect = clip.startEffect || {};
             clip.startEffect.type = seTypeEl.value;
             seDurRow.hidden = seTypeEl.value === 'none';
-            S.dirty = true; renderPreview();
+            _syncEffToPip(); S.dirty = true; renderPreview();
         });
         $('pv-start-eff-dur')?.addEventListener('change', e => {
             const v = parseFloat(e.target.value);
-            if (isFinite(v) && v > 0) { (clip.startEffect = clip.startEffect || {}).duration = v; S.dirty = true; renderPreview(); }
+            if (isFinite(v) && v > 0) { (clip.startEffect = clip.startEffect || {}).duration = v; _syncEffToPip(); S.dirty = true; renderPreview(); }
         });
         const eeTypeEl = $('pv-end-eff-type'), eeDurRow = $('pv-end-eff-dur-row');
         eeTypeEl.addEventListener('change', () => {
             clip.endEffect = clip.endEffect || {};
             clip.endEffect.type = eeTypeEl.value;
             eeDurRow.hidden = eeTypeEl.value === 'none';
-            S.dirty = true; renderPreview();
+            _syncEffToPip(); S.dirty = true; renderPreview();
         });
         $('pv-end-eff-dur')?.addEventListener('change', e => {
             const v = parseFloat(e.target.value);
-            if (isFinite(v) && v > 0) { (clip.endEffect = clip.endEffect || {}).duration = v; S.dirty = true; renderPreview(); }
+            if (isFinite(v) && v > 0) { (clip.endEffect = clip.endEffect || {}).duration = v; _syncEffToPip(); S.dirty = true; renderPreview(); }
         });
         const ceTypeEl = $('pv-cont-eff-type'), ceIntRow = $('pv-cont-eff-int-row');
         ceTypeEl.addEventListener('change', () => {
             clip.continuousEffect = clip.continuousEffect || {};
             clip.continuousEffect.type = ceTypeEl.value;
             ceIntRow.hidden = ceTypeEl.value === 'none';
-            S.dirty = true; renderPreview();
+            _syncEffToPip(); S.dirty = true; renderPreview();
         });
         $('pv-cont-eff-int')?.addEventListener('input', e => {
             const v = parseInt(e.target.value);
             (clip.continuousEffect = clip.continuousEffect || {}).intensity = v;
             const vEl = $('pv-cont-eff-int-v');
             if (vEl) vEl.textContent = v;
-            S.dirty = true; renderPreview();
+            _syncEffToPip(); S.dirty = true; renderPreview();
         });
         $('pv-eff-speed')?.addEventListener('change', e => {
             clip.effectSpeed = parseFloat(e.target.value) || 1;
             S.dirty = true; renderPreview();
+        });
+        $('pv-apply-pip-eff')?.addEventListener('change', e => {
+            clip.applyEffectsToPip = e.target.checked;
+            if (e.target.checked && S.pipLayers.length > 0) {
+                const se = JSON.parse(JSON.stringify(clip.startEffect || { type: 'none', duration: 1 }));
+                const ee = JSON.parse(JSON.stringify(clip.endEffect   || { type: 'none', duration: 1 }));
+                const ce = JSON.parse(JSON.stringify(clip.continuousEffect || { type: 'none', intensity: 30 }));
+                S.pipLayers.forEach(p => { p.startEffect = se; p.endEffect = ee; p.continuousEffect = ce; });
+                renderPreview();
+                toast('Эффекты применены к PIP', 'ok');
+            }
+            S.dirty = true;
         });
         if (!isVideo) {
             $('pv-replace-btn').addEventListener('click', () => $('pv-replace-file').click());
@@ -3606,7 +3652,7 @@ export async function init() {
         const ROW_H = 32;
 
         pipTrackEl.innerHTML = '';
-        if (pipLblEl) { pipLblEl.innerHTML = ''; pipLblEl.style.cssText = 'display:flex;flex-direction:column;'; }
+        if (pipLblEl) { pipLblEl.innerHTML = ''; pipLblEl.style.cssText = 'display:flex;flex-direction:row;'; }
 
         // Each PIP gets its own row; highest order = first row (renders on top in export)
         const sorted = [...S.pipLayers.entries()].sort(([, a], [, b]) => (b.order ?? 0) - (a.order ?? 0));
@@ -4849,10 +4895,20 @@ export async function init() {
         } catch (err) { toast(err.message, 'err'); }
     }
 
+    function _buildTracksMetadata() {
+        const TYPE_MAP  = { video: 'clip', audio: 'audio', subtitle: 'subtitle', pip: 'pip' };
+        const TITLE_MAP = { video: 'Clip 1', audio: 'Audio 1', subtitle: 'Subtitle 1', pip: 'PIP 1' };
+        return S.trackOrder.map((key, order) => ({
+            type: TYPE_MAP[key] || key,
+            title: TITLE_MAP[key] || key,
+            order,
+        }));
+    }
+
     async function _saveProject() {
         if (S.isTemplateMode && S.editingTemplateId) {
             // Save back to template
-            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, export_settings: _getExportSettings() };
+            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
             try {
                 const r = await fetch(`/api/imgvid/templates/${S.editingTemplateId}`, {
                     method: 'PUT',
@@ -4868,7 +4924,7 @@ export async function init() {
             } catch (err) { toast(err.message, 'err'); }
             return;
         }
-        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, export_settings: _getExportSettings() };
+        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
                 method: S.projectId ? 'PUT' : 'POST',
@@ -4900,7 +4956,7 @@ export async function init() {
         progFill.style.width = '2%';
         progPct.textContent  = '0%';
 
-        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder });
+        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, tracks: _buildTracksMetadata() });
 
         if (isAudioOnly) {
             if (!S.audioTracks.length) { exportBtn.disabled = false; toast('Нет аудиодорожек для экспорта', 'warn'); return; }
