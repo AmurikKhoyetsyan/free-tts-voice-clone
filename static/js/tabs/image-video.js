@@ -5,7 +5,7 @@ import { openConfirm, openPrompt } from '../modal.js';
 import { ICONS }           from '../icons.js';
 import { events }          from '../events.js';
 
-import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS, CONTINUOUS_EFFECTS } from '../imgvid/constants.js';
+import { TRANSITIONS, EFFECTS_DEF, FONTS, ANIMS, START_EFFECTS, END_EFFECTS, CONTINUOUS_EFFECTS, PIP_START_EFFECTS, PIP_END_EFFECTS, PIP_CONTINUOUS_EFFECTS, TRACK_TYPES } from '../imgvid/constants.js';
 import { uid, eh, fmt, fmtShort, buildCSSFilter, hexToRgba, _makeTextShadow, getSnapTargets, snap } from '../imgvid/utils.js';
 import { totalDur as _totalDurFn, clipAtTime as _clipAtTimeFn } from '../imgvid/utils.js';
 import { drawWaveform, probeAudioDuration } from '../imgvid/waveform.js';
@@ -925,42 +925,72 @@ export async function init() {
         });
     })();
 
-    // ── Add Track button ──────────────────────────────────────────────────────
+    // ── Add Track button (beautiful modal) ────────────────────────────────────
     (function _initAddTrackBtn() {
         const addTrackBtn = document.createElement('button');
-        addTrackBtn.className = 'btn btn-sm';
-        addTrackBtn.style.cssText = 'margin:4px 2px;font-size:10px;padding:2px 6px;width:calc(100% - 4px);text-align:center';
-        addTrackBtn.textContent = '+ Дорожка';
+        addTrackBtn.className = 'btn btn-sm ive-add-track-btn';
+        addTrackBtn.innerHTML = '<span style="font-size:14px;margin-right:4px">+</span> Добавить дорожку';
         addTrackBtn.title = 'Добавить новую дорожку';
-        addTrackBtn.dataset.trackAddBtn = '1';
         labelsScroll.appendChild(addTrackBtn);
 
-        const menu = document.createElement('div');
-        menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg2,#222);border:1px solid var(--border,#333);border-radius:6px;padding:4px;display:none;box-shadow:0 4px 16px rgba(0,0,0,0.4);min-width:120px';
-        document.body.appendChild(menu);
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'ive-add-track-modal';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+        overlay.innerHTML = `
+          <div class="ive-atm-box" style="background:var(--bg2,#1e1e2e);border:1px solid var(--border,#333);border-radius:12px;padding:24px;max-width:600px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+              <h3 style="margin:0;font-size:16px;font-weight:600;color:var(--text,#fff)">Добавить дорожку</h3>
+              <button id="ive-atm-close" style="background:none;border:none;color:var(--text-muted,#888);font-size:20px;cursor:pointer;padding:0 4px;line-height:1">&times;</button>
+            </div>
+            <div id="ive-atm-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px"></div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
 
-        const _menuItems = [
-            { label: 'Аудио дорожку',  action: () => { addAudioBtn?.click(); } },
-            { label: 'PIP слой',       action: () => { addPipBtn?.click(); } },
-        ];
-        for (const item of _menuItems) {
-            const btn = document.createElement('button');
-            btn.style.cssText = 'display:block;width:100%;text-align:left;background:none;border:none;color:inherit;padding:6px 10px;font-size:12px;cursor:pointer;border-radius:4px';
-            btn.textContent = item.label;
-            btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--accent,#f97316)'; btn.style.color = '#fff'; });
-            btn.addEventListener('mouseleave', () => { btn.style.background = ''; btn.style.color = ''; });
-            btn.addEventListener('click', () => { menu.style.display = 'none'; item.action(); });
-            menu.appendChild(btn);
+        const grid = overlay.querySelector('#ive-atm-grid');
+        const _actionMap = {
+            'upload-video':      () => { videoInput?.click(); },
+            'upload-image':      () => { imgInput?.click(); },
+            'upload-audio':      () => { addAudioBtn?.click(); },
+            'upload-pip':        () => { addPipBtn?.click(); },
+            'upload-overlay':    () => { addPipBtn?.click(); },
+            'upload-background': () => { imgInput?.click(); },
+            'add-subtitle': () => {
+                const td = totalDur();
+                S.subtitles = S.subtitles || [];
+                S.subtitles.push({ id: uid(), text: 'Subtitle', start: S.currentTime, end: Math.min(S.currentTime + 3, td || 3), style: {} });
+                S.dirty = true; renderAll();
+            },
+            'add-effect': () => {
+                toast('Выберите клип и назначьте эффект в панели свойств', 'info');
+            },
+        };
+
+        for (const tt of TRACK_TYPES) {
+            const card = document.createElement('button');
+            card.style.cssText = 'background:var(--bg3,#2a2a3e);border:1px solid var(--border,#333);border-radius:8px;padding:14px 10px;cursor:pointer;text-align:center;transition:all 0.15s;color:inherit;display:flex;flex-direction:column;align-items:center;gap:6px';
+            card.innerHTML = `
+              <span style="font-size:28px;line-height:1">${tt.icon}</span>
+              <span style="font-size:13px;font-weight:600;color:var(--text,#fff)">${tt.label}</span>
+              <span style="font-size:10px;color:var(--text-muted,#888);line-height:1.3">${tt.desc}</span>
+            `;
+            card.addEventListener('mouseenter', () => { card.style.borderColor = 'var(--accent,#f97316)'; card.style.background = 'var(--surface-hover,rgba(249,115,22,0.1))'; });
+            card.addEventListener('mouseleave', () => { card.style.borderColor = 'var(--border,#333)'; card.style.background = 'var(--bg3,#2a2a3e)'; });
+            card.addEventListener('click', () => {
+                overlay.style.display = 'none';
+                const fn = _actionMap[tt.action];
+                if (fn) fn();
+            });
+            grid.appendChild(card);
         }
 
-        addTrackBtn.addEventListener('click', e => {
-            const r = addTrackBtn.getBoundingClientRect();
-            menu.style.left = r.left + 'px';
-            menu.style.top  = (r.bottom + 4) + 'px';
-            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-            e.stopPropagation();
-        });
-        document.addEventListener('click', () => { menu.style.display = 'none'; }, { capture: true, passive: true });
+        const _show = () => { overlay.style.display = 'flex'; };
+        const _hide = () => { overlay.style.display = 'none'; };
+        addTrackBtn.addEventListener('click', _show);
+        overlay.querySelector('#ive-atm-close').addEventListener('click', _hide);
+        overlay.addEventListener('click', e => { if (e.target === overlay) _hide(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && overlay.style.display !== 'none') _hide(); });
     })();
 
     // ── Export Modal ──────────────────────────────────────────────────────────
@@ -3780,9 +3810,9 @@ export async function init() {
         _normalizePip(pip);
         const isVideo = pip.type === 'video';
         const totalPip = S.pipLayers.length;
-        const seOpts = START_EFFECTS.map(e => `<option value="${e.value}"${(pip.startEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('');
-        const eeOpts = END_EFFECTS.map(e =>   `<option value="${e.value}"${(pip.endEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('');
-        const ceOpts = CONTINUOUS_EFFECTS.map(e => `<option value="${e.value}"${(pip.continuousEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('');
+        const seOpts = PIP_START_EFFECTS.map(e => `<option value="${e.value}"${(pip.startEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('');
+        const eeOpts = PIP_END_EFFECTS.map(e =>   `<option value="${e.value}"${(pip.endEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('');
+        const ceOpts = PIP_CONTINUOUS_EFFECTS.map(e => `<option value="${e.value}"${(pip.continuousEffect?.type||'none')===e.value?' selected':''}>${e.label}</option>`).join('');
 
         propsBody.innerHTML = `<div class="ive-form">
             <div style="font-size:10px;color:var(--text-dim);padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${eh(pip.original || pip.file)}">PIP: ${eh(pip.original || pip.file)}</div>

@@ -160,7 +160,7 @@ async def export_video(
         """Background thread that builds and runs the FFmpeg export command."""
         try:
             with tempfile.TemporaryDirectory() as tmp:
-                q.put(("progress", 0.03, "Подготовка…"))
+                q.put(("progress", 0.03, "Подготовка файлов…"))
 
                 # ── Resolve PIP layers ───────────────────────────────────────
                 valid_pip = []
@@ -212,7 +212,7 @@ async def export_video(
                         cmd_inputs += ["-loop", "1", "-t", f"{_total_dur_approx:.3f}", "-i", pip_path]
 
                 # ── Per-slide filters ────────────────────────────────────────
-                q.put(("progress", 0.07, "Применение эффектов…"))
+                q.put(("progress", 0.07, "Создание фильтров эффектов…"))
                 scale_f = build_scale_filter(width, height, fps)
                 filter_parts: list[str] = []
 
@@ -294,7 +294,7 @@ async def export_video(
                     filter_parts.append(f"[{i}:v]{','.join(parts)}[v{i}]")
 
                 # ── Subtitles ────────────────────────────────────────────────
-                q.put(("progress", 0.10, "Подготовка субтитров…"))
+                q.put(("progress", 0.10, "Рендеринг субтитров…"))
                 all_subs: list[dict] = []
                 top_subs = project.get("subtitles", [])
                 video_dur = _compute_video_dur(slides)
@@ -320,7 +320,7 @@ async def export_video(
                 sub_filter = build_subtitle_filter(all_subs, tmp, width, height)
 
                 # ── Transitions ──────────────────────────────────────────────
-                q.put(("progress", 0.12, "Сборка переходов…"))
+                q.put(("progress", 0.12, "Обработка переходов…"))
                 filter_parts, last = build_transition_filters_fps(slides, filter_parts, fps)
 
                 filter_parts.append(f"[{last}]null[vout_base]")
@@ -431,6 +431,9 @@ async def export_video(
                 print(flush=True)
                 q.put(("progress", 0.15, "Запуск FFmpeg…"))
 
+                import time as _time
+                import threading as _threading
+
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -438,33 +441,86 @@ async def export_video(
                     creationflags=_NO_WIN,
                 )
 
-                buf = b""
-                all_ffmpeg_lines: list[str] = []
-                while True:
-                    chunk = proc.stdout.read(1024)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    parts2 = re.split(rb"\r\n|\r|\n", buf)
-                    buf = parts2[-1]
-                    for raw in parts2[:-1]:
-                        line = raw.decode("utf-8", errors="replace").strip()
-                        if not line:
-                            continue
-                        all_ffmpeg_lines.append(line)
-                        if "time=" in line and total_dur > 0:
-                            try:
-                                ts2 = line.split("time=")[1].split()[0]
-                                if ":" in ts2 and not ts2.startswith("-"):
-                                    hh, mm, ss2 = ts2.split(":")
-                                    done = int(hh) * 3600 + int(mm) * 60 + float(ss2)
-                                    pct = int(min(95, 15 + done / total_dur * 80))
-                                    q.put(("progress", pct / 100, line))
-                                    print_progress(pct, "FFmpeg")
-                            except Exception:
-                                pass
+                MAX_EXPORT_SECONDS = 1800  # 30 min hard timeout
+                STALL_SECONDS = 120        # 2 min stall timeout
 
-                proc.wait()
+                def fmt_time(secs: float) -> str:
+                    m, s = divmod(int(secs), 60)
+                    return f"{m}:{s:02d}"
+
+                _stdout_q: queue.Queue = queue.Queue()
+                _stdout_done = _threading.Event()
+
+                def _read_stdout():
+                    try:
+                        while True:
+                            chunk = proc.stdout.read(1024)
+                            if not chunk:
+                                break
+                            _stdout_q.put(chunk)
+                    finally:
+                        _stdout_done.set()
+
+                _reader = _threading.Thread(target=_read_stdout, daemon=True)
+                _reader.start()
+
+                _start_t = _time.monotonic()
+                _last_len = 0
+                _last_stall_check = _time.monotonic()
+                all_ffmpeg_lines: list[str] = []
+                buf = b""
+
+                while not _stdout_done.is_set():
+                    now = _time.monotonic()
+                    if now - _start_t > MAX_EXPORT_SECONDS:
+                        proc.kill()
+                        _stdout_done.wait(5)
+                        q.put(("error", f"Таймаут экспорта (>{MAX_EXPORT_SECONDS//60} мин)"))
+                        return
+                    # Drain buffered output
+                    while not _stdout_q.empty():
+                        try:
+                            chunk = _stdout_q.get_nowait()
+                        except queue.Empty:
+                            break
+                        buf += chunk
+                        parts2 = re.split(rb"\r\n|\r|\n", buf)
+                        buf = parts2[-1]
+                        for raw in parts2[:-1]:
+                            line = raw.decode("utf-8", errors="replace").strip()
+                            if not line:
+                                continue
+                            all_ffmpeg_lines.append(line)
+                            if "time=" in line and total_dur > 0:
+                                try:
+                                    ts2 = line.split("time=")[1].split()[0]
+                                    if ":" in ts2 and not ts2.startswith("-"):
+                                        hh, mm, ss2 = ts2.split(":")
+                                        done = int(hh) * 3600 + int(mm) * 60 + float(ss2)
+                                        pct = int(min(95, 15 + done / total_dur * 80))
+                                        q.put(("progress", pct / 100, f"Рендеринг: {fmt_time(done)}/{fmt_time(total_dur)}"))
+                                        print_progress(pct, "FFmpeg")
+                                        _last_stall_check = _time.monotonic()
+                                except Exception:
+                                    pass
+                    # Check for stall (no new output for STALL_SECONDS)
+                    cur_len = len(all_ffmpeg_lines)
+                    if cur_len > _last_len:
+                        _last_len = cur_len
+                        _last_stall_check = _time.monotonic()
+                    elif _time.monotonic() - _last_stall_check > STALL_SECONDS:
+                        proc.kill()
+                        _stdout_done.wait(5)
+                        q.put(("error", f"FFmpeg завис (нет вывода {STALL_SECONDS}с). Проверьте эффекты и параметры."))
+                        return
+                    _stdout_done.wait(0.5)
+
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    q.put(("error", "FFmpeg не завершился после окончания вывода"))
+                    return
                 if proc.returncode != 0:
                     print(flush=True)
                     tail = "\n".join(all_ffmpeg_lines[-30:])

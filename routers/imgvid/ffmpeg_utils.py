@@ -44,13 +44,19 @@ _EFFECTS = {
     "brightness": lambda v: f"eq=brightness={float(v)/100:.3f}",
     "contrast":   lambda v: f"eq=contrast={1+float(v)/100:.3f}",
     "saturation": lambda v: f"eq=saturation={max(0,1+float(v)/100):.3f}",
+    "exposure":   lambda v: f"eq=brightness={float(v)/200:.3f}:contrast={1+float(v)/200:.3f}",
+    "gamma":      lambda v: f"eq=gamma={max(0.1,1+float(v)/50):.3f}",
+    "temperature": lambda v: f"colorchannelmixer=rr={max(0.1,1+float(v)/300):.3f}:bb={max(0.1,1-float(v)/300):.3f}",
     "blur":       lambda v: f"gblur=sigma={max(0.1, float(v)):.1f}",
     "sharpen":    lambda v: f"unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount={max(0,float(v)/10):.2f}",
     "grayscale":  lambda v: "hue=s=0",
     "sepia":      lambda v: "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131",
     "vignette":   lambda v: "vignette=PI/4",
     "filmgrain":  lambda v: f"noise=alls={max(1,int(float(v)))}:allf=t+u",
+    "noise":      lambda v: f"noise=alls={max(1,int(float(v)*1.5))}:allf=u",
     "invert":     lambda v: "negate",
+    "vintage":    lambda v: "curves=r='0/0.1 1/0.9':g='0/0 1/0.85':b='0/0.1 1/0.7',vignette=PI/5",
+    "noir":       lambda v: "hue=s=0,curves=0.1/0 0.5/0.5 0.9/1,vignette=PI/3",
 }
 
 
@@ -157,6 +163,26 @@ def _start_effect_filters(se_type: str, se_dur: float, dur: float, w: int, h: in
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
             f"fade=type=in:start_time=0:duration={min(D, 0.35):.3f}",
         ]
+    if se_type == "pop":
+        expr = f"min(1.15,1.15*min(1,t/{D:.3f}))"
+        return [
+            f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
+            f"fade=type=in:start_time=0:duration={min(D, 0.3):.3f}",
+        ]
+    if se_type == "elastic-in":
+        expr = f"min(1.2,1.2*min(1,t/{D:.3f}))"
+        return [
+            f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
+            f"fade=type=in:start_time=0:duration={min(D, 0.4):.3f}",
+        ]
+    if se_type == "flip-v-in":
+        expr = f"max(2,trunc({h}*min(1,t/{D:.3f})/2)*2)"
+        return [
+            f"scale={w}:'{expr}':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
+        ]
     return []
 
 
@@ -226,6 +252,26 @@ def _end_effect_filters(ee_type: str, ee_dur: float, dur: float, w: int, h: int)
             f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
             f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
             f"fade=type=out:start_time={st:.3f}:duration={min(D, 0.35):.3f}",
+        ]
+    if ee_type == "pop-out":
+        expr = f"min(1.15,1.15*max(0,({dur:.3f}-t)/{D:.3f}))"
+        return [
+            f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
+            f"fade=type=out:start_time={st:.3f}:duration={min(D, 0.3):.3f}",
+        ]
+    if ee_type == "elastic-out":
+        expr = f"min(1.2,1.2*max(0,({dur:.3f}-t)/{D:.3f}))"
+        return [
+            f"scale='max(2,trunc({w}*min(1,{expr})/2)*2)':'max(2,trunc({h}*min(1,{expr})/2)*2)':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
+            f"fade=type=out:start_time={st:.3f}:duration={min(D, 0.4):.3f}",
+        ]
+    if ee_type == "flip-v-out":
+        expr = f"max(2,trunc({h}*max(0,({dur:.3f}-t)/{D:.3f})/2)*2)"
+        return [
+            f"scale={w}:'{expr}':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
         ]
     return []
 
@@ -321,6 +367,46 @@ def _continuous_effect_filters(
         ]
     if cont_type == "rotate-slow":
         deg_per_sec = intens * 30 * spd
+        return False, [
+            f"rotate=a='{deg_per_sec:.2f}*(PI/180)*t':fillcolor=black"
+            f",scale={w}:{h},setsar=1",
+        ]
+    if cont_type == "wiggle":
+        amp = max(1, int(intens * w * 0.015))
+        period = 0.4 / spd
+        return False, [
+            f"pad={w + amp * 2}:{h}:{amp}:0:black",
+            f"crop={w}:{h}:'round({amp}+{amp}*sin(2*PI*t/{period:.4f}))':0",
+        ]
+    if cont_type == "drift":
+        amp_x = max(1, int(intens * w * 0.02))
+        amp_y = max(1, int(intens * h * 0.015))
+        period_x = 7.0 / spd
+        period_y = 11.0 / spd
+        return False, [
+            f"pad={w + amp_x * 2}:{h + amp_y * 2}:{amp_x}:{amp_y}:black",
+            f"crop={w}:{h}:'round({amp_x}+{amp_x}*sin(2*PI*t/{period_x:.4f}))':"
+            f"'round({amp_y}+{amp_y}*sin(2*PI*t/{period_y:.4f}))'",
+        ]
+    if cont_type == "heartbeat":
+        # Two quick pulses then pause — period ~1s
+        amp = intens * 0.06
+        period = 1.0 / spd
+        # Use a piecewise approximation via scale
+        expr_s = f"1+{amp:.4f}*max(0,sin(2*PI*t/{period:.4f})*sin(4*PI*t/{period:.4f}))"
+        return False, [
+            f"scale='trunc({w}*({expr_s})/2)*2':'trunc({h}*({expr_s})/2)*2':eval=frame",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black",
+        ]
+    if cont_type == "swing":
+        amp_px = max(1, int(intens * w * 0.04))
+        period = 2.0 / spd
+        return False, [
+            f"pad={w + amp_px * 2}:{h}:{amp_px}:0:black",
+            f"crop={w}:{h}:'round({amp_px}+{amp_px}*sin(2*PI*t/{period:.4f}))':0",
+        ]
+    if cont_type == "spin-fast":
+        deg_per_sec = intens * 90 * spd
         return False, [
             f"rotate=a='{deg_per_sec:.2f}*(PI/180)*t':fillcolor=black"
             f",scale={w}:{h},setsar=1",
