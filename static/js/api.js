@@ -78,6 +78,8 @@ export async function synthesizeStream(url, opts, handlers) {
                 handlers.done(evt.data);
             } else if (evt.event === 'error' && handlers.error) {
                 handlers.error(evt.data.status || 'unknown error');
+            } else if (evt.event === 'cancelled' && handlers.cancelled) {
+                handlers.cancelled(evt.data?.status || 'Export cancelled');
             }
         }
     }

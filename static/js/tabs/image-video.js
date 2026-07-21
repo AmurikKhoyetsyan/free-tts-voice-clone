@@ -105,6 +105,7 @@ export async function init() {
     const exportStatus  = $('ive-export-status');
     const progFill      = $('ive-prog-fill');
     const progPct       = $('ive-prog-pct');
+    const cancelExportBtn = $('ive-cancel-export-btn');
     // Preview
     const previewWrap   = $('ive-preview-inner').parentElement;
     const previewInner  = $('ive-preview-inner');
@@ -555,6 +556,13 @@ export async function init() {
     // ── Save / Export ─────────────────────────────────────────────────────────
     saveBtn.addEventListener('click', _saveProject);
     exportBtn.addEventListener('click', _startExport);
+    cancelExportBtn?.addEventListener('click', async () => {
+        cancelExportBtn.disabled = true;
+        cancelExportBtn.textContent = 'Отмена…';
+        try { await fetch('/api/imgvid/cancel-export', { method: 'POST' }); } catch (_) {}
+        cancelExportBtn.disabled = false;
+        cancelExportBtn.textContent = '✕ Отменить';
+    });
     $('ive-save-template-btn')?.addEventListener('click', async () => {
         if (!S.projectId) { await _saveProject(); }
         if (!S.projectId) { toast('Сначала сохраните проект', 'warn'); return; }
@@ -925,6 +933,7 @@ export async function init() {
         });
     })();
 
+
     // ── Add Track button (beautiful modal) ────────────────────────────────────
     (function _initAddTrackBtn() {
         const addTrackBtn = document.createElement('button');
@@ -950,59 +959,68 @@ export async function init() {
 
         const grid = overlay.querySelector('#ive-atm-grid');
 
-        // 4 canonical track groups — only shown when they have content (or if nothing exists yet)
+        // Track type definitions — "Add Track" creates an empty named track (lane/slot)
+        // "Add Element" (+) is per-label inside each track row
         const GROUPS = [
             {
                 key: 'clip', icon: '🎬', label: 'Clip',
-                subItems: ['Видео', 'Изображение'],
-                hasContent: () => S.clips.length > 0,
+                desc: 'Дорожка для видео/изображений',
                 count: () => S.clips.length,
+                // Clip track is singular — just open the file picker to add elements
                 action: () => { _hide(); videoInput?.click(); },
             },
             {
-                key: 'subtitle', icon: '📝', label: 'Subtitle',
-                subItems: ['Субтитры'],
-                hasContent: () => S.subtitles.length > 0,
-                count: () => S.subtitles.length,
+                key: 'audio', icon: '🎵', label: 'Audio',
+                desc: 'Новая аудиодорожка (новая полоса)',
+                count: () => {
+                    const lanes = new Set(S.audioTracks.map(t => t.laneIndex ?? 0));
+                    return lanes.size;
+                },
+                // Creates a new empty audio lane — user adds files with "+" in label
                 action: () => {
                     _hide();
-                    const td = totalDur();
-                    S.subtitles = S.subtitles || [];
-                    S.subtitles.push({ id: uid(), text: 'Subtitle', start: S.currentTime, end: Math.min(S.currentTime + 3, td || 3), style: {} });
-                    S.dirty = true; renderAll();
+                    const newLane = S.audioTracks.length
+                        ? Math.max(...S.audioTracks.map(t => t.laneIndex ?? 0)) + 1
+                        : 0;
+                    S._nextAudioLane = newLane;
+                    // Show the lane immediately (renderTimeline shows all used lanes)
+                    // Trigger file pick so user can add audio to the new lane
+                    addAudioBtn?.click();
                 },
             },
             {
                 key: 'pip', icon: '📺', label: 'PIP',
-                subItems: ['PIP объекты'],
-                hasContent: () => S.pipLayers.length > 0,
+                desc: 'Новый PIP слой поверх видео',
                 count: () => S.pipLayers.length,
+                // PIP track creates a new layer via file picker
                 action: () => { _hide(); addPipBtn?.click(); },
             },
             {
-                key: 'audio', icon: '🎵', label: 'Audio',
-                subItems: ['Аудио файлы'],
-                hasContent: () => S.audioTracks.length > 0,
-                count: () => S.audioTracks.length,
-                action: () => { _hide(); addAudioBtn?.click(); },
+                key: 'subtitle', icon: '📝', label: 'Subtitle',
+                desc: 'Дорожка субтитров',
+                count: () => S.subtitles.length,
+                // Subtitle track creates a new subtitle entry
+                action: () => {
+                    _hide();
+                    const td = totalDur();
+                    S.subtitles.push({ id: uid(), text: 'Subtitle', start: S.currentTime, end: Math.min(S.currentTime + 3, td || 3), style: {} });
+                    S.dirty = true; renderAll();
+                    toast('Субтитр добавлен — нажмите + для добавления ещё', 'info');
+                },
             },
         ];
 
         function _refreshGrid() {
             grid.innerHTML = '';
-            const available = GROUPS.filter(g => g.hasContent());
-            // If nothing has content yet show all groups so user can add first elements
-            const list = available.length > 0 ? available : GROUPS;
-            list.forEach(g => {
+            GROUPS.forEach(g => {
                 const card = document.createElement('button');
                 card.className = 'ive-atm-card';
                 const cnt = g.count();
-                const itemsHtml = g.subItems.map(s => `<span>${s}</span>`).join('');
                 card.innerHTML = `
                   <span class="ive-atm-card-icon">${g.icon}</span>
                   <span class="ive-atm-card-label">${g.label}</span>
-                  <span class="ive-atm-card-items">${itemsHtml}</span>
-                  ${cnt > 0 ? `<span class="ive-atm-card-count">${cnt} элем.</span>` : ''}
+                  <span class="ive-atm-card-items"><span>${g.desc}</span></span>
+                  ${cnt > 0 ? `<span class="ive-atm-card-count">${cnt}</span>` : ''}
                 `;
                 card.addEventListener('click', g.action);
                 grid.appendChild(card);
@@ -1118,7 +1136,8 @@ export async function init() {
             const r = await fetch('/api/imgvid/audio', { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            const _newLane = _getNextLane();
+            const _newLane = (S._nextAudioLane !== undefined) ? S._nextAudioLane : _getNextLane();
+            delete S._nextAudioLane;
             const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(_newLane), trimIn: 0, laneIndex: _newLane };
             S.audioTracks.push(track);
             _pushHistory();
@@ -1683,12 +1702,19 @@ export async function init() {
         audioLblEl.style.height   = totalH + 'px';
         audioLblEl.style.display  = 'flex';
         audioLblEl.style.flexDirection = 'row';
+        const _audioHandle = audioLblEl.querySelector('[data-track-drag-key]');
         audioLblEl.innerHTML = '';
 
         audioTrackEl.innerHTML = '';
 
         if (!S.audioTracks.length) {
-            audioLblEl.innerHTML = `<div style="height:${rowH}px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em">AUDIO</div>`;
+            const emptyLbl = document.createElement('div');
+            emptyLbl.style.cssText = `height:${rowH}px;display:flex;align-items:center;padding:0 4px;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em`;
+            if (_audioHandle) emptyLbl.appendChild(_audioHandle);
+            const _emptyTxt = document.createElement('span');
+            _emptyTxt.textContent = 'AUDIO';
+            emptyLbl.appendChild(_emptyTxt);
+            audioLblEl.appendChild(emptyLbl);
             const empty = document.createElement('div');
             empty.className = 'ive-audio-row-inner';
             empty.innerHTML = '<div class="ive-tl-empty-abs">Нет аудиодорожек</div>';
@@ -1699,8 +1725,11 @@ export async function init() {
         uniqueLanes.forEach((laneIdx, lj) => {
             // Label for this lane
             const lbl = document.createElement('div');
-            lbl.style.cssText = `height:${rowH}px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,.04);flex-shrink:0`;
-            lbl.textContent = uniqueLanes.length === 1 ? 'AUDIO' : `AUDIO ${laneIdx + 1}`;
+            lbl.style.cssText = `height:${rowH}px;display:flex;align-items:center;padding:0 4px;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid rgba(255,255,255,.04);flex-shrink:0`;
+            if (lj === 0 && _audioHandle) lbl.appendChild(_audioHandle);
+            const lblTxt = document.createElement('span');
+            lblTxt.textContent = uniqueLanes.length === 1 ? 'AUDIO' : `AUDIO ${laneIdx + 1}`;
+            lbl.appendChild(lblTxt);
             audioLblEl.appendChild(lbl);
 
             // Row for this lane
@@ -3652,7 +3681,11 @@ export async function init() {
         const ROW_H = 32;
 
         pipTrackEl.innerHTML = '';
-        if (pipLblEl) { pipLblEl.innerHTML = ''; pipLblEl.style.cssText = 'display:flex;flex-direction:row;'; }
+        const _pipHandle = pipLblEl ? pipLblEl.querySelector('[data-track-drag-key]') : null;
+        if (pipLblEl) {
+            pipLblEl.innerHTML = '';
+            pipLblEl.style.cssText = 'display:flex;flex-direction:row;';
+        }
 
         // Each PIP gets its own row; highest order = first row (renders on top in export)
         const sorted = [...S.pipLayers.entries()].sort(([, a], [, b]) => (b.order ?? 0) - (a.order ?? 0));
@@ -3666,9 +3699,12 @@ export async function init() {
                 pipLblEl.style.height = emptyH;
                 const lbl = document.createElement('div');
                 lbl.className = 'ive-pip-lbl-row';
-                lbl.style.cssText = 'justify-content:center;cursor:pointer;color:var(--accent);';
+                lbl.style.cssText = 'cursor:pointer;color:var(--accent);';
                 lbl.title = 'Добавить PIP слой';
-                lbl.textContent = '+ PIP';
+                if (_pipHandle) lbl.appendChild(_pipHandle);
+                const _emptyTxt = document.createElement('span');
+                _emptyTxt.textContent = 'PIP';
+                lbl.appendChild(_emptyTxt);
                 lbl.addEventListener('click', () => addPipBtn?.click());
                 pipLblEl.appendChild(lbl);
             }
@@ -3689,6 +3725,8 @@ export async function init() {
                 const lbl = document.createElement('div');
                 lbl.className = 'ive-pip-lbl-row';
                 lbl.dataset.rowIdx = rowIdx;
+
+                if (rowIdx === 0 && _pipHandle) lbl.appendChild(_pipHandle);
 
                 const handle = document.createElement('span');
                 handle.className = 'ive-pip-drag-handle';
@@ -4951,6 +4989,7 @@ export async function init() {
 
         exportBtn.disabled = true;
         exportProg.hidden  = false;
+        if (cancelExportBtn) cancelExportBtn.style.display = '';
         exportStatus.textContent = 'Подготовка…';
         exportStatus.className   = 'status busy';
         progFill.style.width = '2%';
@@ -4974,6 +5013,7 @@ export async function init() {
                     },
                     done(payload) {
                         exportBtn.disabled = false;
+                        if (cancelExportBtn) cancelExportBtn.style.display = 'none';
                         progFill.style.width = '100%'; progPct.textContent = '100%';
                         exportStatus.textContent = '✓ Готово'; exportStatus.className = 'status ok';
                         toast('Аудио экспортировано!', 'ok'); log('Аудио экспортировано: ' + payload.filename, 'done');
@@ -4984,8 +5024,17 @@ export async function init() {
                     },
                     error(msg) {
                         exportBtn.disabled = false;
+                        if (cancelExportBtn) cancelExportBtn.style.display = 'none';
                         exportStatus.textContent = msg; exportStatus.className = 'status err';
                         toast(msg, 'err'); log(msg, 'err');
+                    },
+                    cancelled(msg) {
+                        exportBtn.disabled = false;
+                        if (cancelExportBtn) cancelExportBtn.style.display = 'none';
+                        exportStatus.textContent = 'Отменено'; exportStatus.className = 'status';
+                        progFill.style.width = '0%'; progPct.textContent = '0%';
+                        toast('Экспорт отменён', 'info'); log('Export cancelled by user', 'warn');
+                        setTimeout(() => { exportProg.hidden = true; }, 3000);
                     },
                 });
             } catch (err) { exportBtn.disabled = false; toast(err.message, 'err'); }
@@ -5014,6 +5063,7 @@ export async function init() {
                 },
                 done(payload) {
                     exportBtn.disabled   = false;
+                    if (cancelExportBtn) cancelExportBtn.style.display = 'none';
                     progFill.style.width = '100%'; progPct.textContent = '100%';
                     exportStatus.textContent = '✓ Готово'; exportStatus.className = 'status ok';
                     toast('Экспорт завершён!', 'ok'); log('Видео экспортировано: ' + payload.filename, 'done');
@@ -5023,8 +5073,17 @@ export async function init() {
                 },
                 error(msg) {
                     exportBtn.disabled = false;
+                    if (cancelExportBtn) cancelExportBtn.style.display = 'none';
                     exportStatus.textContent = msg; exportStatus.className = 'status err';
                     toast(msg, 'err'); log(msg, 'err');
+                },
+                cancelled(msg) {
+                    exportBtn.disabled = false;
+                    if (cancelExportBtn) cancelExportBtn.style.display = 'none';
+                    exportStatus.textContent = 'Отменено'; exportStatus.className = 'status';
+                    progFill.style.width = '0%'; progPct.textContent = '0%';
+                    toast('Экспорт отменён', 'info'); log('Export cancelled by user', 'warn');
+                    setTimeout(() => { exportProg.hidden = true; }, 3000);
                 },
             });
         } catch (err) { exportBtn.disabled = false; toast(err.message, 'err'); }

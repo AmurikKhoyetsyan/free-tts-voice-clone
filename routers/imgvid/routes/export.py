@@ -52,6 +52,10 @@ from routers.imgvid.filter_builder import (
 
 router = APIRouter()
 
+# ── Active-export state (module-level for cancel support) ─────────────────────
+_active_export_proc: "subprocess.Popen | None" = None
+_active_export_cancel = threading.Event()
+
 # ── Directory constants ───────────────────────────────────────────────────────
 _BASE_DIR   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _IMGVID_DIR = os.path.join(_BASE_DIR, ".outputs", "imgvid")
@@ -158,6 +162,8 @@ async def export_video(
 
     def worker():
         """Background thread that builds and runs the FFmpeg export command."""
+        global _active_export_proc
+        _active_export_cancel.clear()
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 q.put(("progress", 0.03, "Подготовка файлов…"))
@@ -440,6 +446,7 @@ async def export_video(
                     stdin=subprocess.DEVNULL, bufsize=0,
                     creationflags=_NO_WIN,
                 )
+                _active_export_proc = proc
 
                 MAX_EXPORT_SECONDS = 1800  # 30 min hard timeout
                 STALL_SECONDS = 120        # 2 min stall timeout
@@ -472,6 +479,11 @@ async def export_video(
 
                 while not _stdout_done.is_set():
                     now = _time.monotonic()
+                    if _active_export_cancel.is_set():
+                        proc.kill()
+                        _stdout_done.wait(3)
+                        q.put(("cancelled", "Export cancelled by user"))
+                        return
                     if now - _start_t > MAX_EXPORT_SECONDS:
                         proc.kill()
                         _stdout_done.wait(5)
@@ -549,6 +561,8 @@ async def export_video(
             import traceback
             app_log(f"Export error: {traceback.format_exc()}", "ERROR", "ImgVid")
             q.put(("error", str(e)))
+        finally:
+            _active_export_proc = None
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -568,8 +582,35 @@ async def export_video(
             elif ev == "error":
                 yield f"event: error\ndata: {json.dumps({'status': '❌ ' + item[1]})}\n\n"
                 break
+            elif ev == "cancelled":
+                app_log("Export cancelled by user", "INFO", "ImgVid")
+                yield f"event: cancelled\ndata: {json.dumps({'status': item[1]})}\n\n"
+                break
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+# ── /cancel-export ───────────────────────────────────────────────────────────
+
+@router.post("/cancel-export")
+async def cancel_export():
+    """Signal the active FFmpeg export to stop and kill its process."""
+    global _active_export_proc
+    _active_export_cancel.set()
+    proc = _active_export_proc
+    if proc and proc.poll() is None:
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    capture_output=True, timeout=5,
+                )
+            else:
+                proc.kill()
+        except Exception:
+            pass
+    app_log("Export cancelled by user", "INFO", "ImgVid")
+    return {"ok": True}
 
 
 # ── /export-audio ─────────────────────────────────────────────────────────────
