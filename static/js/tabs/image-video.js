@@ -28,6 +28,7 @@ const S = {
     previewZoom: 1.0,     // actual CSS scale factor
     // PIP layers
     pipLayers: [],
+    audioLanes: [],
     // Track display order: first = topmost visual row = highest render layer
     trackOrder: ['video', 'audio', 'subtitle', 'pip'],
     // Preview dimensions (set by _updatePreviewSize, used for subtitle scaling)
@@ -625,6 +626,7 @@ export async function init() {
             _stopPlayback();
             S.projectId = d.id; S.projectName = d.name;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
+            S.audioLanes = [...new Set((S.audioTracks).map(t => t.laneIndex ?? 0))];
             S.subtitles = d.subtitles || [];
             _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
             _pipEls.clear();
@@ -650,6 +652,7 @@ export async function init() {
             _stopPlayback();
             S.projectId = d.id; S.projectName = d.name;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
+            S.audioLanes = [...new Set((S.audioTracks).map(t => t.laneIndex ?? 0))];
             S.subtitles = d.subtitles || [];
             _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
             _pipEls.clear();
@@ -980,21 +983,35 @@ export async function init() {
                 // Creates a new empty audio lane — user adds files with "+" in label
                 action: () => {
                     _hide();
-                    const newLane = S.audioTracks.length
-                        ? Math.max(...S.audioTracks.map(t => t.laneIndex ?? 0)) + 1
-                        : 0;
-                    S._nextAudioLane = newLane;
-                    // Show the lane immediately (renderTimeline shows all used lanes)
-                    // Trigger file pick so user can add audio to the new lane
-                    addAudioBtn?.click();
+                    const allLanes = new Set([
+                        ...S.audioTracks.map(t => t.laneIndex ?? 0),
+                        ...S.audioLanes,
+                    ]);
+                    const newLane = allLanes.size ? Math.max(...allLanes) + 1 : 0;
+                    if (!S.audioLanes.includes(newLane)) S.audioLanes.push(newLane);
+                    renderTimeline();
+                    toast('Аудиодорожка создана', 'info');
                 },
             },
             {
                 key: 'pip', icon: '📺', label: 'PIP',
                 desc: 'Новый PIP слой поверх видео',
-                count: () => S.pipLayers.length,
-                // PIP track creates a new layer via file picker
-                action: () => { _hide(); addPipBtn?.click(); },
+                count: () => S.pipLayers.filter(p => !p._empty).length,
+                // PIP track creates a new empty layer
+                action: () => {
+                    _hide();
+                    const emptyPip = _normalizePip({
+                        id: uid(), type: 'image', file: null, fileUrl: null, thumbUrl: null,
+                        x: 5, y: 5, w: 30, h: 20,
+                        startTime: 0, endTime: Math.max(totalDur(), 5),
+                        order: S.pipLayers.length,
+                        _empty: true,
+                    });
+                    S.pipLayers.push(emptyPip);
+                    S.dirty = true;
+                    renderTimeline(); renderPreview();
+                    toast('PIP дорожка создана', 'info');
+                },
             },
             {
                 key: 'subtitle', icon: '📝', label: 'Subtitle',
@@ -1139,6 +1156,7 @@ export async function init() {
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
             const _newLane = (S._nextAudioLane !== undefined) ? S._nextAudioLane : _getNextLane();
             delete S._nextAudioLane;
+            if (!S.audioLanes.includes(_newLane)) S.audioLanes.push(_newLane);
             const track = { id: uid(), file: d.name, fileUrl: d.url, original: d.original, volume: 1, fadeIn: 0, fadeOut: 0, startOffset: _findFreeAudioOffset(_newLane), trimIn: 0, laneIndex: _newLane };
             S.audioTracks.push(track);
             _pushHistory();
@@ -1696,6 +1714,7 @@ export async function init() {
         S.audioTracks.forEach((t, i) => { if (t.laneIndex === undefined) t.laneIndex = i; });
 
         const lanesSet = new Set(S.audioTracks.map(t => t.laneIndex));
+        (S.audioLanes || []).forEach(l => lanesSet.add(l));
         const uniqueLanes = [...lanesSet].sort((a, b) => a - b);
         if (!uniqueLanes.length) uniqueLanes.push(0);
 
@@ -1709,7 +1728,7 @@ export async function init() {
 
         audioTrackEl.innerHTML = '';
 
-        if (!S.audioTracks.length) {
+        if (!S.audioTracks.length && !S.audioLanes.length) {
             const emptyLbl = document.createElement('div');
             emptyLbl.style.cssText = `height:${rowH}px;display:flex;align-items:center;padding:0 4px;font-size:8px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em`;
             if (_audioHandle) emptyLbl.appendChild(_audioHandle);
@@ -1879,6 +1898,15 @@ export async function init() {
                 row.appendChild(item);
                 drawWaveform(canvas, track.fileUrl, track.trimIn || 0, trackDur);
             });
+
+            if (!S.audioTracks.some(t => (t.laneIndex ?? 0) === laneIdx)) {
+                const ph = document.createElement('div');
+                ph.className = 'ive-tl-empty-abs';
+                ph.textContent = 'Нажмите для добавления аудио';
+                ph.style.cssText = 'cursor:pointer;font-size:9px;';
+                ph.addEventListener('click', () => { S._nextAudioLane = laneIdx; addAudioBtn?.click(); });
+                row.appendChild(ph);
+            }
 
             audioTrackEl.appendChild(row);
         });
@@ -3637,6 +3665,7 @@ export async function init() {
         const sortedPip = [...S.pipLayers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         for (const pip of sortedPip) {
             const start = pip.startTime || 0;
+            if (pip._empty) continue;
             const end   = pip.endTime ?? (start + 5);
             if (currentTime < start || currentTime >= end) continue;
             activeIds.add(pip.id);
@@ -3721,6 +3750,33 @@ export async function init() {
             const end   = pip.endTime ?? (start + 5);
             const leftPx = start * S.pxPerSec;
             const w     = Math.max(16, (end - start) * S.pxPerSec);
+
+            if (pip._empty) {
+                // Label
+                if (pipLblEl) {
+                    const lbl = document.createElement('div');
+                    lbl.className = 'ive-pip-lbl-row';
+                    lbl.dataset.rowIdx = rowIdx;
+                    if (rowIdx === 0 && _pipHandle) lbl.appendChild(_pipHandle);
+                    const lblTxt = document.createElement('span');
+                    lblTxt.textContent = 'PIP (пустой)';
+                    lblTxt.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:7px;opacity:.6;';
+                    lbl.appendChild(lblTxt);
+                    pipLblEl.appendChild(lbl);
+                }
+                // Track body placeholder
+                const phRow = document.createElement('div');
+                phRow.className = 'ive-pip-track-row';
+                phRow.style.width = contentW + 'px';
+                const ph = document.createElement('div');
+                ph.className = 'ive-tl-empty-abs';
+                ph.textContent = 'Нажмите для добавления медиа';
+                ph.style.cssText = 'cursor:pointer;font-size:9px;';
+                ph.addEventListener('click', () => { S._fillEmptyPipId = pip.id; addPipBtn?.click(); });
+                phRow.appendChild(ph);
+                pipTrackEl.appendChild(phRow);
+                return;
+            }
 
             // ── Label row ────────────────────────────────────────────────
             if (pipLblEl) {
@@ -4233,13 +4289,25 @@ export async function init() {
             const r = await fetch(endpoint, { method: 'POST', body: fd });
             const d = await r.json();
             if (!r.ok) { toast(d.detail || 'Ошибка', 'err'); return; }
-            const pip = _normalizePip({
-                id: uid(), file: d.name, fileUrl: d.url, type: isVideo ? 'video' : 'image',
-                original: d.original, startTime: S.currentTime, endTime: S.currentTime + 5,
-                x: 5, y: 5, w: 30, h: 20, opacity: 1, volume: 0, speed: 1, trimIn: 0,
-                effects: [], order: S.pipLayers.length,
-            });
-            S.pipLayers.push(pip);
+            const _emptyIdx = S._fillEmptyPipId
+                ? S.pipLayers.findIndex(p => p.id === S._fillEmptyPipId)
+                : -1;
+            delete S._fillEmptyPipId;
+            if (_emptyIdx >= 0) {
+                Object.assign(S.pipLayers[_emptyIdx], {
+                    file: d.name, fileUrl: d.url, type: isVideo ? 'video' : 'image',
+                    original: d.original, _empty: false,
+                });
+                _normalizePip(S.pipLayers[_emptyIdx]);
+            } else {
+                const pip = _normalizePip({
+                    id: uid(), file: d.name, fileUrl: d.url, type: isVideo ? 'video' : 'image',
+                    original: d.original, startTime: S.currentTime, endTime: S.currentTime + 5,
+                    x: 5, y: 5, w: 30, h: 20, opacity: 1, volume: 0, speed: 1, trimIn: 0,
+                    effects: [], order: S.pipLayers.length,
+                });
+                S.pipLayers.push(pip);
+            }
             _pushHistory();
             S.selPipIdx = S.pipLayers.length - 1;
             S.dirty = true;
@@ -4739,6 +4807,7 @@ export async function init() {
             S.isTemplateMode = false; S.editingTemplateId = null;
             S.clips       = newClips;
             S.audioTracks = newAudio;
+            S.audioLanes = [...new Set((S.audioTracks).map(t => t.laneIndex ?? 0))];
             S.subtitles   = newSubs;
             _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
             _pipEls.clear();
@@ -4813,6 +4882,7 @@ export async function init() {
             S.projectId = d.id; S.projectName = d.name;
             S.isTemplateMode = false; S.editingTemplateId = null;
             S.clips = d.slides || []; S.audioTracks = d.audio || [];
+            S.audioLanes = [...new Set((S.audioTracks).map(t => t.laneIndex ?? 0))];
             // Load independent subtitles
             S.subtitles = d.subtitles || [];
             // Migrate old per-clip subtitles to independent track if no top-level subs exist
@@ -4917,6 +4987,7 @@ export async function init() {
             S.projectName = d.name;
             S.clips = d.slides || [];
             S.audioTracks = d.audio || [];
+            S.audioLanes = [...new Set((S.audioTracks).map(t => t.laneIndex ?? 0))];
             S.subtitles = d.subtitles || [];
             _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
             _pipEls.clear();
@@ -4948,7 +5019,7 @@ export async function init() {
     async function _saveProject() {
         if (S.isTemplateMode && S.editingTemplateId) {
             // Save back to template
-            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
+            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
             try {
                 const r = await fetch(`/api/imgvid/templates/${S.editingTemplateId}`, {
                     method: 'PUT',
@@ -4964,7 +5035,7 @@ export async function init() {
             } catch (err) { toast(err.message, 'err'); }
             return;
         }
-        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
+        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
                 method: S.projectId ? 'PUT' : 'POST',
@@ -4997,7 +5068,7 @@ export async function init() {
         progFill.style.width = '2%';
         progPct.textContent  = '0%';
 
-        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers, trackOrder: S.trackOrder, tracks: _buildTracksMetadata() });
+        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata() });
 
         if (isAudioOnly) {
             if (!S.audioTracks.length) { exportBtn.disabled = false; toast('Нет аудиодорожек для экспорта', 'warn'); return; }
