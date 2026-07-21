@@ -867,8 +867,10 @@
                             <div id="ive-trans-overlay" style="display:none;position:absolute;z-index:9;pointer-events:none;background:#000;"></div>
                             <!-- Zoom-able content layer -->
                             <div id="ive-preview-content" class="ive-preview-content" style="position:relative;z-index:2">
-                                <img    id="ive-preview-img"   style="display:none" alt="">
-                                <video  id="ive-preview-video" style="display:none" muted playsinline></video>
+                                <div id="ive-preview-media-wrap" style="position:absolute;inset:0;overflow:hidden">
+                                    <img    id="ive-preview-img"   style="display:none" alt="">
+                                    <video  id="ive-preview-video" style="display:none" muted playsinline></video>
+                                </div>
                             </div>
                             <!-- Subtitle container — always above transitions, outside preview-content -->
                             <div id="ive-sub-container" style="display:none;position:absolute;z-index:20;pointer-events:none">

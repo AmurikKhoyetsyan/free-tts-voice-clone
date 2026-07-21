@@ -109,7 +109,8 @@ export async function init() {
     // Preview
     const previewWrap   = $('ive-preview-inner').parentElement;
     const previewInner  = $('ive-preview-inner');
-    const previewContent= $('ive-preview-content');
+    const previewContent    = $('ive-preview-content');
+    const previewMediaWrap  = $('ive-preview-media-wrap');
     const previewImg    = $('ive-preview-img');
     const previewVideo  = $('ive-preview-video');
     const previewEmpty  = $('ive-preview-empty');
@@ -1410,6 +1411,7 @@ export async function init() {
         previewContent.style.clipPath = '';
         if (zT) previewContent.style.transform = zT;
         else previewContent.style.transform = '';
+        if (previewMediaWrap) previewMediaWrap.style.transform = '';
         previewContentNext.style.display   = 'none';
         previewContentNext.style.opacity   = '1';
         previewContentNext.style.transform = '';
@@ -2295,16 +2297,16 @@ export async function init() {
         }
 
         // ── Apply ─────────────────────────────────────────────────────────────
-        const zT = S.previewMode === 'custom' ? `scale(${S.previewZoom})` : '';
-        const parts = [];
-        if (zT) parts.push(zT);
-        if (scale !== 1) parts.push(`scale(${scale.toFixed(4)})`);
-        if (flipX !== 1) parts.push(`scaleX(${flipX.toFixed(4)})`);
-        if (rotate !== 0) parts.push(`rotate(${rotate.toFixed(2)}deg)`);
-        if (tx !== 0 || ty !== 0) parts.push(`translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%)`);
+        // Effect transforms go on the media wrapper inside previewContent so that
+        // previewContent's overflow:hidden clips any translate that goes out of frame.
+        const effectParts = [];
+        if (scale !== 1) effectParts.push(`scale(${scale.toFixed(4)})`);
+        if (flipX !== 1) effectParts.push(`scaleX(${flipX.toFixed(4)})`);
+        if (rotate !== 0) effectParts.push(`rotate(${rotate.toFixed(2)}deg)`);
+        if (tx !== 0 || ty !== 0) effectParts.push(`translate(${tx.toFixed(2)}%, ${ty.toFixed(2)}%)`);
+        if (previewMediaWrap) previewMediaWrap.style.transform = effectParts.join(' ') || '';
 
-        previewContent.style.opacity   = opacity.toFixed(4);
-        previewContent.style.transform = parts.join(' ') || '';
+        previewContent.style.opacity = opacity.toFixed(4);
 
         if (extraBlur > 0) {
             const cur = previewContent.style.filter || '';

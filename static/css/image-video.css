@@ -252,6 +252,18 @@
     flex-shrink: 0;
 }
 
+/* Media wrapper — fills previewContent; effect transforms applied here so slides are clipped at the frame boundary */
+#ive-preview-media-wrap {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+}
+
+/* Subtitle container — clipped to preview frame */
+#ive-sub-container {
+    overflow: hidden;
+}
+
 .ive-preview-content img,
 .ive-preview-content video {
     display: block;
