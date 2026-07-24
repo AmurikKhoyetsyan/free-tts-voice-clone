@@ -858,6 +858,7 @@ export async function init() {
             _applyExportSettings(d.export_settings);
             _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
             clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            _updatePreviewSize();
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен из .project', 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -887,6 +888,7 @@ export async function init() {
             _applyExportSettings(d.export_settings);
             _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
             clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            _updatePreviewSize();
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект открыт: ' + d.name, 'ok');
         } catch (e) { toast(e.message, 'err'); }
@@ -1773,13 +1775,19 @@ export async function init() {
     function renderTimeline() {
         const total = totalDur();
         totalDurEl.textContent = total.toFixed(1) + 'с';
-        const contentW = Math.max(total * S.pxPerSec, (tracksScroll.clientWidth || 500));
+        // Extend timeline to cover audio tracks that run beyond slides
+        const audioEnd = S.audioTracks.reduce((max, t) => {
+            const end = (t.startOffset || 0) + (t.duration !== undefined ? t.duration : (t.originalDuration || 0));
+            return Math.max(max, end);
+        }, 0);
+        const extTotal = Math.max(total, audioEnd);
+        const contentW = Math.max(extTotal * S.pxPerSec, (tracksScroll.clientWidth || 500));
         tracksInner.style.minWidth = contentW + 'px';
-        _renderRuler(contentW, total);
-        _renderVideoTrack(total);
-        _renderAudioTracks(total, contentW);
-        _renderSubsTrack(total);
-        _renderPipTrack(total);
+        _renderRuler(contentW, extTotal);
+        _renderVideoTrack(extTotal);
+        _renderAudioTracks(total, contentW, extTotal);
+        _renderSubsTrack(extTotal);
+        _renderPipTrack(extTotal);
         _applyTrackOrder();
         renderPlayhead();
     }
@@ -1963,7 +1971,7 @@ export async function init() {
         });
     }
 
-    function _renderAudioTracks(total, contentW) {
+    function _renderAudioTracks(total, contentW, extTotal = total) {
         const rowH = 44;
 
         // Backward compat: give every track without a laneIndex its own unique lane
@@ -2020,7 +2028,7 @@ export async function init() {
                 if ((track.laneIndex ?? 0) !== laneIdx) return;
 
                 const offsetPx = (track.startOffset || 0) * S.pxPerSec;
-                const trackDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+                const trackDur = track.duration !== undefined ? track.duration : (track.originalDuration || Math.max(1, extTotal - (track.startOffset || 0)));
                 const itemW    = trackDur * S.pxPerSec;
                 const item     = document.createElement('div');
                 const isMultiAudioSel = S.selAudioIdxs.size > 1 && S.selAudioIdxs.has(i);
@@ -2112,7 +2120,7 @@ export async function init() {
                 lh.addEventListener('mousedown', e => {
                     e.stopPropagation(); e.preventDefault();
                     const sx = e.clientX, sOff = track.startOffset || 0, sTrimIn = track.trimIn || 0;
-                    const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - sOff);
+                    const sDur = track.duration !== undefined ? track.duration : (track.originalDuration || Math.max(1, extTotal - sOff));
                     const outPt = sOff + sDur;
                     let moved = false;
                     const onMove = ev => {
@@ -2136,7 +2144,7 @@ export async function init() {
                 rh.addEventListener('mousedown', e => {
                     e.stopPropagation(); e.preventDefault();
                     const sx = e.clientX;
-                    const sDur = track.duration !== undefined ? track.duration : Math.max(1, total - (track.startOffset || 0));
+                    const sDur = track.duration !== undefined ? track.duration : (track.originalDuration || Math.max(1, extTotal - (track.startOffset || 0)));
                     let moved = false;
                     const onMove = ev => {
                         moved = true;
@@ -3082,8 +3090,14 @@ export async function init() {
                 <label class="ive-label">Fade In (с)<input class="ive-input" id="acp-fi" type="number" min="0" max="30" step="0.5" value="${track.fadeIn || 0}"></label>
                 <label class="ive-label">Fade Out (с)<input class="ive-input" id="acp-fo" type="number" min="0" max="30" step="0.5" value="${track.fadeOut || 0}"></label>
             </div>
-            <label class="ive-label">Начало (с)<input class="ive-input" id="acp-offset" type="number" min="0" step="0.5" value="${track.startOffset || 0}"></label>
-            <label class="ive-label">Длит. (с)<input class="ive-input" id="acp-dur" type="number" min="0" step="0.5" placeholder="авто" value="${track.duration !== undefined ? track.duration : ''}"></label>
+            <label class="ive-label">Начало на таймлайне (с)<input class="ive-input" id="acp-offset" type="number" min="0" step="0.5" value="${track.startOffset || 0}"></label>
+            <div style="border:1px solid var(--border);border-radius:5px;padding:6px 8px;margin-bottom:4px">
+                <div style="font-size:10px;font-weight:600;color:var(--text-dim);margin-bottom:5px;text-transform:uppercase;letter-spacing:.05em">Обрезка аудиофайла${track.originalDuration ? ` <span style="font-weight:400;text-transform:none">(файл: ${track.originalDuration.toFixed(1)} с)</span>` : ''}</div>
+                <div class="ive-row2">
+                    <label class="ive-label">Откуда (с)<input class="ive-input" id="acp-trimin" type="number" min="0" ${track.originalDuration ? `max="${(track.originalDuration - 0.5).toFixed(1)}"` : ''} step="0.1" value="${(track.trimIn || 0).toFixed(1)}"></label>
+                    <label class="ive-label">Докуда (с)<input class="ive-input" id="acp-trimout" type="number" min="0.5" ${track.originalDuration ? `max="${track.originalDuration.toFixed(1)}"` : ''} step="0.1" value="${((track.trimIn || 0) + (track.duration !== undefined ? track.duration : (track.originalDuration || 0))).toFixed(1)}"></label>
+                </div>
+            </div>
             <label class="ive-label">Дорожка
                 <select class="ive-select" id="acp-lane">
                     ${_uniqueLanes.map(l => `<option value="${l}"${l===curLane?' selected':''}>Дорожка ${l + 1}</option>`).join('')}
@@ -3114,9 +3128,35 @@ export async function init() {
         $('acp-fi').addEventListener('change', e => { track.fadeIn = parseFloat(e.target.value) || 0; S.dirty = true; });
         $('acp-fo').addEventListener('change', e => { track.fadeOut = parseFloat(e.target.value) || 0; S.dirty = true; });
         $('acp-offset').addEventListener('change', e => { track.startOffset = parseFloat(e.target.value) || 0; S.dirty = true; renderTimeline(); });
-        $('acp-dur').addEventListener('change', e => {
+
+        const _syncTrimFields = () => {
+            const tiEl = $('acp-trimin'), toEl = $('acp-trimout');
+            if (tiEl) tiEl.value = (track.trimIn || 0).toFixed(1);
+            if (toEl) toEl.value = ((track.trimIn || 0) + (track.duration !== undefined ? track.duration : (track.originalDuration || 0))).toFixed(1);
+        };
+
+        $('acp-trimin').addEventListener('change', e => {
             const v = parseFloat(e.target.value);
-            track.duration = isFinite(v) && v > 0 ? v : undefined;
+            if (!isFinite(v) || v < 0) return;
+            const origMax = track.originalDuration || 9999;
+            const newTrimIn = Math.max(0, Math.min(origMax - 0.5, v));
+            const prevEnd = (track.trimIn || 0) + (track.duration !== undefined ? track.duration : 0);
+            track.trimIn = Math.round(newTrimIn * 10) / 10;
+            if (prevEnd > track.trimIn) {
+                track.duration = Math.max(0.5, Math.round((prevEnd - track.trimIn) * 10) / 10);
+            }
+            _syncTrimFields();
+            S.dirty = true; renderTimeline();
+        });
+
+        $('acp-trimout').addEventListener('change', e => {
+            const v = parseFloat(e.target.value);
+            if (!isFinite(v)) return;
+            const origMax = track.originalDuration || 9999;
+            const trimIn = track.trimIn || 0;
+            const newEnd = Math.max(trimIn + 0.5, Math.min(origMax, v));
+            track.duration = Math.max(0.5, Math.round((newEnd - trimIn) * 10) / 10);
+            _syncTrimFields();
             S.dirty = true; renderTimeline();
         });
 
@@ -3138,8 +3178,7 @@ export async function init() {
             if (speedDisp) speedDisp.textContent = clamped + '×';
             if (track.originalDuration !== undefined) {
                 track.duration = track.originalDuration / clamped;
-                const durEl = $('acp-dur');
-                if (durEl) durEl.value = track.duration.toFixed(2);
+                _syncTrimFields();
             }
             S.dirty = true;
             const el = _audioEls.get(track.id);
@@ -5198,6 +5237,7 @@ export async function init() {
             _updateSaveBtn();
             _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
             clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            _updatePreviewSize();
             renderAll(); _pushHistory(); await loadProjectsList();
             toast('Проект загружен', 'ok');
         } catch (err) { toast(err.message, 'err'); }
@@ -5286,6 +5326,7 @@ export async function init() {
             _updateSaveBtn();
             _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
             clearTimeout(_propsHistTimer); _propsHistTimer = null;
+            _updatePreviewSize();
             renderAll(); _pushHistory();
             await loadTemplatesList();
             toast('Шаблон открыт для редактирования', 'ok');
