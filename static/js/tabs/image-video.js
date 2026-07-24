@@ -2115,20 +2115,24 @@ export async function init() {
         // Show current clip
         if (clip.type === 'image') {
             previewVideo.style.display = 'none';
+            _applyFramePos(previewVideo, null);
             if (previewImg.dataset.src !== clip.fileUrl) {
                 previewImg.src = clip.fileUrl; previewImg.dataset.src = clip.fileUrl;
             }
             previewImg.style.display = 'block';
             _applyImgTransform(previewImg, clip);
+            _applyFramePos(previewImg, clip);
         } else {
             previewImg.style.display = 'none';
             previewImg.style.transform = '';
             previewImg.style.clipPath = '';
+            _applyFramePos(previewImg, null);
             if (previewVideo.dataset.src !== clip.fileUrl) {
                 previewVideo.src = clip.fileUrl; previewVideo.dataset.src = clip.fileUrl;
                 previewVideo.load();
             }
             previewVideo.style.display = 'block';
+            _applyFramePos(previewVideo, clip);
             const videoTime = local + (clip.trimIn || 0);
             const vSpeed    = clip.speed ?? 1;
             if (previewVideo.playbackRate !== vSpeed) previewVideo.playbackRate = vSpeed;
@@ -2207,6 +2211,26 @@ export async function init() {
             imgEl.style.clipPath = `inset(${t}% ${r}% ${b}% ${l}%)`;
         } else {
             imgEl.style.clipPath = '';
+        }
+    }
+
+    function _applyFramePos(el, clip) {
+        const fx = clip ? (clip.frameX || 0) : 0;
+        const fy = clip ? (clip.frameY || 0) : 0;
+        const fw = clip ? (clip.frameW ?? 100) : 100;
+        const fh = clip ? (clip.frameH ?? 100) : 100;
+        if (fx === 0 && fy === 0 && fw === 100 && fh === 100) {
+            el.style.position = '';
+            el.style.left = '';
+            el.style.top = '';
+            el.style.width = '';
+            el.style.height = '';
+        } else {
+            el.style.position = 'absolute';
+            el.style.left   = fx + '%';
+            el.style.top    = fy + '%';
+            el.style.width  = fw + '%';
+            el.style.height = fh + '%';
         }
     }
 

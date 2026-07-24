@@ -219,7 +219,6 @@ async def export_video(
 
                 # ── Per-slide filters ────────────────────────────────────────
                 q.put(("progress", 0.07, "Создание фильтров эффектов…"))
-                scale_f = build_scale_filter(width, height, fps)
                 filter_parts: list[str] = []
 
                 for i, slide in enumerate(slides):
@@ -228,6 +227,17 @@ async def export_video(
                     trim_in = float(slide.get("trimIn", 0) or 0)
                     dur = float(slide.get("duration", 4))
 
+                    # Frame position/size
+                    frame_x_pct = float(slide.get("frameX", 0) or 0)
+                    frame_y_pct = float(slide.get("frameY", 0) or 0)
+                    frame_w_pct = max(1.0, float(slide.get("frameW", 100) or 100))
+                    frame_h_pct = max(1.0, float(slide.get("frameH", 100) or 100))
+                    has_frame = not (frame_x_pct == 0 and frame_y_pct == 0 and
+                                     frame_w_pct == 100 and frame_h_pct == 100)
+                    sw = max(2, int(width  * frame_w_pct / 100) // 2 * 2) if has_frame else width
+                    sh = max(2, int(height * frame_h_pct / 100) // 2 * 2) if has_frame else height
+
+                    scale_f = build_scale_filter(sw, sh, fps)
                     pre_parts: list[str] = []
                     cur_scale_f = scale_f
 
@@ -256,11 +266,11 @@ async def export_video(
                             pre_parts.append(f"scale=iw*{s:.4f}:ih*{s:.4f}")
 
                         if img_ox != 0 or img_oy != 0:
-                            ox_px = int(width * img_ox / 100)
-                            oy_px = int(height * img_oy / 100)
+                            ox_px = int(sw * img_ox / 100)
+                            oy_px = int(sh * img_oy / 100)
                             cur_scale_f = (
-                                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                                f"pad={width}:{height}:(ow-iw)/2+{ox_px}:(oh-ih)/2+{oy_px}:black,"
+                                f"scale={sw}:{sh}:force_original_aspect_ratio=decrease,"
+                                f"pad={sw}:{sh}:(ow-iw)/2+{ox_px}:(oh-ih)/2+{oy_px}:black,"
                                 f"setsar=1,fps={fps},format=yuv420p"
                             )
 
@@ -270,7 +280,7 @@ async def export_video(
                     effect_speed = max(0.01, float(slide.get("effectSpeed", 1) or 1))
 
                     replaces_scale, cont_filters = _continuous_effect_filters(
-                        cont_type, cont_int, dur, width, height, fps, clip_type,
+                        cont_type, cont_int, dur, sw, sh, fps, clip_type,
                         speed=effect_speed,
                     )
 
@@ -294,8 +304,26 @@ async def export_video(
                     ee_type   = (end_eff.get("type")   or "none").strip()
                     se_dur    = max(0.001, min(float(start_eff.get("duration") or 1.0), dur) / effect_speed)
                     ee_dur    = max(0.001, min(float(end_eff.get("duration")   or 1.0), dur) / effect_speed)
-                    parts.extend(_start_effect_filters(se_type, se_dur, dur, width, height))
-                    parts.extend(_end_effect_filters(ee_type, ee_dur, dur, width, height))
+                    parts.extend(_start_effect_filters(se_type, se_dur, dur, sw, sh))
+                    parts.extend(_end_effect_filters(ee_type, ee_dur, dur, sw, sh))
+
+                    # Place slide onto full canvas when frame position/size is non-default
+                    if has_frame:
+                        fx = int(width  * frame_x_pct / 100)
+                        fy = int(height * frame_y_pct / 100)
+                        crop_x = max(0, -fx)
+                        crop_y = max(0, -fy)
+                        vis_w = max(2, min(sw - crop_x, width  - max(0, fx)))
+                        vis_h = max(2, min(sh - crop_y, height - max(0, fy)))
+                        place_x = max(0, fx)
+                        place_y = max(0, fy)
+                        if vis_w > 1 and vis_h > 1:
+                            if crop_x > 0 or crop_y > 0 or vis_w < sw or vis_h < sh:
+                                parts.append(f"crop={vis_w}:{vis_h}:{crop_x}:{crop_y}")
+                            parts.append(
+                                f"pad={width}:{height}:{place_x}:{place_y}:black,"
+                                f"setsar=1,fps={fps},format=yuv420p"
+                            )
 
                     filter_parts.append(f"[{i}:v]{','.join(parts)}[v{i}]")
 

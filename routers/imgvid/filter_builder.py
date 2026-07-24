@@ -37,14 +37,28 @@ def build_slide_filter(
     """Return the full per-slide filter string ``[i:v]<chain>[vi]``.
 
     Handles video trims/speed, image crop/scale/offset, per-slide effects,
-    and start/end motion effects.  The output label is ``[v{i}]``.
+    start/end motion effects, and optional frame position/size (frameX/Y/W/H).
+    The output label is ``[v{i}]``.
     """
     clip_type = slide.get("type", "image")
     speed = float(slide.get("speed", 1) or 1)
     trim_in = float(slide.get("trimIn", 0) or 0)
     dur = float(slide.get("duration", 3))
 
-    base_scale_f = build_scale_filter(width, height, fps)
+    # Frame position/size: place the slide in a sub-region of the canvas.
+    # Values are percentages of the output canvas dimensions.
+    frame_x_pct = float(slide.get("frameX", 0) or 0)
+    frame_y_pct = float(slide.get("frameY", 0) or 0)
+    frame_w_pct = max(1.0, float(slide.get("frameW", 100) or 100))
+    frame_h_pct = max(1.0, float(slide.get("frameH", 100) or 100))
+    has_frame = not (frame_x_pct == 0 and frame_y_pct == 0 and
+                     frame_w_pct == 100 and frame_h_pct == 100)
+
+    # Effective slide dimensions (equals full canvas when no custom frame)
+    sw = max(2, int(width  * frame_w_pct / 100) // 2 * 2) if has_frame else width
+    sh = max(2, int(height * frame_h_pct / 100) // 2 * 2) if has_frame else height
+
+    base_scale_f = build_scale_filter(sw, sh, fps)
     cur_scale_f = base_scale_f
 
     pre_parts: list[str] = []
@@ -75,11 +89,11 @@ def build_slide_filter(
             pre_parts.append(f"scale=iw*{s:.4f}:ih*{s:.4f}")
 
         if img_ox != 0 or img_oy != 0:
-            ox_px = int(width * img_ox / 100)
-            oy_px = int(height * img_oy / 100)
+            ox_px = int(sw * img_ox / 100)
+            oy_px = int(sh * img_oy / 100)
             cur_scale_f = (
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2+{ox_px}:(oh-ih)/2+{oy_px}:black,"
+                f"scale={sw}:{sh}:force_original_aspect_ratio=decrease,"
+                f"pad={sw}:{sh}:(ow-iw)/2+{ox_px}:(oh-ih)/2+{oy_px}:black,"
                 f"setsar=1,fps={fps},format=yuv420p"
             )
 
@@ -96,8 +110,26 @@ def build_slide_filter(
     ee_type = (end_eff.get("type") or "none").strip()
     se_dur = min(float(start_eff.get("duration") or 1.0), dur)
     ee_dur = min(float(end_eff.get("duration") or 1.0), dur)
-    parts.extend(_start_effect_filters(se_type, se_dur, dur, width, height))
-    parts.extend(_end_effect_filters(ee_type, ee_dur, dur, width, height))
+    parts.extend(_start_effect_filters(se_type, se_dur, dur, sw, sh))
+    parts.extend(_end_effect_filters(ee_type, ee_dur, dur, sw, sh))
+
+    # Place slide onto full canvas when frame position/size is non-default
+    if has_frame:
+        fx = int(width  * frame_x_pct / 100)
+        fy = int(height * frame_y_pct / 100)
+        crop_x = max(0, -fx)
+        crop_y = max(0, -fy)
+        vis_w = max(2, min(sw - crop_x, width  - max(0, fx)))
+        vis_h = max(2, min(sh - crop_y, height - max(0, fy)))
+        place_x = max(0, fx)
+        place_y = max(0, fy)
+        if vis_w > 1 and vis_h > 1:
+            if crop_x > 0 or crop_y > 0 or vis_w < sw or vis_h < sh:
+                parts.append(f"crop={vis_w}:{vis_h}:{crop_x}:{crop_y}")
+            parts.append(
+                f"pad={width}:{height}:{place_x}:{place_y}:black,"
+                f"setsar=1,fps={fps},format=yuv420p"
+            )
 
     return f"[{i}:v]{','.join(parts)}[v{i}]"
 

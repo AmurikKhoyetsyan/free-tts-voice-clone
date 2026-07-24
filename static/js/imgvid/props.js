@@ -473,6 +473,16 @@ function _renderPropsSlide(clip) {
             </div>
             <div id="pv-speed-display" style="font-size:11px;color:var(--text-dim)">${(clip.speed??1)}×</div>
         </label>
+        <div style="font-size:11px;font-weight:600;color:var(--text-dim);margin:6px 0 2px">Позиция на кадре</div>
+        <div class="ive-row2">
+            <label class="ive-label">X%<input class="ive-input" type="number" id="pv-frame-x" min="-200" max="300" step="1" value="${clip.frameX||0}"></label>
+            <label class="ive-label">Y%<input class="ive-input" type="number" id="pv-frame-y" min="-200" max="300" step="1" value="${clip.frameY||0}"></label>
+        </div>
+        <div class="ive-row2">
+            <label class="ive-label">Ширина%<input class="ive-input" type="number" id="pv-frame-w" min="1" max="500" step="1" value="${clip.frameW??100}"></label>
+            <label class="ive-label">Высота%<input class="ive-input" type="number" id="pv-frame-h" min="1" max="500" step="1" value="${clip.frameH??100}"></label>
+        </div>
+        <button class="btn btn-sm" id="pv-frame-reset" style="margin-top:2px" title="Вернуть на весь кадр">↺ Полный кадр</button>
         ${isVideo ? `<label class="ive-toggle-row ive-label">Убрать аудио видео
             <input class="ive-toggle" type="checkbox" id="pv-mute-audio"${clip.muteAudio ? ' checked' : ''}>
         </label>
@@ -616,6 +626,14 @@ function _renderPropsSlide(clip) {
         _cb.renderTimeline(); _cb.renderMediaList();
     });
     $('pv-remove-clip').addEventListener('click', () => { _cb.deleteSelectedClip(); });
+    $('pv-frame-x')?.addEventListener('change', e => { clip.frameX = parseFloat(e.target.value)||0; S.dirty=true; _cb.renderPreview(); });
+    $('pv-frame-y')?.addEventListener('change', e => { clip.frameY = parseFloat(e.target.value)||0; S.dirty=true; _cb.renderPreview(); });
+    $('pv-frame-w')?.addEventListener('change', e => { clip.frameW = Math.max(1, parseFloat(e.target.value)||100); S.dirty=true; _cb.renderPreview(); });
+    $('pv-frame-h')?.addEventListener('change', e => { clip.frameH = Math.max(1, parseFloat(e.target.value)||100); S.dirty=true; _cb.renderPreview(); });
+    $('pv-frame-reset')?.addEventListener('click', () => {
+        clip.frameX=0; clip.frameY=0; clip.frameW=100; clip.frameH=100;
+        _cb.pushHistory(); S.dirty=true; _cb.renderPreview(); renderProps();
+    });
     if (isVideo) {
         $('pv-extract-audio')?.addEventListener('click', async () => {
             toast('Извлечение аудио…', 'info');
