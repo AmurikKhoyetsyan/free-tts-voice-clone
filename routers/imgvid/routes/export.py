@@ -98,6 +98,7 @@ async def export_video(
     audio_bitrate: str  = Form("192k"),
     audio_sr:      str  = Form("44100"),
     audio_ch:      str  = Form("2"),
+    canvas_crop:   str  = Form(""),
 ):
     """Start an SSE-streamed video export job.
 
@@ -403,6 +404,29 @@ async def export_video(
                         valid_audio, audio_start_idx, total_dur
                     )
                     filter_parts.extend(audio_filter_parts)
+
+                # ── Canvas crop ──────────────────────────────────────────────
+                if canvas_crop:
+                    try:
+                        cc_parts = [int(v) for v in canvas_crop.split(",")]
+                        if len(cc_parts) == 4:
+                            cc_x, cc_y, cc_w, cc_h = cc_parts
+                            if cc_w > 0 and cc_h > 0:
+                                # Clamp to canvas bounds
+                                cc_x = max(0, min(cc_x, width - 1))
+                                cc_y = max(0, min(cc_y, height - 1))
+                                cc_w = max(2, min(cc_w, width  - cc_x))
+                                cc_h = max(2, min(cc_h, height - cc_y))
+                                # Ensure even dimensions for codecs
+                                cc_w = cc_w // 2 * 2
+                                cc_h = cc_h // 2 * 2
+                                if cc_w > 0 and cc_h > 0:
+                                    filter_parts.append(
+                                        f"[{final_video_label}]crop={cc_w}:{cc_h}:{cc_x}:{cc_y}[vout_crop]"
+                                    )
+                                    final_video_label = "vout_crop"
+                    except Exception:
+                        pass
 
                 # ── Codec ────────────────────────────────────────────────────
                 ext = output_format.lower()

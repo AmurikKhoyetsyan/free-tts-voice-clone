@@ -35,6 +35,8 @@ const S = {
     previewH: 0, previewW: 0,
     // Template edit mode
     isTemplateMode: false, editingTemplateId: null,
+    // Canvas crop: {x, y, w, h} in canvas pixels, or null for full canvas
+    canvasCrop: null,
 };
 
 // ── Undo/Redo history ────────────────────────────────────────────────────────
@@ -156,6 +158,19 @@ export async function init() {
     // PIP
     const addPipBtn   = $('ive-add-pip-btn');
     const pipInput    = $('ive-pip-input');
+
+    // Canvas crop controls
+    const cropBtn       = $('ive-crop-btn');
+    const cropOv        = $('ive-crop-ov');
+    const cropSel       = $('ive-crop-sel');
+    const cropMaskT     = $('ive-cov-t');
+    const cropMaskB     = $('ive-cov-b');
+    const cropMaskL     = $('ive-cov-l');
+    const cropMaskR     = $('ive-cov-r');
+    const cropDimsLbl   = $('ive-crop-dims-lbl');
+    const cropOkBtn     = $('ive-ccrop-ok');
+    const cropCancelBtn = $('ive-crop-cancel-btn');
+    const cropFullBtn   = $('ive-crop-full-btn');
 
     // .amur buttons
     const saveAmurBtn        = $('ive-save-amur-btn');
@@ -357,6 +372,193 @@ export async function init() {
         _applyZoom('custom', newPct);
         zoomMode.value = 'custom';
     }, { passive: false });
+
+    // ── Canvas crop overlay ────────────────────────────────────────────────────
+    let _cropDraft     = null;  // {x,y,w,h} in canvas pixels, being edited
+    let _cropPrevCrop  = null;  // saved S.canvasCrop before entering crop mode
+    let _cropDragMode  = null;  // 'draw' | 'move' | 'resize-nw' | ...
+    let _cropDragStart = null;  // {mx, my} in canvas pixels at drag start
+    let _cropDragInit  = null;  // {x,y,w,h} snapshot at drag start
+
+    function _cropCanvasRes() {
+        const { w, h } = expModal.getResolution();
+        return { resW: w || 1920, resH: h || 1080 };
+    }
+
+    function _cancelCropMode() {
+        if (!cropOv || cropOv.style.display === 'none') return;
+        cropOv.style.display = 'none';
+        _cropDraft = null; _cropPrevCrop = null; _cropDragMode = null;
+    }
+
+    function _showCropOverlay() {
+        _cropPrevCrop = S.canvasCrop;
+        S.canvasCrop  = null;
+        _updatePreviewSize();
+
+        // Position overlay to match previewContent within previewInner
+        const cRect = previewContent.getBoundingClientRect();
+        const iRect = previewInner.getBoundingClientRect();
+        cropOv.style.left   = (cRect.left - iRect.left) + 'px';
+        cropOv.style.top    = (cRect.top  - iRect.top)  + 'px';
+        cropOv.style.width  = cRect.width  + 'px';
+        cropOv.style.height = cRect.height + 'px';
+
+        const { resW, resH } = _cropCanvasRes();
+        _cropDraft = _cropPrevCrop
+            ? { ..._cropPrevCrop }
+            : { x: 0, y: 0, w: resW, h: resH };
+
+        cropOv.style.display = 'block';
+        cropBtn.classList.add('ive-crop-active');
+        _updateCropOverlayUI();
+    }
+
+    function _updateCropOverlayUI() {
+        if (!_cropDraft || !cropOv || cropOv.style.display === 'none') return;
+        const { resW, resH } = _cropCanvasRes();
+        const ovW = parseFloat(cropOv.style.width)  || previewContent.offsetWidth;
+        const ovH = parseFloat(cropOv.style.height) || previewContent.offsetHeight;
+        const scX = ovW / resW, scY = ovH / resH;
+
+        const px = Math.round(_cropDraft.x * scX);
+        const py = Math.round(_cropDraft.y * scY);
+        const pw = Math.max(2, Math.round(_cropDraft.w * scX));
+        const ph = Math.max(2, Math.round(_cropDraft.h * scY));
+
+        cropSel.style.left   = px + 'px';
+        cropSel.style.top    = py + 'px';
+        cropSel.style.width  = pw + 'px';
+        cropSel.style.height = ph + 'px';
+
+        cropMaskT.style.cssText = `position:absolute;left:0;top:0;width:100%;height:${py}px;background:rgba(0,0,0,.62);pointer-events:auto`;
+        cropMaskB.style.cssText = `position:absolute;left:0;top:${py+ph}px;width:100%;height:${ovH-py-ph}px;background:rgba(0,0,0,.62);pointer-events:auto`;
+        cropMaskL.style.cssText = `position:absolute;left:0;top:${py}px;width:${px}px;height:${ph}px;background:rgba(0,0,0,.62);pointer-events:auto`;
+        cropMaskR.style.cssText = `position:absolute;left:${px+pw}px;top:${py}px;width:${ovW-px-pw}px;height:${ph}px;background:rgba(0,0,0,.62);pointer-events:auto`;
+
+        if (cropDimsLbl) cropDimsLbl.textContent = `${_cropDraft.w} × ${_cropDraft.h}`;
+    }
+
+    function _applyCanvasCrop() {
+        const { resW, resH } = _cropCanvasRes();
+        const { x, y, w, h } = _cropDraft;
+        S.canvasCrop = (x === 0 && y === 0 && w === resW && h === resH) ? null : { x, y, w, h };
+        S.dirty = true;
+        cropOv.style.display = 'none';
+        _cropDraft = null; _cropPrevCrop = null; _cropDragMode = null;
+        _updatePreviewSize();
+        cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
+    }
+
+    cropBtn?.addEventListener('click', () => {
+        if (cropOv && cropOv.style.display !== 'none') {
+            // Toggle off — cancel crop mode without applying
+            S.canvasCrop = _cropPrevCrop;
+            _cancelCropMode();
+            _updatePreviewSize();
+            cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
+        } else {
+            _showCropOverlay();
+        }
+    });
+
+    cropOkBtn?.addEventListener('click', () => _applyCanvasCrop());
+
+    cropCancelBtn?.addEventListener('click', () => {
+        S.canvasCrop = _cropPrevCrop;
+        _cancelCropMode();
+        _updatePreviewSize();
+        cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
+    });
+
+    cropFullBtn?.addEventListener('click', () => {
+        const { resW, resH } = _cropCanvasRes();
+        _cropDraft = { x: 0, y: 0, w: resW, h: resH };
+        _updateCropOverlayUI();
+    });
+
+    // ── Crop overlay mouse interaction ────────────────────────────────────────
+    cropOv?.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const ch = e.target.dataset?.ch;
+        const ovRect = cropOv.getBoundingClientRect();
+        const { resW, resH } = _cropCanvasRes();
+        const scX = resW / ovRect.width, scY = resH / ovRect.height;
+        const mx  = (e.clientX - ovRect.left) * scX;
+        const my  = (e.clientY - ovRect.top)  * scY;
+        if (ch) {
+            _cropDragMode  = 'resize-' + ch;
+            _cropDragStart = { mx, my };
+            _cropDragInit  = { ..._cropDraft };
+            e.stopPropagation();
+        } else if (e.target === cropSel || cropSel.contains(e.target)) {
+            _cropDragMode  = 'move';
+            _cropDragStart = { mx, my };
+            _cropDragInit  = { ..._cropDraft };
+            e.stopPropagation();
+        } else {
+            _cropDragMode  = 'draw';
+            _cropDragStart = { mx, my };
+            _cropDraft     = { x: Math.round(mx), y: Math.round(my), w: 2, h: 2 };
+            _updateCropOverlayUI();
+        }
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!_cropDragMode || !cropOv || cropOv.style.display === 'none') return;
+        const ovRect = cropOv.getBoundingClientRect();
+        const { resW, resH } = _cropCanvasRes();
+        const scX = resW / ovRect.width, scY = resH / ovRect.height;
+        const mx  = Math.max(0, Math.min(resW, (e.clientX - ovRect.left) * scX));
+        const my  = Math.max(0, Math.min(resH, (e.clientY - ovRect.top)  * scY));
+        const dx  = mx - _cropDragStart.mx;
+        const dy  = my - _cropDragStart.my;
+        const ir  = _cropDragInit;
+
+        if (_cropDragMode === 'draw') {
+            const sx = _cropDragStart.mx, sy = _cropDragStart.my;
+            let w = Math.max(2, Math.round(Math.abs(mx - sx)));
+            let h = Math.max(2, Math.round(Math.abs(my - sy)));
+            if (e.shiftKey || e.ctrlKey) { const s = Math.min(w, h); w = s; h = s; }
+            _cropDraft = {
+                x: Math.round(Math.min(sx, mx)),
+                y: Math.round(Math.min(sy, my)),
+                w, h,
+            };
+        } else if (_cropDragMode === 'move') {
+            _cropDraft = {
+                x: Math.max(0, Math.min(resW - ir.w, Math.round(ir.x + dx))),
+                y: Math.max(0, Math.min(resH - ir.h, Math.round(ir.y + dy))),
+                w: ir.w, h: ir.h,
+            };
+        } else {
+            const ch = _cropDragMode.slice(7);
+            let { x, y, w, h } = ir;
+            if (ch.includes('n')) { y = ir.y + dy; h = ir.h - dy; }
+            if (ch.includes('s')) { h = ir.h + dy; }
+            if (ch.includes('w')) { x = ir.x + dx; w = ir.w - dx; }
+            if (ch.includes('e')) { w = ir.w + dx; }
+            // Shift/Ctrl: lock aspect ratio
+            if (e.shiftKey || e.ctrlKey) {
+                const ar = ir.h > 0 ? ir.w / ir.h : 1;
+                if (ch === 'n' || ch === 's') { w = Math.round(h * ar); }
+                else if (ch === 'w' || ch === 'e') { h = Math.round(w / ar); }
+                else { w / h > ar ? h = Math.round(w / ar) : w = Math.round(h * ar); }
+            }
+            if (w < 2) { if (ch.includes('w')) x = x + w - 2; w = 2; }
+            if (h < 2) { if (ch.includes('n')) y = y + h - 2; h = 2; }
+            x = Math.max(0, x); y = Math.max(0, y);
+            w = Math.min(w, resW - x); h = Math.min(h, resH - y);
+            _cropDraft = { x: Math.round(x), y: Math.round(y), w: Math.max(2, Math.round(w)), h: Math.max(2, Math.round(h)) };
+        }
+        _updateCropOverlayUI();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!_cropDragMode) return;
+        _cropDragMode = null; _cropDragStart = null; _cropDragInit = null;
+    });
 
     // ── Subtitle overlay: text element + resize handles (created once) ────────
     const subTextEl = document.createElement('span');
@@ -634,6 +836,9 @@ export async function init() {
             S.trackOrder = d.trackOrder || ['video', 'audio', 'subtitle', 'pip'];
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            S.canvasCrop = d.canvasCrop || null;
+            _cancelCropMode();
+            if (cropBtn) cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
@@ -660,6 +865,9 @@ export async function init() {
             S.trackOrder = d.trackOrder || ['video', 'audio', 'subtitle', 'pip'];
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            S.canvasCrop = d.canvasCrop || null;
+            _cancelCropMode();
+            if (cropBtn) cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
@@ -1273,18 +1481,42 @@ export async function init() {
         const parts  = resVal.split('x').map(Number);
         const resW   = parts[0] || 1920;
         const resH   = parts[1] || 1080;
+
+        const crop  = S.canvasCrop;
+        const viewW = (crop && crop.w > 0) ? crop.w : resW;
+        const viewH = (crop && crop.h > 0) ? crop.h : resH;
+
         let w, h;
         if (S.previewMode === 'original') {
-            w = resW; h = resH;
+            w = viewW; h = viewH;
         } else {
             const cW = previewInner.clientWidth  || 640;
             const cH = previewInner.clientHeight || 360;
-            const sc = Math.min(cW / resW, cH / resH);
-            w = Math.floor(resW * sc); h = Math.floor(resH * sc);
+            const sc = Math.min(cW / viewW, cH / viewH);
+            w = Math.floor(viewW * sc); h = Math.floor(viewH * sc);
         }
         previewContent.style.width  = w + 'px';
         previewContent.style.height = h + 'px';
         S.previewH = h; S.previewW = w;
+
+        // Canvas crop: offset the full-canvas media wrap within the crop viewport
+        if (crop && crop.w > 0 && crop.h > 0) {
+            const scale = w / viewW;
+            previewMediaWrap.style.left   = (-Math.round(crop.x * scale)) + 'px';
+            previewMediaWrap.style.top    = (-Math.round(crop.y * scale)) + 'px';
+            previewMediaWrap.style.right  = 'auto';
+            previewMediaWrap.style.bottom = 'auto';
+            previewMediaWrap.style.width  = Math.round(resW * scale) + 'px';
+            previewMediaWrap.style.height = Math.round(resH * scale) + 'px';
+        } else {
+            previewMediaWrap.style.left   = '';
+            previewMediaWrap.style.top    = '';
+            previewMediaWrap.style.right  = '';
+            previewMediaWrap.style.bottom = '';
+            previewMediaWrap.style.width  = '';
+            previewMediaWrap.style.height = '';
+        }
+
         if (previewContentNext) {
             const iW   = previewInner.clientWidth  || 640;
             const iH   = previewInner.clientHeight || 360;
@@ -4934,6 +5166,9 @@ export async function init() {
             S.trackOrder = d.trackOrder || ['video', 'audio', 'subtitle', 'pip'];
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            S.canvasCrop = d.canvasCrop || null;
+            _cancelCropMode();
+            if (cropBtn) cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _updateSaveBtn();
@@ -5019,6 +5254,9 @@ export async function init() {
             S.trackOrder = d.trackOrder || ['video', 'audio', 'subtitle', 'pip'];
             S.selPipIdx = -1; S.selIdxs = new Set();
             S.selIdx = S.clips.length ? 0 : -1; S.dirty = false;
+            S.canvasCrop = d.canvasCrop || null;
+            _cancelCropMode();
+            if (cropBtn) cropBtn.classList.toggle('ive-crop-active', !!S.canvasCrop);
             if ($('ive-project-name')) $('ive-project-name').value = S.projectName;
             _applyExportSettings(d.export_settings);
             _updateSaveBtn();
@@ -5043,7 +5281,7 @@ export async function init() {
     async function _saveProject() {
         if (S.isTemplateMode && S.editingTemplateId) {
             // Save back to template
-            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
+            const body = { name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings(), canvasCrop: S.canvasCrop || null };
             try {
                 const r = await fetch(`/api/imgvid/templates/${S.editingTemplateId}`, {
                     method: 'PUT',
@@ -5059,7 +5297,7 @@ export async function init() {
             } catch (err) { toast(err.message, 'err'); }
             return;
         }
-        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings() };
+        const body = { id: S.projectId, name: S.projectName, slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), export_settings: _getExportSettings(), canvasCrop: S.canvasCrop || null };
         try {
             const r = await fetch(S.projectId ? `/api/imgvid/projects/${S.projectId}` : '/api/imgvid/projects', {
                 method: S.projectId ? 'PUT' : 'POST',
@@ -5092,7 +5330,7 @@ export async function init() {
         progFill.style.width = '2%';
         progPct.textContent  = '0%';
 
-        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata() });
+        const projectPayload = JSON.stringify({ slides: S.clips, audio: S.audioTracks, subtitles: S.subtitles, pip: S.pipLayers.filter(p => !p._empty), trackOrder: S.trackOrder, tracks: _buildTracksMetadata(), canvasCrop: S.canvasCrop || null });
 
         if (isAudioOnly) {
             if (!S.audioTracks.length) { exportBtn.disabled = false; toast('Нет аудиодорожек для экспорта', 'warn'); return; }
@@ -5149,6 +5387,10 @@ export async function init() {
         fd.append('audio_bitrate',  settings.audioBitrate);
         fd.append('audio_sr',       settings.audioSR);
         fd.append('audio_ch',       settings.audioCh);
+        if (S.canvasCrop) {
+            const c = S.canvasCrop;
+            fd.append('canvas_crop', `${c.x},${c.y},${c.w},${c.h}`);
+        }
         try {
             await synthesizeStream('/api/imgvid/export', { method: 'POST', body: fd }, {
                 progress(val, desc) {
@@ -5505,9 +5747,12 @@ export async function init() {
         S.pipLayers = [];
         S.trackOrder = ['video', 'audio', 'subtitle', 'pip'];
         S.isTemplateMode = false; S.editingTemplateId = null;
+        S.canvasCrop = null;
         S.dirty = false; S.currentTime = 0;
         _pipEls.forEach(({ wrapper }) => { if (wrapper?.parentNode) wrapper.parentNode.removeChild(wrapper); });
         _pipEls.clear();
+        _cancelCropMode();
+        if (cropBtn) cropBtn.classList.remove('ive-crop-active');
         _historyStack.length = 0; _historyIdx = -1; _historyMinIdx = 0;
         clearTimeout(_propsHistTimer); _propsHistTimer = null;
         _updateSaveBtn();

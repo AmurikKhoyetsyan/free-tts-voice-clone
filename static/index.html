@@ -876,6 +876,31 @@
                             <div id="ive-sub-container" style="display:none;position:absolute;z-index:20;pointer-events:none">
                                 <div class="ive-sub-overlay" id="ive-sub-overlay" style="display:none"></div>
                             </div>
+                            <!-- Floating crop button — stable position regardless of transport bar -->
+                            <button id="ive-crop-btn" class="ive-crop-float-btn" title="Кроп канваса — выбрать область">✂ Кроп</button>
+                            <!-- Canvas crop overlay -->
+                            <div id="ive-crop-ov" class="ive-crop-ov" style="display:none;position:absolute;z-index:50">
+                                <div id="ive-cov-t" class="ive-cov-mask"></div>
+                                <div id="ive-cov-b" class="ive-cov-mask"></div>
+                                <div id="ive-cov-l" class="ive-cov-mask"></div>
+                                <div id="ive-cov-r" class="ive-cov-mask"></div>
+                                <div id="ive-crop-sel" class="ive-crop-sel">
+                                    <div class="ive-ch" data-ch="nw"></div>
+                                    <div class="ive-ch" data-ch="n"></div>
+                                    <div class="ive-ch" data-ch="ne"></div>
+                                    <div class="ive-ch" data-ch="w"></div>
+                                    <div class="ive-ch" data-ch="e"></div>
+                                    <div class="ive-ch" data-ch="sw"></div>
+                                    <div class="ive-ch" data-ch="s"></div>
+                                    <div class="ive-ch" data-ch="se"></div>
+                                    <span id="ive-crop-dims-lbl" class="ive-crop-dims-lbl"></span>
+                                </div>
+                                <div class="ive-crop-toolbar" id="ive-crop-toolbar">
+                                    <button class="btn accent" id="ive-ccrop-ok">Применить</button>
+                                    <button class="btn" id="ive-crop-cancel-btn">Отмена</button>
+                                    <button class="btn btn-sm" id="ive-crop-full-btn">✕ Сбросить кроп</button>
+                                </div>
+                            </div>
                             <div class="ive-preview-empty" id="ive-preview-empty">
                                 <div>Добавьте медиафайлы</div>
                                 <div style="font-size:11px;opacity:.45;margin-top:4px">или перетащите сюда</div>
