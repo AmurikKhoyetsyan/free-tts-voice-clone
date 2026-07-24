@@ -515,12 +515,16 @@ export async function init() {
 
         if (_cropDragMode === 'draw') {
             const sx = _cropDragStart.mx, sy = _cropDragStart.my;
-            let w = Math.max(2, Math.round(Math.abs(mx - sx)));
-            let h = Math.max(2, Math.round(Math.abs(my - sy)));
+            const rawW = mx - sx, rawH = my - sy;
+            let w = Math.max(2, Math.abs(rawW));
+            let h = Math.max(2, Math.abs(rawH));
             if (e.shiftKey || e.ctrlKey) { const s = Math.min(w, h); w = s; h = s; }
+            // Anchor at start point, extend in the direction of the drag
+            const x = rawW >= 0 ? sx : sx - w;
+            const y = rawH >= 0 ? sy : sy - h;
             _cropDraft = {
-                x: Math.round(Math.min(sx, mx)),
-                y: Math.round(Math.min(sy, my)),
+                x: Math.max(0, Math.round(x)),
+                y: Math.max(0, Math.round(y)),
                 w, h,
             };
         } else if (_cropDragMode === 'move') {
@@ -536,12 +540,26 @@ export async function init() {
             if (ch.includes('s')) { h = ir.h + dy; }
             if (ch.includes('w')) { x = ir.x + dx; w = ir.w - dx; }
             if (ch.includes('e')) { w = ir.w + dx; }
-            // Shift/Ctrl: lock aspect ratio
+            // Shift/Ctrl: lock aspect ratio and re-anchor position
             if (e.shiftKey || e.ctrlKey) {
                 const ar = ir.h > 0 ? ir.w / ir.h : 1;
-                if (ch === 'n' || ch === 's') { w = Math.round(h * ar); }
-                else if (ch === 'w' || ch === 'e') { h = Math.round(w / ar); }
-                else { w / h > ar ? h = Math.round(w / ar) : w = Math.round(h * ar); }
+                if (ch === 'n' || ch === 's') {
+                    // Edge handle vertical: adjust width, keep horizontally centered
+                    const newW = Math.round(h * ar);
+                    x = ir.x + Math.round((ir.w - newW) / 2);
+                    w = newW;
+                } else if (ch === 'w' || ch === 'e') {
+                    // Edge handle horizontal: adjust height, keep vertically centered
+                    const newH = Math.round(w / ar);
+                    y = ir.y + Math.round((ir.h - newH) / 2);
+                    h = newH;
+                } else {
+                    // Corner handle: adjust to AR then re-anchor opposite corner
+                    if (w / h > ar) { h = Math.round(w / ar); } else { w = Math.round(h * ar); }
+                    // Fixed corner is the one opposite to the dragged handle
+                    x = ch.includes('e') ? ir.x : (ir.x + ir.w) - w;
+                    y = ch.includes('s') ? ir.y : (ir.y + ir.h) - h;
+                }
             }
             if (w < 2) { if (ch.includes('w')) x = x + w - 2; w = 2; }
             if (h < 2) { if (ch.includes('n')) y = y + h - 2; h = 2; }
