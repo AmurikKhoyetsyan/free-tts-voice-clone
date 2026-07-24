@@ -645,16 +645,82 @@
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    gap: 6px;
+    gap: 5px;
+    align-items: center;
     pointer-events: auto;
     z-index: 51;
     white-space: nowrap;
-    background: rgba(8, 14, 26, .82);
-    padding: 5px 10px;
-    border-radius: 7px;
-    border: 1px solid rgba(255,255,255,.12);
-    backdrop-filter: blur(6px);
+    background: rgba(6, 11, 22, .90);
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.14);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 20px rgba(0,0,0,.55);
 }
+
+/* Crop toolbar — apply button */
+.ive-ctb-apply {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 14px;
+    border-radius: 5px;
+    border: 1px solid #2563eb;
+    background: #1d4ed8;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .14s, border-color .14s, box-shadow .14s;
+    letter-spacing: .01em;
+}
+.ive-ctb-apply:hover {
+    background: #2563eb;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59,130,246,.30);
+}
+.ive-ctb-apply:active { transform: translateY(1px); }
+
+/* Crop toolbar — cancel button */
+.ive-ctb-cancel {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 5px;
+    border: 1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.07);
+    color: #b8cfe4;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .14s, border-color .14s, color .14s;
+}
+.ive-ctb-cancel:hover {
+    background: rgba(255,255,255,.13);
+    border-color: rgba(255,255,255,.30);
+    color: #ddeeff;
+}
+.ive-ctb-cancel:active { transform: translateY(1px); }
+
+/* Crop toolbar — reset button */
+.ive-ctb-reset {
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 400;
+    padding: 4px 10px;
+    border-radius: 5px;
+    border: 1px solid rgba(255,255,255,.10);
+    background: transparent;
+    color: #6a8599;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .14s, border-color .14s, color .14s;
+}
+.ive-ctb-reset:hover {
+    background: rgba(220,60,60,.16);
+    border-color: rgba(220,80,80,.35);
+    color: #e07878;
+}
+.ive-ctb-reset:active { transform: translateY(1px); }
 
 /* ── Multi-track Timeline ────────────────────────────────────────────────── */
 .ive-timeline-wrap {

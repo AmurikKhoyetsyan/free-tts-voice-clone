@@ -334,17 +334,12 @@ export async function init() {
 
     // ── Preview zoom ──────────────────────────────────────────────────────────
     zoomMode.addEventListener('change', () => {
-        const mode = zoomMode.value;
-        if (mode === 'custom') {
-            _applyZoom('custom', parseFloat(zoomPct.value) || 100);
-        } else {
-            _applyZoom(mode, 100);
-        }
+        _applyZoom(zoomMode.value, 100);
     });
 
     zoomPct.addEventListener('input', () => {
-        if (S.previewMode === 'custom') {
-            previewContent.style.transformOrigin = '';  // center for manual input
+        if (S.previewMode !== 'fit' && S.previewMode !== 'original' && S.previewMode !== 'cover') {
+            previewContent.style.transformOrigin = '';
             _applyZoom('custom', parseFloat(zoomPct.value) || 100);
         }
     });
@@ -370,7 +365,6 @@ export async function init() {
         // Set pivot before scaling so the point under cursor stays fixed
         previewContent.style.transformOrigin = `${pctX.toFixed(2)}% ${pctY.toFixed(2)}%`;
         _applyZoom('custom', newPct);
-        zoomMode.value = 'custom';
     }, { passive: false });
 
     // ── Canvas crop overlay ────────────────────────────────────────────────────
@@ -476,6 +470,9 @@ export async function init() {
         _cropDraft = { x: 0, y: 0, w: resW, h: resH };
         _updateCropOverlayUI();
     });
+
+    // Prevent toolbar button clicks from bubbling to cropOv and starting a draw
+    $('ive-crop-toolbar')?.addEventListener('mousedown', e => e.stopPropagation());
 
     // ── Crop overlay mouse interaction ────────────────────────────────────────
     cropOv?.addEventListener('mousedown', e => {
@@ -1459,13 +1456,20 @@ export async function init() {
             zoomDisplay.textContent = '100%';
             zoomPct.style.display = 'none'; zoomSign.style.display = 'none';
             _updatePreviewSize();
+        } else if (mode === 'cover') {
+            S.previewZoom = 1;
+            previewContent.style.transform = '';
+            previewContent.style.transformOrigin = '';
+            zoomDisplay.textContent = 'Cover';
+            zoomPct.style.display = 'none'; zoomSign.style.display = 'none';
+            _updatePreviewSize();
         } else {
+            // internal custom scale (e.g., Ctrl+Scroll wheel)
             const scale = Math.max(0.1, Math.min(8, pct / 100));
             S.previewZoom = scale;
             previewContent.style.transform = `scale(${scale})`;
             zoomDisplay.textContent = Math.round(scale * 100) + '%';
             zoomPct.value = Math.round(scale * 100);
-            zoomPct.style.display = ''; zoomSign.style.display = '';
             _updatePreviewSize();
         }
     }
@@ -1492,7 +1496,9 @@ export async function init() {
         } else {
             const cW = previewInner.clientWidth  || 640;
             const cH = previewInner.clientHeight || 360;
-            const sc = Math.min(cW / viewW, cH / viewH);
+            const sc = S.previewMode === 'cover'
+                ? Math.max(cW / viewW, cH / viewH)
+                : Math.min(cW / viewW, cH / viewH);
             w = Math.floor(viewW * sc); h = Math.floor(viewH * sc);
         }
         previewContent.style.width  = w + 'px';
